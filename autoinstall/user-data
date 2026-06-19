@@ -1,4 +1,6 @@
 #cloud-config
+# Ubuntu Server 26.04 LTS unattended autoinstall (NoCloud).
+# 26.04's GA kernel 7.0 clears the gfx1151 (Strix Halo) >= 6.18.4 stability floor.
 autoinstall:
   version: 1
 

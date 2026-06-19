@@ -12,12 +12,12 @@
 # ─── ROCm stack (gpu_backend == rocm) ────────────────────────────────────────
 # gfx1151 (Strix Halo / Radeon 8060S) is NOT on AMD's official ROCm support
 # matrix. The HSA_OVERRIDE_GFX_VERSION=11.5.1 workaround in /etc/profile.d/rocm.sh
-# and the Ollama systemd override causes ROCm to treat gfx1151 as gfx1100 (RDNA3).
+# and the Ollama systemd override makes the HSA runtime recognise gfx1151.
 #
-# TODO: Before running on hardware, verify the exact amdgpu-install --usecase
-# flags and any additional packages for gfx1151 against a current Strix Halo
-# community guide (e.g. AMD ROCm GitHub issues, r/LocalLLaMA Strix Halo threads).
-# Reference: https://rocm.docs.amd.com/en/latest/compatibility/compatibility-matrix.html
+# We install ROCm *userspace only* with --no-dkms: the in-tree amdgpu driver that
+# ships with kernel 7.0 drives the GPU. DKMS fails to build on kernel 7.0 and
+# Ryzen APUs are meant to use the inbox driver, so the kernel module is skipped.
+# ROCm is pinned to 7.2.4 production (see defaults/main.yml) — no nightlies.
 
 - name: Download amdgpu-install deb
   ansible.builtin.get_url:
@@ -34,15 +34,12 @@
     state: present
   when: gpu_backend == "rocm"
 
-- name: Run amdgpu-install for ROCm usecase
+- name: Run amdgpu-install for ROCm usecase (userspace only, no DKMS)
   ansible.builtin.command:
-    # --usecase=rocm installs: amdgpu-dkms, ROCm runtime, HIP, and supporting libs.
-    # TODO: Confirm the correct usecase string for gfx1151. Options:
-    #   rocm        → full ROCm stack (HIP, OpenCL, etc.)
-    #   rocmdev     → ROCm + dev tools (adds rocm-developer-tools)
-    #   openclsdk   → OpenCL SDK only
-    # See: amdgpu-install --list-usecase
-    cmd: amdgpu-install -y --usecase=rocm
+    # --usecase=rocm installs the ROCm runtime, HIP, and supporting libs.
+    # --no-dkms skips the out-of-tree kernel module: the in-tree amdgpu (kernel 7.0)
+    # drives the GPU. DKMS does not build on kernel 7.0 and is unnecessary on this APU.
+    cmd: amdgpu-install -y --usecase=rocm --no-dkms
     creates: /opt/rocm/bin/rocminfo
   when: gpu_backend == "rocm"
   notify: update initramfs

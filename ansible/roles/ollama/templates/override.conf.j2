@@ -10,3 +10,7 @@ Environment="OLLAMA_MAX_LOADED_MODELS={{ ollama_max_loaded_models }}"
 Environment="HSA_OVERRIDE_GFX_VERSION={{ hsa_override_gfx_version }}"
 # Store model blobs on the data disk (second NVMe), not the OS disk
 Environment="OLLAMA_MODELS={{ data_mount }}/ollama"
+# Legacy gfx1151 hang workarounds — likely unneeded on kernel 7.0.
+# Uncomment only if you observe ROCm hangs after a kernel/ROCm bump:
+# Environment="HSA_ENABLE_SDMA=0"
+# Environment="HSA_USE_SVM=0"

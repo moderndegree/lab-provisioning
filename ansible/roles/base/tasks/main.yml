@@ -6,15 +6,44 @@
     cache_valid_time: 3600
 
 # ─── Kernel ───────────────────────────────────────────────────────────────────
-- name: Install HWE kernel
-  ansible.builtin.apt:
-    name: linux-generic-hwe-24.04
+# Ubuntu Server 26.04 LTS ships kernel 7.0, which clears the gfx1151 (Strix Halo)
+# stability floor of >= 6.18.4 with no HWE/mainline-PPA juggling. The GA kernel is
+# sufficient — no extra kernel package is installed here.
+
+# ─── gfx1151 bad firmware block ───────────────────────────────────────────────
+# linux-firmware build 20251125 breaks ROCm on Strix Halo. Pin it to a negative
+# priority so apt will never select that specific version, while still allowing
+# all other linux-firmware updates.
+- name: Block known-bad linux-firmware build (breaks ROCm on Strix Halo)
+  ansible.builtin.copy:
+    dest: /etc/apt/preferences.d/no-bad-firmware
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by Ansible (base role).
+      # linux-firmware 20251125 breaks ROCm on gfx1151 — never install it.
+      Package: linux-firmware
+      Pin: version 20251125*
+      Pin-Priority: -1
+
+# ─── Kernel cmdline (GRUB) ────────────────────────────────────────────────────
+# gfx1151 unified-memory tuning, reapplied on every provision (lives on the SSD):
+#   amd_iommu=off            belt-and-suspenders with the BIOS IOMMU-off setting
+#                            (kills VFIO passthrough; fine for headless inference)
+#   amdgpu.gttsize=131072    128 GB GTT (deprecated on newer kernels but harmless)
+#   ttm.pages_limit=33554432 128 GB TTM page pool — the load-bearing flag
+- name: Set gfx1151 kernel cmdline in GRUB
+  ansible.builtin.lineinfile:
+    path: /etc/default/grub
+    regexp: '^GRUB_CMDLINE_LINUX_DEFAULT='
+    line: 'GRUB_CMDLINE_LINUX_DEFAULT="amd_iommu=off amdgpu.gttsize=131072 ttm.pages_limit=33554432"'
     state: present
-  # HWE tracks the latest Ubuntu LTS hardware-enablement kernel (6.8.x as of 24.04).
-  # TODO: Strix Halo (gfx1151) may require a mainline kernel ≥ 6.11 for full
-  # RDNA3.5 stability. If needed, replace with linux-image-<ver>-generic from
-  # the Ubuntu mainline PPA: https://kernel.ubuntu.com/~kernel-ppa/mainline/
-  notify: reboot required
+    create: true
+    mode: "0644"
+  notify:
+    - update grub
+    - reboot required
 
 # ─── Base packages ────────────────────────────────────────────────────────────
 - name: Install base packages

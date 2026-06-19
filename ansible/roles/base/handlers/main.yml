@@ -1,7 +1,12 @@
 ---
+- name: update grub
+  ansible.builtin.command:
+    cmd: update-grub
+  changed_when: true
+
 - name: reboot required
   ansible.builtin.debug:
     msg: >
-      A kernel package was installed or updated.
-      Schedule a reboot to activate the new kernel:
+      The kernel cmdline or a kernel package changed.
+      Schedule a reboot to apply (confirm with `cat /proc/cmdline` afterward):
         ssh blewis@mini 'sudo reboot'
