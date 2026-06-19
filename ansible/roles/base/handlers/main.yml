@@ -1,0 +1,7 @@
+---
+- name: reboot required
+  ansible.builtin.debug:
+    msg: >
+      A kernel package was installed or updated.
+      Schedule a reboot to activate the new kernel:
+        ssh blewis@mini 'sudo reboot'

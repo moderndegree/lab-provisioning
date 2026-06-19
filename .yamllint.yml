@@ -1,0 +1,21 @@
+---
+extends: default
+
+rules:
+  # Relax line length for task comments and long module args
+  line-length:
+    max: 160
+    level: warning
+
+  # Allow comment indentation to match block structure rather than parent indent
+  comments-indentation: disable
+
+  # Playbooks always start with --- on line 1; trust our files
+  document-start: enable
+
+  # Template files (*.j2) use Jinja — ignore their truthy values
+  truthy:
+    allowed-values:
+      - 'true'
+      - 'false'
+    level: warning

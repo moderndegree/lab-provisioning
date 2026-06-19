@@ -1,0 +1,97 @@
+---
+# ─── Vulkan / RADV — always installed as ROCm fallback ───────────────────────
+# Mesa RADV (Vulkan) is installed regardless of gpu_backend so that flipping
+# gpu_backend to "vulkan" never requires a separate package install pass.
+- name: Install Mesa Vulkan drivers and tools
+  ansible.builtin.apt:
+    name:
+      - mesa-vulkan-drivers
+      - vulkan-tools
+    state: present
+
+# ─── ROCm stack (gpu_backend == rocm) ────────────────────────────────────────
+# gfx1151 (Strix Halo / Radeon 8060S) is NOT on AMD's official ROCm support
+# matrix. The HSA_OVERRIDE_GFX_VERSION=11.5.1 workaround in /etc/profile.d/rocm.sh
+# and the Ollama systemd override causes ROCm to treat gfx1151 as gfx1100 (RDNA3).
+#
+# TODO: Before running on hardware, verify the exact amdgpu-install --usecase
+# flags and any additional packages for gfx1151 against a current Strix Halo
+# community guide (e.g. AMD ROCm GitHub issues, r/LocalLLaMA Strix Halo threads).
+# Reference: https://rocm.docs.amd.com/en/latest/compatibility/compatibility-matrix.html
+
+- name: Download amdgpu-install deb
+  ansible.builtin.get_url:
+    url: "{{ amdgpu_installer_url }}"
+    dest: "/tmp/{{ amdgpu_installer_deb }}"
+    mode: "0644"
+  when: gpu_backend == "rocm"
+  # Verify the downloaded file against AMD's published SHA256 checksum before
+  # deploying in production. Add: checksum: "sha256:<AMD_PUBLISHED_HASH>"
+
+- name: Install amdgpu-install deb
+  ansible.builtin.apt:
+    deb: "/tmp/{{ amdgpu_installer_deb }}"
+    state: present
+  when: gpu_backend == "rocm"
+
+- name: Run amdgpu-install for ROCm usecase
+  ansible.builtin.command:
+    # --usecase=rocm installs: amdgpu-dkms, ROCm runtime, HIP, and supporting libs.
+    # TODO: Confirm the correct usecase string for gfx1151. Options:
+    #   rocm        → full ROCm stack (HIP, OpenCL, etc.)
+    #   rocmdev     → ROCm + dev tools (adds rocm-developer-tools)
+    #   openclsdk   → OpenCL SDK only
+    # See: amdgpu-install --list-usecase
+    cmd: amdgpu-install -y --usecase=rocm
+    creates: /opt/rocm/bin/rocminfo
+  when: gpu_backend == "rocm"
+  notify: update initramfs
+
+- name: Add blewis to render and video groups (required for ROCm device access)
+  ansible.builtin.user:
+    name: blewis
+    groups:
+      - render
+      - video
+    append: true
+  when: gpu_backend == "rocm"
+
+- name: Install ROCm environment profile (gfx1151 override)
+  ansible.builtin.copy:
+    dest: /etc/profile.d/rocm.sh
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # ROCm environment for Strix Halo (gfx1151).
+      # gfx1151 is not on AMD's official support matrix; HSA_OVERRIDE_GFX_VERSION
+      # instructs the HSA runtime to use the nearest supported RDNA3 target.
+      export HSA_OVERRIDE_GFX_VERSION="{{ hsa_override_gfx_version }}"
+      export ROCM_PATH=/opt/rocm
+      export PATH="${ROCM_PATH}/bin:${PATH}"
+      export LD_LIBRARY_PATH="${ROCM_PATH}/lib:${LD_LIBRARY_PATH:-}"
+  when: gpu_backend == "rocm"
+
+- name: Remove ROCm profile if switching to Vulkan backend
+  ansible.builtin.file:
+    path: /etc/profile.d/rocm.sh
+    state: absent
+  when: gpu_backend == "vulkan"
+
+# ─── Vulkan backend env (gpu_backend == vulkan) ───────────────────────────────
+- name: Set OLLAMA_GPU_DRIVER=vulkan in /etc/environment
+  ansible.builtin.lineinfile:
+    path: /etc/environment
+    regexp: '^OLLAMA_GPU_DRIVER='
+    line: 'OLLAMA_GPU_DRIVER=vulkan'
+    state: present
+    create: true
+    mode: "0644"
+  when: gpu_backend == "vulkan"
+
+- name: Remove OLLAMA_GPU_DRIVER from /etc/environment (ROCm mode)
+  ansible.builtin.lineinfile:
+    path: /etc/environment
+    regexp: '^OLLAMA_GPU_DRIVER='
+    state: absent
+  when: gpu_backend == "rocm"

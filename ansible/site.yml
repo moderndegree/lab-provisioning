@@ -1,0 +1,23 @@
+---
+# Entry point — provision mini end-to-end.
+# Run: make provision
+#
+# Role execution order (dependencies flow top-to-bottom):
+#   base        → kernel, packages, UFW, data disk mount
+#   amdgpu_rocm → ROCm stack + Vulkan fallback drivers
+#   ollama      → Ollama LLM server (depends on amdgpu_rocm)
+#   harness     → Node.js, opencode, Hermes Agent + gateway service
+#   tailscale   → tailnet access
+#   cloudflared → Cloudflare Zero Trust tunnel stub (off by default)
+
+- name: Provision mini
+  hosts: mini
+  become: true
+  gather_facts: true
+  roles:
+    - role: base
+    - role: amdgpu_rocm
+    - role: ollama
+    - role: harness
+    - role: tailscale
+    - role: cloudflared

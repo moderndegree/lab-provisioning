@@ -1,0 +1,12 @@
+---
+# GPU backend: rocm | vulkan
+# Overridden by group_vars/all.yml (gpu_backend: rocm by default).
+gpu_backend: "rocm"
+
+# ─── AMD GPU installer ────────────────────────────────────────────────────────
+# TODO: Verify this is the current amdgpu-install version for Ubuntu 24.04 (Noble).
+# Latest releases: https://repo.radeon.com/amdgpu-install/
+# Check: https://rocm.docs.amd.com/en/latest/deploy/linux/os-native/install.html
+amdgpu_installer_version: "6.3.60303-1"
+amdgpu_installer_deb: "amdgpu-install_{{ amdgpu_installer_version }}_all.deb"
+amdgpu_installer_url: "https://repo.radeon.com/amdgpu-install/6.3/ubuntu/noble/{{ amdgpu_installer_deb }}"

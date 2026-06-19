@@ -1,0 +1,116 @@
+---
+# ─── Node.js via NodeSource LTS (v22.x) ──────────────────────────────────────
+- name: Check if NodeSource apt repository is configured
+  ansible.builtin.stat:
+    path: /etc/apt/sources.list.d/nodesource.list
+  register: nodesource_list
+
+- name: Download NodeSource LTS setup script
+  ansible.builtin.get_url:
+    url: "https://deb.nodesource.com/setup_lts.x"
+    dest: /tmp/nodesource_setup.sh
+    mode: "0700"
+  when: not nodesource_list.stat.exists
+
+- name: Run NodeSource setup script (configures apt repo)
+  ansible.builtin.command:
+    cmd: bash /tmp/nodesource_setup.sh
+  changed_when: true
+  when: not nodesource_list.stat.exists
+
+- name: Install Node.js
+  ansible.builtin.apt:
+    name: nodejs
+    state: present
+    update_cache: true
+
+# ─── opencode-ai (global npm package) ────────────────────────────────────────
+- name: Install opencode-ai globally via npm
+  community.general.npm:
+    name: opencode-ai
+    version: "{{ opencode_version }}"
+    global: true
+    state: present
+  # Pinned to {{ opencode_version }} (verified 2026-06-19 on npmjs.com)
+
+# ─── Hermes Agent (NousResearch) — Python, installed per-user ────────────────
+# Hermes Agent is a Python project by NousResearch (https://github.com/NousResearch/hermes-agent).
+# The official installer handles: uv, Python 3.11, the hermes-agent Python package,
+# and the `hermes` CLI entry point at ~/.local/bin/hermes.
+# Version: {{ hermes_version }} (release tag v2026.6.5)
+
+- name: Check if Hermes Agent binary exists
+  ansible.builtin.stat:
+    path: "{{ hermes_bin }}"
+  register: hermes_binary_stat
+
+- name: Install Hermes Agent via official NousResearch installer
+  ansible.builtin.shell:
+    cmd: "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"
+    executable: /bin/bash
+  environment:
+    HOME: /home/blewis
+    HERMES_HOME: "{{ hermes_home }}"
+    USER: blewis
+  become: true
+  become_user: blewis
+  when: not hermes_binary_stat.stat.exists
+  # TODO: The installer installs the latest published version. Pin to a
+  # specific version once Hermes installer supports a --version flag.
+  # Track: https://github.com/NousResearch/hermes-agent/releases
+
+- name: Ensure HERMES_HOME is set in blewis .bashrc
+  ansible.builtin.lineinfile:
+    path: /home/blewis/.bashrc
+    regexp: '^export HERMES_HOME='
+    line: "export HERMES_HOME={{ hermes_home }}"
+    state: present
+    create: false
+
+# ─── Hermes gateway secrets environment file ─────────────────────────────────
+- name: Create /etc/hermes directory for environment secrets
+  ansible.builtin.file:
+    path: /etc/hermes
+    state: directory
+    owner: root
+    group: blewis
+    mode: "0750"
+
+- name: Template Hermes environment file (vault secrets)
+  ansible.builtin.template:
+    src: hermes-environment.j2
+    dest: /etc/hermes/environment
+    owner: root
+    group: blewis
+    mode: "0640"
+  notify:
+    - restart hermes-gateway
+
+# ─── Hermes gateway systemd service ──────────────────────────────────────────
+- name: Template hermes-gateway systemd service unit
+  ansible.builtin.template:
+    src: hermes-gateway.service.j2
+    dest: /etc/systemd/system/hermes-gateway.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - daemon-reload
+    - enable hermes-gateway
+    - restart hermes-gateway
+
+# ─── UFW: allow Hermes dashboard port ────────────────────────────────────────
+- name: Allow Hermes dashboard port through UFW
+  community.general.ufw:
+    rule: allow
+    port: "{{ hermes_dashboard_port | string }}"
+    proto: tcp
+    comment: "Hermes Agent gateway dashboard (tailnet access)"
+
+# ─── Ensure service is running ────────────────────────────────────────────────
+- name: Ensure hermes-gateway service is enabled and started
+  ansible.builtin.systemd:
+    name: hermes-gateway
+    enabled: true
+    state: started
+    daemon_reload: true

@@ -1,0 +1,46 @@
+---
+# ─── Install Tailscale ────────────────────────────────────────────────────────
+- name: Check if Tailscale is already installed
+  ansible.builtin.stat:
+    path: /usr/bin/tailscale
+  register: tailscale_binary
+
+- name: Install Tailscale via official installer
+  ansible.builtin.shell:
+    cmd: "curl -fsSL https://tailscale.com/install.sh | sh"
+    executable: /bin/bash
+  when: not tailscale_binary.stat.exists
+  # The official Tailscale installer adds the apt repo, installs tailscale and
+  # tailscaled, and enables tailscaled.service.
+
+# ─── Bring up the tailnet ─────────────────────────────────────────────────────
+- name: Check Tailscale backend state
+  ansible.builtin.command:
+    cmd: tailscale status --json
+  register: tailscale_status_raw
+  changed_when: false
+  failed_when: false
+
+- name: Parse Tailscale backend state
+  ansible.builtin.set_fact:
+    tailscale_backend_state: >-
+      {{ (tailscale_status_raw.stdout | default('{}') | from_json).BackendState | default('Stopped') }}
+  when: tailscale_status_raw.rc == 0
+
+- name: Set Tailscale backend state to Stopped (if daemon not running)
+  ansible.builtin.set_fact:
+    tailscale_backend_state: "Stopped"
+  when: tailscale_status_raw.rc != 0
+
+- name: Bring up Tailscale (connect to tailnet)
+  ansible.builtin.shell:
+    # Trailing empty string when exit node is disabled is harmless to the shell.
+    cmd: >
+      tailscale up
+      --hostname=mini
+      --authkey={{ vault_tailscale_authkey }}
+      {{ '--advertise-exit-node' if (tailscale_advertise_exit_node | bool) else '' }}
+    executable: /bin/bash
+  when: tailscale_backend_state != "Running"
+  no_log: true
+  # no_log prevents the auth key from appearing in Ansible output or logs.

@@ -1,0 +1,8 @@
+---
+# Ansible collection dependencies for mini provisioning.
+# Install once with: make install-deps
+collections:
+  - name: community.general
+    version: ">=9.0.0"
+  - name: ansible.posix
+    version: ">=1.5.0"

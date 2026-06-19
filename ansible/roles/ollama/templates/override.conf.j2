@@ -1,0 +1,12 @@
+[Service]
+# Ollama environment overrides for mini (MS-S1 Max, gfx1151, 128 GB unified RAM)
+Environment="OLLAMA_CONTEXT_LENGTH={{ ollama_context_length }}"
+Environment="OLLAMA_NUM_PARALLEL={{ ollama_num_parallel }}"
+Environment="OLLAMA_FLASH_ATTENTION={{ ollama_flash_attention }}"
+Environment="OLLAMA_KV_CACHE_TYPE={{ ollama_kv_cache_type }}"
+Environment="OLLAMA_KEEP_ALIVE={{ ollama_keep_alive }}"
+Environment="OLLAMA_MAX_LOADED_MODELS={{ ollama_max_loaded_models }}"
+# gfx1151 ROCm workaround — not on AMD's official support matrix
+Environment="HSA_OVERRIDE_GFX_VERSION={{ hsa_override_gfx_version }}"
+# Store model blobs on the data disk (second NVMe), not the OS disk
+Environment="OLLAMA_MODELS={{ data_mount }}/ollama"

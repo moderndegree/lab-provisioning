@@ -1,0 +1,56 @@
+---
+# ─── Install Ollama ───────────────────────────────────────────────────────────
+- name: Install Ollama via official script (idempotent — skips if binary present)
+  ansible.builtin.shell:
+    cmd: curl -fsSL https://ollama.com/install.sh | sh
+    executable: /bin/bash
+  args:
+    creates: /usr/local/bin/ollama
+  # The official installer:
+  #   - installs /usr/local/bin/ollama
+  #   - creates the `ollama` system user
+  #   - installs and enables ollama.service
+  # ROCm GPU detection happens automatically via HIP discovery at runtime;
+  # the HSA_OVERRIDE_GFX_VERSION in the systemd override handles gfx1151.
+  notify:
+    - daemon-reload
+    - restart ollama
+
+# ─── Ollama model directory on data disk ──────────────────────────────────────
+- name: Set ownership of Ollama model directory
+  ansible.builtin.file:
+    path: "{{ data_mount }}/ollama"
+    state: directory
+    owner: ollama
+    group: ollama
+    mode: "0755"
+  # The `ollama` user is created by the install script above.
+  # The directory itself was created by the base role.
+
+# ─── Systemd service override ─────────────────────────────────────────────────
+- name: Create ollama systemd override directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/ollama.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Template ollama systemd override
+  ansible.builtin.template:
+    src: override.conf.j2
+    dest: /etc/systemd/system/ollama.service.d/override.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - daemon-reload
+    - restart ollama
+
+# ─── Ensure service is running ────────────────────────────────────────────────
+- name: Ensure ollama service is enabled and started
+  ansible.builtin.systemd:
+    name: ollama
+    enabled: true
+    state: started
+    daemon_reload: true

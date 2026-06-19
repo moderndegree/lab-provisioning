@@ -1,0 +1,12 @@
+---
+- name: daemon-reload
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: enable cloudflared
+  ansible.builtin.systemd:
+    name: cloudflared
+    enabled: true
+    state: started
+    daemon_reload: false
+  when: enable_cloudflared | bool

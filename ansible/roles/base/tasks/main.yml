@@ -1,0 +1,118 @@
+---
+# ─── Package cache ────────────────────────────────────────────────────────────
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+# ─── Kernel ───────────────────────────────────────────────────────────────────
+- name: Install HWE kernel
+  ansible.builtin.apt:
+    name: linux-generic-hwe-24.04
+    state: present
+  # HWE tracks the latest Ubuntu LTS hardware-enablement kernel (6.8.x as of 24.04).
+  # TODO: Strix Halo (gfx1151) may require a mainline kernel ≥ 6.11 for full
+  # RDNA3.5 stability. If needed, replace with linux-image-<ver>-generic from
+  # the Ubuntu mainline PPA: https://kernel.ubuntu.com/~kernel-ppa/mainline/
+  notify: reboot required
+
+# ─── Base packages ────────────────────────────────────────────────────────────
+- name: Install base packages
+  ansible.builtin.apt:
+    name:
+      - git
+      - build-essential
+      - ufw
+      - curl
+      - ca-certificates
+      - python3-pip       # needed by Hermes Agent installer
+    state: present
+
+# ─── UFW firewall ─────────────────────────────────────────────────────────────
+- name: Set UFW default — deny incoming
+  community.general.ufw:
+    default: deny
+    direction: incoming
+
+- name: Set UFW default — allow outgoing
+  community.general.ufw:
+    default: allow
+    direction: outgoing
+
+- name: Allow SSH through UFW
+  community.general.ufw:
+    rule: allow
+    port: "22"
+    proto: tcp
+    comment: "SSH"
+
+- name: Enable UFW
+  community.general.ufw:
+    state: enabled
+
+# ─── Data disk (second NVMe) ─────────────────────────────────────────────────
+# The OS disk is /dev/nvme0n1 (autoinstall). The data disk is /dev/nvme1n1.
+# Ansible partitions and formats it exactly once (idempotency guard below).
+# Set skip_data_disk_format: true in group_vars/all.yml if already prepared.
+
+- name: Check if data partition already has a filesystem
+  ansible.builtin.command:
+    cmd: "blkid -o value -s TYPE {{ data_disk_device }}p1"
+  register: data_fs_check
+  changed_when: false
+  failed_when: false
+  when: not (skip_data_disk_format | bool)
+
+- name: Partition and format data disk (first-time only — no filesystem detected)
+  when:
+    - not (skip_data_disk_format | bool)
+    - data_fs_check.rc != 0 or data_fs_check.stdout | trim == ""
+  block:
+    - name: Create GPT label and single partition spanning full disk
+      ansible.builtin.command:
+        cmd: "parted -s {{ data_disk_device }} mklabel gpt mkpart primary ext4 0% 100%"
+      changed_when: true
+
+    - name: Probe new partition table
+      ansible.builtin.command:
+        cmd: "partprobe {{ data_disk_device }}"
+      changed_when: true
+
+    - name: Wait for partition device node to appear
+      ansible.builtin.wait_for:
+        path: "{{ data_disk_device }}p1"
+        timeout: 30
+
+    - name: Format partition as ext4
+      ansible.builtin.command:
+        cmd: "mkfs.ext4 -F -L data {{ data_disk_device }}p1"
+      changed_when: true
+
+- name: Create data mount point
+  ansible.builtin.file:
+    path: "{{ data_mount }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Mount data disk and add to fstab
+  ansible.posix.mount:
+    path: "{{ data_mount }}"
+    src: "{{ data_disk_device }}p1"
+    fstype: ext4
+    opts: defaults,noatime
+    state: mounted
+  when: not (skip_data_disk_format | bool)
+
+- name: Create standard data subdirectories
+  ansible.builtin.file:
+    path: "{{ data_mount }}/{{ item }}"
+    state: directory
+    owner: blewis
+    group: blewis
+    mode: "0755"
+  loop:
+    - ollama
+    - hermes
+    - worktrees

@@ -1,0 +1,16 @@
+---
+- name: daemon-reload
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: enable hermes-gateway
+  ansible.builtin.systemd:
+    name: hermes-gateway
+    enabled: true
+    daemon_reload: false
+
+- name: restart hermes-gateway
+  ansible.builtin.systemd:
+    name: hermes-gateway
+    state: restarted
+    daemon_reload: false

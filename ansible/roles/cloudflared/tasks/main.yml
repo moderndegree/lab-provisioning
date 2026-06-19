@@ -1,0 +1,50 @@
+---
+# ─── cloudflared — Podman + systemd quadlet stub ─────────────────────────────
+# Status:  DISABLED  (enable_cloudflared: false in group_vars/all.yml)
+#
+# Purpose: Expose services through Cloudflare Zero Trust without opening
+#          inbound firewall ports. Tunnel token sourced from ansible-vault.
+#
+# To enable:
+#   1. Set  enable_cloudflared: true  in ansible/group_vars/all.yml
+#   2. Add your Cloudflare tunnel token to vault_cloudflared_token in vault.yml
+#   3. Run: make provision
+#
+# References:
+#   https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/
+
+- name: cloudflared stub — role is disabled
+  ansible.builtin.debug:
+    msg: >
+      cloudflared role is disabled (enable_cloudflared: false).
+      Set enable_cloudflared: true in group_vars/all.yml to activate.
+  when: not (enable_cloudflared | bool)
+
+# ─── Tasks below only execute when enable_cloudflared: true ──────────────────
+
+- name: Install Podman
+  ansible.builtin.apt:
+    name: podman
+    state: present
+  when: enable_cloudflared | bool
+
+- name: Create systemd containers directory (Podman quadlet path)
+  ansible.builtin.file:
+    path: /etc/containers/systemd
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: enable_cloudflared | bool
+
+- name: Template cloudflared quadlet unit
+  ansible.builtin.template:
+    src: cloudflared.container.j2
+    dest: /etc/containers/systemd/cloudflared.container
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - daemon-reload
+    - enable cloudflared
+  when: enable_cloudflared | bool

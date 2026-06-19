@@ -1,0 +1,8 @@
+---
+# Toggle this role on/off without removing it from site.yml.
+enable_cloudflared: false
+
+# Cloudflare cloudflared container image.
+# TODO: Pin to a specific digest or tag for production use.
+# See: https://hub.docker.com/r/cloudflare/cloudflared/tags
+cloudflared_image: "docker.io/cloudflare/cloudflared:latest"

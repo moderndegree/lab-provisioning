@@ -1,0 +1,25 @@
+[Unit]
+Description=Hermes Agent Gateway
+Documentation=https://hermes-agent.nousresearch.com/docs/user-guide/messaging
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=blewis
+Group=blewis
+Environment=HOME=/home/blewis
+Environment=HERMES_HOME={{ hermes_home }}
+# Secrets (LLM provider API key, etc.) sourced from vault-managed environment file.
+# The leading dash means systemd ignores a missing file (graceful degradation).
+EnvironmentFile=-/etc/hermes/environment
+ExecStart={{ hermes_bin }} gateway start
+Restart=on-failure
+RestartSec=15
+StandardOutput=journal
+StandardError=journal
+# Give the gateway time to start before reporting failure
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target

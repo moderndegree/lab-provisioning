@@ -1,0 +1,24 @@
+# Podman quadlet unit — Cloudflare Zero Trust tunnel
+# Documentation: https://docs.podman.io/en/latest/markdown/podman-systemd.unit.5.html
+# Cloudflare tunnel docs: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/
+
+[Unit]
+Description=Cloudflare Zero Trust Tunnel
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image={{ cloudflared_image }}
+ContainerName=cloudflared
+# Tunnel token sourced from ansible-vault (vault_cloudflared_token)
+Environment=TUNNEL_TOKEN={{ vault_cloudflared_token }}
+Exec=tunnel --no-autoupdate run
+# Auto-update container image (remove if you want strict version pinning)
+AutoUpdate=registry
+
+[Service]
+Restart=always
+TimeoutStartSec=900
+
+[Install]
+WantedBy=multi-user.target default.target

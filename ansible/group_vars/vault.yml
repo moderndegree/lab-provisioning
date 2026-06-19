@@ -1,0 +1,26 @@
+---
+# ansible-vault encrypted file
+# ─────────────────────────────────────────────────────────────────────────────
+# WORKFLOW:
+#   1. Replace every PLACEHOLDER_* value below with your real secret.
+#   2. Run:  make vault-encrypt
+#   3. Commit the resulting $ANSIBLE_VAULT;1.1;AES256... ciphertext.
+#   4. Future edits:  make vault-edit
+#
+# NEVER commit this file in plaintext with real secrets.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Password hash for the blewis OS user.
+# Generate: python3 -c "import crypt; print(crypt.crypt('yourpassword', crypt.mksalt(crypt.METHOD_SHA512)))"
+# Or:       mkpasswd --method=SHA-512
+# Must match the password hash in autoinstall/user-data.
+vault_blewis_password_hash: "PLACEHOLDER_PASSWORD_HASH"
+
+# Tailscale auth key (reusable or ephemeral — from https://login.tailscale.com/admin/settings/keys)
+vault_tailscale_authkey: "PLACEHOLDER_TAILSCALE_AUTH_KEY"
+
+# Hermes Agent LLM provider API key (e.g. OpenRouter, OpenAI, Anthropic, Nous Portal)
+vault_hermes_api_key: "PLACEHOLDER_HERMES_API_KEY"
+
+# Cloudflare Zero Trust tunnel token (only required when enable_cloudflared: true)
+vault_cloudflared_token: "PLACEHOLDER_CLOUDFLARED_TOKEN"

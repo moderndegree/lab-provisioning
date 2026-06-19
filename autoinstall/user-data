@@ -1,0 +1,91 @@
+#cloud-config
+autoinstall:
+  version: 1
+
+  locale: en_US.UTF-8
+
+  keyboard:
+    layout: us
+    variant: ""
+
+  identity:
+    hostname: mini
+    realname: ""
+    username: blewis
+    # TODO: PLACEHOLDER — generate with:  mkpasswd --method=SHA-512
+    password: "PLACEHOLDER_PASSWORD_HASH"
+
+  ssh:
+    install-server: true
+    allow-pw: false
+    authorized-keys:
+      # TODO: PLACEHOLDER — paste your SSH public key here (ssh-ed25519 AAAA...)
+      - "PLACEHOLDER_SSH_PUBLIC_KEY"
+
+  packages:
+    - openssh-server
+
+  storage:
+    # Explicit config: only disk0 (/dev/nvme0n1) is referenced.
+    # The second NVMe (/dev/nvme1n1) is intentionally absent — it is never
+    # touched by autoinstall and will be formatted by Ansible (harness role).
+    #
+    # TODO: PLACEHOLDER — verify /dev/nvme0n1 is the correct OS disk in your
+    # environment. Boot the live ISO, open a shell, and run `lsblk -d -o NAME,SIZE,MODEL`
+    # to confirm which NVMe should be the OS target before flashing the USB.
+    config:
+      - type: disk
+        id: disk0
+        path: /dev/nvme0n1
+        ptable: gpt
+        wipe: superblock
+        grub_device: false
+        preserve: false
+
+      # EFI system partition — 1 GB (generous; holds multiple kernel generations)
+      - type: partition
+        id: part-efi
+        device: disk0
+        size: 1G
+        flag: boot
+        grub_device: false
+        preserve: false
+
+      - type: format
+        id: fmt-efi
+        volume: part-efi
+        fstype: fat32
+        preserve: false
+
+      - type: mount
+        id: mnt-efi
+        device: fmt-efi
+        path: /boot/efi
+
+      # Root partition — remainder of OS disk
+      - type: partition
+        id: part-root
+        device: disk0
+        size: -1
+        grub_device: false
+        preserve: false
+
+      - type: format
+        id: fmt-root
+        volume: part-root
+        fstype: ext4
+        label: ubuntu-root
+        preserve: false
+
+      - type: mount
+        id: mnt-root
+        device: fmt-root
+        path: /
+
+  # Minimal late-commands: ensure SSH is enabled; UFW is configured by Ansible.
+  late-commands:
+    - curtin in-target -- systemctl enable ssh
+    - curtin in-target -- ufw disable || true
+
+  updates: security
+  shutdown: reboot
