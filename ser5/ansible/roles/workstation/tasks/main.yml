@@ -28,6 +28,7 @@
       - fd-find
       - tmux
       - neovim
+      - btop
       # Network debugging
       - nmap
       - netcat-openbsd
