@@ -1,0 +1,26 @@
+---
+# Ansible Vault secret stubs.
+# This file (vault.yml.example) is tracked with placeholder values.
+# vault.yml (the real file with secrets) is gitignored.
+#
+# ─── First-time setup ─────────────────────────────────────────────────────────
+#   1. make init           → copies this file to ansible/group_vars/vault.yml
+#   2. Edit vault.yml      → fill in real values (see generation commands below)
+#   3. make vault-encrypt  → encrypts vault.yml in-place with ansible-vault
+#   4. Commit encrypted vault.yml to your private fork/clone
+#
+# ─── Generating values ────────────────────────────────────────────────────────
+# Password hash (must match PASSWORD_HASH in .bootstrap.env):
+#   python3 -c "import crypt, getpass; print(crypt.crypt(getpass.getpass(), crypt.mksalt(crypt.METHOD_SHA512)))"
+#   OR: mkpasswd --method=sha-512    (apt install whois)
+#
+# Tailscale auth key:
+#   https://login.tailscale.com/admin/settings/keys
+#   Use an ephemeral key tagged for ser5.
+
+# SHA-512 crypt hash of the primary user's password.
+# Must match PASSWORD_HASH in .bootstrap.env so autoinstall and Ansible are consistent.
+vault_user_password_hash: "PLACEHOLDER_SHA512_CRYPT_HASH"
+
+# Tailscale ephemeral auth key (from Tailscale admin console → Settings → Keys)
+vault_tailscale_authkey: "tskey-auth-PLACEHOLDER"

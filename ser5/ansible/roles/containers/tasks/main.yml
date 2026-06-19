@@ -1,0 +1,47 @@
+---
+# Rootless Podman with systemd quadlet support.
+# Enables persistent user-level container services that survive reboots and
+# run without an active login session (via systemd user lingering).
+#
+# Podman 4.4+ ships quadlet support natively; Ubuntu 26.04 should provide
+# Podman 5.x — no extra configuration needed to enable it.
+
+- name: Install Podman
+  ansible.builtin.apt:
+    name:
+      - podman
+    state: present
+
+- name: Enable user lingering for {{ username }}
+  ansible.builtin.command: loginctl enable-linger {{ username }}
+  register: linger_cmd
+  changed_when: linger_cmd.rc == 0
+  failed_when: false
+
+- name: Verify lingering is active (linger file must exist)
+  ansible.builtin.stat:
+    path: "/var/lib/systemd/linger/{{ username }}"
+  register: linger_stat
+  failed_when: not linger_stat.stat.exists
+
+- name: Ensure user systemd/quadlet directory exists
+  ansible.builtin.file:
+    path: "{{ user_home }}/.config/systemd/user"
+    state: directory
+    owner: "{{ username }}"
+    group: "{{ username }}"
+    mode: '0755'
+
+- name: Ensure user containers config directory exists
+  ansible.builtin.file:
+    path: "{{ user_home }}/.config/containers"
+    state: directory
+    owner: "{{ username }}"
+    group: "{{ username }}"
+    mode: '0755'
+
+# To deploy a Podman quadlet service, drop a .container unit file in
+# {{ user_home }}/.config/systemd/user/ then run:
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now <name>.service
+# See: https://docs.podman.io/en/latest/markdown/podman-systemd.unit.5.html

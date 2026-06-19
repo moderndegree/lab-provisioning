@@ -1,0 +1,55 @@
+---
+# Developer tooling: make ser5 a usable Linux workstation and Ansible control node.
+# This role installs the toolset needed to author and run Ansible playbooks locally
+# (i.e. to rehearse provisioning the mini or other targets from ser5).
+#
+# NOTE: This role does NOT install AI inference stacks, ROCm, or GPU compute tooling.
+# The Vega iGPU is for display/transcode only; inference runs on the mini.
+
+- name: Install workstation packages
+  ansible.builtin.apt:
+    name:
+      # Version control + build
+      - git
+      - build-essential
+      - make
+      # Ansible control node
+      - ansible
+      - ansible-lint
+      # Container tooling
+      - podman
+      # libvirt client (server-side installed by virtualization role)
+      - libvirt-clients
+      - virt-viewer
+      # CLI utilities
+      - jq
+      - tree
+      - ripgrep
+      - fd-find
+      - tmux
+      - neovim
+      # Network debugging
+      - nmap
+      - netcat-openbsd
+      - dnsutils
+      # Python
+      - python3-pip
+      - python3-venv
+      # YAML linting (for this repo)
+      - yamllint
+    state: present
+
+- name: Install required Ansible collections (as the provisioned user)
+  ansible.builtin.command:
+    cmd: >
+      ansible-galaxy collection install
+      community.general
+      ansible.posix
+      community.libvirt
+  become: true
+  become_user: "{{ username }}"
+  register: galaxy_install
+  changed_when: "'Nothing to do' not in galaxy_install.stdout"
+
+# TODO: Optionally install a pinned Node.js / pnpm here if the user's dev workflow
+# requires it. Omitted from the base workstation role to keep it minimal.

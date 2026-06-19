@@ -1,0 +1,2 @@
+---
+# No handlers — ansible.posix.mount is fully idempotent.

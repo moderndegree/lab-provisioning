@@ -1,0 +1,31 @@
+---
+# Provision ser5 end-to-end.
+# Run: make provision  (idempotent — safe to re-run)
+#
+# Role execution order:
+#   base           → kernel, apt, UFW, user account, SSH keys
+#   desktop        → GNOME (ubuntu-desktop-minimal)
+#   storage        → mount 1TB SATA SSD at {{ data_mount }}; create subdirs
+#   workstation    → git, ansible, podman, libvirt-clients, editor; dev workstation + Ansible control node
+#   virtualization → libvirt + qemu-kvm + virt-manager; IaC test-lab pool on {{ data_mount }}/vms
+#   containers     → rootless Podman; user lingering; quadlet support
+#   tailscale      → join tailnet with authkey from vault
+#   observability  → Prometheus + Grafana quadlets (enable_observability: true to activate)
+#   backups        → restic repo at {{ data_mount }}/backups (enable_backups: true to activate)
+
+- name: Provision ser5
+  hosts: ser5
+  become: true
+  gather_facts: true
+  roles:
+    - role: base
+    - role: desktop
+    - role: storage
+    - role: workstation
+    - role: virtualization
+    - role: containers
+    - role: tailscale
+    - role: observability
+      when: enable_observability | bool
+    - role: backups
+      when: enable_backups | bool

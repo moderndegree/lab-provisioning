@@ -1,0 +1,43 @@
+---
+# Observability — Prometheus + Grafana as rootless Podman quadlets.
+# Disabled by default; set enable_observability: true in group_vars/all.yml to activate.
+#
+# Purpose: monitor the mini inference box from ser5 —
+#   GPU temps, VRAM/GTT usage, and token throughput via Prometheus metrics.
+# Both services run as user-level systemd units (quadlets), no root required,
+# and survive reboots via user lingering (containers role must run first).
+#
+# STUB — set enable_observability: true and flesh out the TODOs below to build this out.
+
+- name: Observability role is a stub
+  ansible.builtin.debug:
+    msg: >
+      enable_observability: true but this role is not yet fully implemented.
+      See ansible/roles/observability/tasks/main.yml for TODOs.
+
+# TODO: Install Prometheus as a Podman quadlet
+# Steps:
+#   1. Write {{ user_home }}/.config/systemd/user/prometheus.container
+#      [Container]
+#      Image=docker.io/prom/prometheus:v2.x.x   # pin version
+#      Volume={{ data_mount }}/services/prometheus:/prometheus:Z
+#      PublishPort=9090:9090
+#   2. Write prometheus.yml scrape config to {{ data_mount }}/services/prometheus/
+#      scrape_configs:
+#        - job_name: mini-node
+#          static_configs: [{targets: ['{{ mini_tailscale_ip }}:9100']}]
+#   3. systemctl --user daemon-reload && systemctl --user enable --now prometheus.service
+#   4. UFW: allow on tailscale0 interface only (no LAN exposure)
+
+# TODO: Install Grafana as a Podman quadlet
+# Steps:
+#   1. Write {{ user_home }}/.config/systemd/user/grafana.container
+#      [Container]
+#      Image=docker.io/grafana/grafana:11.x.x   # pin version
+#      Volume={{ data_mount }}/services/grafana:/var/lib/grafana:Z
+#      PublishPort=3000:3000
+#      Environment=GF_AUTH_ANONYMOUS_ENABLED=true
+#   2. Provision Prometheus data source via Grafana provisioning file
+#   3. Import AMD node-exporter dashboard (community dashboard ID: 1860 or similar)
+
+# TODO: Add mini_tailscale_ip to group_vars/all.yml once mini's Tailscale IP is stable

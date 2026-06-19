@@ -1,0 +1,2 @@
+---
+# No handlers — pool lifecycle is managed directly in tasks with idempotent guards.

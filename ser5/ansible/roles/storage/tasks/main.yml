@@ -1,0 +1,71 @@
+---
+# Mount the 1TB SATA SSD at {{ data_mount }} with four service subdirectories.
+# The data disk is NEVER touched by autoinstall — this role is the only thing
+# that partitions and formats it on first provision.
+#
+# Subsequent runs: idempotent — skips format if filesystem already exists,
+# ensures fstab entry and mount are present, ensures subdirs exist.
+
+- name: Create data mount point
+  ansible.builtin.file:
+    path: "{{ data_mount }}"
+    state: directory
+    mode: '0755'
+
+- name: Check if data disk partition exists and has a filesystem
+  ansible.builtin.command: blkid {{ data_disk_partition }}
+  register: data_disk_blkid
+  changed_when: false
+  failed_when: false
+
+- name: Prepare data disk (first-time partition + format)
+  when:
+    - data_disk_blkid.rc != 0
+    - not (skip_data_disk_format | bool)
+  block:
+    - name: Create GPT partition table on data disk
+      community.general.parted:
+        device: "{{ data_disk }}"
+        label: gpt
+        state: present
+
+    - name: Create single partition covering full data disk
+      community.general.parted:
+        device: "{{ data_disk }}"
+        number: 1
+        state: present
+        part_end: "100%"
+
+    - name: Format data partition ext4 with label 'data'
+      community.general.filesystem:
+        fstype: ext4
+        dev: "{{ data_disk_partition }}"
+        opts: "-L data"
+        force: false
+
+- name: Get data partition UUID
+  ansible.builtin.command: blkid -o value -s UUID {{ data_disk_partition }}
+  register: data_uuid
+  changed_when: false
+  failed_when: data_uuid.stdout | trim == ""
+
+- name: Mount data partition via fstab (by UUID — survives device-name changes)
+  ansible.posix.mount:
+    path: "{{ data_mount }}"
+    src: "UUID={{ data_uuid.stdout | trim }}"
+    fstype: ext4
+    opts: defaults,noatime
+    state: mounted
+
+- name: Create data subdirectories
+  ansible.builtin.file:
+    path: "{{ data_mount }}/{{ item }}"
+    state: directory
+    owner: "{{ username }}"
+    group: "{{ username }}"
+    mode: '0755'
+  loop:
+    - vms
+    - backups
+    - services
+    - media

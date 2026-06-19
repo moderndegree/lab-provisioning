@@ -1,0 +1,69 @@
+---
+# ser5 group_vars — copy to all.yml and fill in real values.
+# all.yml is gitignored; all.example.yml (this file, with placeholders) is tracked.
+#
+# Run: make init   → copies this file to ansible/group_vars/all.yml
+# Then edit ansible/group_vars/all.yml with your real values.
+
+# ─── Node identity ────────────────────────────────────────────────────────────
+# MUST match USERNAME / HOSTNAME in .bootstrap.env — autoinstall is static and
+# cannot read Ansible vars. Keep them in sync or the user account won't exist
+# when Ansible tries to connect.
+username: "YOUR_USERNAME"
+user_full_name: "Your Full Name"
+hostname: "YOUR_HOSTNAME"
+
+# Derived path — do NOT change; roles reference {{ user_home }}
+user_home: "/home/{{ username }}"
+
+# Ansible SSH login follows username (single source of truth)
+ansible_user: "{{ username }}"
+
+# ─── Locale ───────────────────────────────────────────────────────────────────
+# Must match LOCALE / KEYBOARD_LAYOUT / TIMEZONE in .bootstrap.env (autoinstall).
+timezone: "America/Chicago"
+locale: "en_US.UTF-8"
+keyboard_layout: "us"
+
+# ─── SSH authorized keys ──────────────────────────────────────────────────────
+# List of public keys to install in ~/.ssh/authorized_keys.
+# Must include at least the key whose private half your Ansible control node uses.
+ssh_authorized_keys:
+  - "ssh-ed25519 AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA your_comment_here"
+
+# ─── Disk layout ──────────────────────────────────────────────────────────────
+# Verify device names before running: lsblk -d -o NAME,SIZE,MODEL,TRAN
+#
+# os_disk   — 500GB NVMe; targeted by autoinstall ONLY (never touched by Ansible)
+# data_disk — 1TB SATA SSD; configured by the storage role
+# data_disk_partition — first partition on data_disk
+#   SATA SSD:  /dev/sda  → /dev/sda1    (default)
+#   NVMe:      /dev/nvme1n1 → /dev/nvme1n1p1
+os_disk: "/dev/nvme0n1"
+data_disk: "/dev/sda"
+data_disk_partition: "/dev/sda1"
+data_mount: "/data"
+
+# Set true if the data disk is already partitioned and formatted (skip fdisk/mkfs).
+# When true, ensure the partition has label 'data': e2label /dev/sda1 data
+skip_data_disk_format: false
+
+# ─── Tailscale ────────────────────────────────────────────────────────────────
+# TODO: verify latest stable version at https://pkgs.tailscale.com/stable/
+# Update before provisioning; re-run make provision to upgrade in place.
+tailscale_version: "1.80.0"
+
+# ─── Feature flags ───────────────────────────────────────────────────────────
+# Optional roles — disabled by default. Flip to true to activate.
+enable_observability: false   # Prometheus + Grafana quadlets (monitors mini)
+enable_backups: false         # restic snapshots to {{ data_mount }}/backups
+
+# ─── Future stubs (not yet implemented) ───────────────────────────────────────
+# Set true only after the corresponding role is built.
+enable_postgres: false
+enable_forgejo: false
+enable_jellyfin: false
+enable_coolify: false
+
+# ─── Repo URL (for bootstrap documentation) ───────────────────────────────────
+repo_url: "https://github.com/YOUR_GH_USERNAME/ser5-provisioning"

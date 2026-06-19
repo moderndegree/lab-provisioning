@@ -1,0 +1,25 @@
+---
+# Install GNOME desktop via the ubuntu-desktop-minimal metapackage.
+# Installing via Ansible (not autoinstall) keeps the OS layer thin and gives us
+# a logged, idempotent install that can be re-run after a wipe.
+#
+# ubuntu-desktop-minimal includes GNOME Shell, GDM3, and a curated core app set
+# without office suites or games.  Install ubuntu-desktop instead if you want
+# the full metapackage.
+#
+# TODO: Verify 'ubuntu-desktop-minimal' package name in Ubuntu 26.04.
+#       It exists in 24.04; confirm it was not renamed in 26.04 release notes.
+#       Fallback: 'ubuntu-desktop' (full) or 'ubuntu-gnome-desktop'.
+
+- name: Install ubuntu-desktop-minimal (GNOME)
+  ansible.builtin.apt:
+    name: ubuntu-desktop-minimal
+    state: present
+    install_recommends: true
+  # First run takes several minutes. Subsequent runs are instant (idempotent).
+
+- name: Enable and start GDM3
+  ansible.builtin.systemd:
+    name: gdm3
+    enabled: true
+    state: started

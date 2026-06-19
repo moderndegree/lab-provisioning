@@ -1,0 +1,117 @@
+#cloud-config
+# Ubuntu Server 26.04 LTS — unattended autoinstall (NoCloud / Subiquity).
+#
+# USE THE SERVER ISO — not the Desktop ISO. The ubuntu-desktop metapackage
+# is intentionally absent here; the Ansible 'desktop' role installs GNOME
+# on the live system for a clean, logged, repeatable install.
+#
+# ISO: ubuntu-26.04-live-server-amd64.iso (verify checksum before flashing)
+# TODO: Confirm 26.04 Server ISO filename and SHA256 at https://releases.ubuntu.com/26.04/
+#
+# ─── How this file is used ────────────────────────────────────────────────────
+# This is a TEMPLATE. ${PLACEHOLDER} tokens are substituted from .bootstrap.env
+# by `make render` (uses envsubst). Never edit autoinstall/user-data directly.
+#
+# Workflow:
+#   1. make init        → create .bootstrap.env from .bootstrap.env.example
+#   2. Edit .bootstrap.env with real values
+#   3. make render      → generates autoinstall/user-data (gitignored)
+#   4. Validate:        cloud-init schema --config-file autoinstall/user-data
+#   5. Flash USB:       See README "Creating the autoinstall USB"
+#
+# ─── Disk safety ──────────────────────────────────────────────────────────────
+# ONLY the NVMe OS disk (${OS_DISK}) is referenced in this config.
+# The 1TB SATA SSD data disk (/dev/sda) is intentionally absent —
+# it is NEVER touched by autoinstall and will be mounted by Ansible.
+#
+# BEFORE PROCEEDING: boot the live ISO, open a shell, and run:
+#   lsblk -d -o NAME,SIZE,MODEL,TRAN
+# Confirm OS_DISK in .bootstrap.env matches the NVMe (not the SATA SSD).
+
+autoinstall:
+  version: 1
+
+  locale: ${LOCALE}
+
+  keyboard:
+    layout: ${KEYBOARD_LAYOUT}
+    variant: ""
+
+  identity:
+    hostname: ${HOSTNAME}
+    realname: ""
+    username: ${USERNAME}
+    # Generate hash: python3 -c "import crypt,getpass; print(crypt.crypt(getpass.getpass(),crypt.mksalt(crypt.METHOD_SHA512)))"
+    # Must match PASSWORD_HASH in .bootstrap.env AND vault_user_password_hash in vault.yml
+    password: "${PASSWORD_HASH}"
+
+  ssh:
+    install-server: true
+    allow-pw: false
+    authorized-keys:
+      - "${SSH_PUBLIC_KEY}"
+
+  packages:
+    - openssh-server
+    # GNOME desktop is installed by Ansible (desktop role), not here.
+
+  storage:
+    # Explicit layout: only disk0 (${OS_DISK}) is referenced.
+    # The SATA SSD is absent — autoinstall will not touch it.
+    config:
+      - type: disk
+        id: disk0
+        path: ${OS_DISK}
+        ptable: gpt
+        wipe: superblock
+        grub_device: false
+        preserve: false
+
+      # EFI system partition — 1 GB (holds multiple kernel generations)
+      - type: partition
+        id: part-efi
+        device: disk0
+        size: 1G
+        flag: boot
+        grub_device: false
+        preserve: false
+
+      - type: format
+        id: fmt-efi
+        volume: part-efi
+        fstype: fat32
+        preserve: false
+
+      - type: mount
+        id: mnt-efi
+        device: fmt-efi
+        path: /boot/efi
+
+      # Root partition — remainder of NVMe
+      - type: partition
+        id: part-root
+        device: disk0
+        size: -1
+        grub_device: false
+        preserve: false
+
+      - type: format
+        id: fmt-root
+        volume: part-root
+        fstype: ext4
+        label: ubuntu-root
+        preserve: false
+
+      - type: mount
+        id: mnt-root
+        device: fmt-root
+        path: /
+
+  late-commands:
+    # Ensure SSH daemon is enabled for Ansible to connect after reboot
+    - curtin in-target -- systemctl enable ssh
+    # Disable any autoinstall-default UFW rules; Ansible configures firewall
+    - curtin in-target -- ufw disable || true
+
+  updates: security
+  shutdown: reboot

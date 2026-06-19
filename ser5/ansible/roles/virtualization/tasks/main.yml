@@ -1,0 +1,73 @@
+---
+# IaC test lab: libvirt + QEMU-KVM + virt-manager.
+# Purpose: spin up throwaway VMs from ser5 to rehearse provisioning playbooks
+# (e.g. the mini's autoinstall flow) before targeting real hardware.
+#
+# Storage pool 'ser5-vms' lives on {{ data_mount }}/vms (the 1TB SATA SSD),
+# so VM disk images survive a wipe-and-reprovision of the OS disk.
+
+- name: Install virtualisation packages
+  ansible.builtin.apt:
+    name:
+      - libvirt-daemon-system
+      - libvirt-clients
+      - qemu-kvm
+      - qemu-utils
+      - virt-manager
+      - bridge-utils
+      - virtinst
+      # TODO: verify package names are unchanged in Ubuntu 26.04
+      # On 24.04 all are present; check https://packages.ubuntu.com if needed
+    state: present
+
+- name: Enable and start libvirtd
+  ansible.builtin.systemd:
+    name: libvirtd
+    enabled: true
+    state: started
+
+- name: Add user to libvirt and kvm groups
+  ansible.builtin.user:
+    name: "{{ username }}"
+    groups:
+      - libvirt
+      - kvm
+    append: true
+
+- name: Ensure VM storage directory exists on data disk
+  ansible.builtin.file:
+    path: "{{ data_mount }}/vms"
+    state: directory
+    owner: "{{ username }}"
+    group: libvirt
+    mode: '0775'
+
+- name: Check if ser5-vms libvirt pool is already defined
+  ansible.builtin.command: virsh pool-info ser5-vms
+  register: pool_check
+  changed_when: false
+  failed_when: false
+
+- name: Define ser5-vms libvirt storage pool on data disk
+  ansible.builtin.command: >
+    virsh pool-define-as
+    --name ser5-vms
+    --type dir
+    --target {{ data_mount }}/vms
+  when: pool_check.rc != 0
+
+- name: Start ser5-vms storage pool (idempotent — ignores 'already active')
+  ansible.builtin.command: virsh pool-start ser5-vms
+  register: pool_start
+  changed_when: pool_start.rc == 0
+  failed_when:
+    - pool_start.rc != 0
+    - "'already active' not in pool_start.stderr"
+
+- name: Autostart ser5-vms pool across reboots
+  ansible.builtin.command: virsh pool-autostart ser5-vms
+  register: pool_autostart
+  changed_when: "'marked as autostarted' in pool_autostart.stdout"
+  failed_when:
+    - pool_autostart.rc != 0
+    - "'already marked' not in pool_autostart.stderr"

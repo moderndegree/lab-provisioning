@@ -1,0 +1,58 @@
+---
+# Join the Tailscale tailnet.
+# Requires vault_tailscale_authkey from ansible/group_vars/vault.yml (encrypted).
+# After a successful `tailscale up`, this box appears in your tailnet alongside mini.
+#
+# TODO: Verify Tailscale GPG key URL for the Ubuntu 26.04 release codename.
+#       The URL below uses {{ ansible_distribution_release }} which resolves at runtime.
+#       If 26.04's codename is not yet in Tailscale's repo, substitute the closest
+#       prior LTS codename and open an issue to update once Tailscale adds it.
+
+- name: Download Tailscale GPG signing key
+  ansible.builtin.get_url:
+    url: "https://pkgs.tailscale.com/stable/ubuntu/{{ ansible_distribution_release }}.noarch.gpg"
+    dest: /usr/share/keyrings/tailscale-archive-keyring.gpg
+    mode: '0644'
+
+- name: Add Tailscale apt repository
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg]
+      https://pkgs.tailscale.com/stable/ubuntu {{ ansible_distribution_release }} main
+    state: present
+    filename: tailscale
+
+- name: Install Tailscale (pinned version)
+  ansible.builtin.apt:
+    name: "tailscale={{ tailscale_version }}"
+    state: present
+    update_cache: true
+
+- name: Enable and start tailscaled
+  ansible.builtin.systemd:
+    name: tailscaled
+    enabled: true
+    state: started
+
+- name: Query Tailscale backend state
+  ansible.builtin.command: tailscale status --json
+  register: ts_status_raw
+  changed_when: false
+  failed_when: false
+
+- name: Parse Tailscale backend state
+  ansible.builtin.set_fact:
+    ts_backend_state: >-
+      {{ (ts_status_raw.stdout | from_json).BackendState
+         if (ts_status_raw.rc == 0 and ts_status_raw.stdout | length > 0)
+         else 'NeedsLogin' }}
+
+- name: Authenticate with Tailscale (skipped when already Running)
+  ansible.builtin.command: >
+    tailscale up
+    --authkey {{ vault_tailscale_authkey }}
+    --hostname {{ hostname }}
+    --accept-routes
+  when: ts_backend_state != 'Running'
+  no_log: true
+  changed_when: true
