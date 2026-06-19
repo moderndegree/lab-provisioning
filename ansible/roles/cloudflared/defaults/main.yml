@@ -1,8 +1,15 @@
 ---
 # Toggle this role on/off without removing it from site.yml.
+# Even when true, the tunnel only *starts* once a real token is in the vault
+# (see cloudflared_token_ready in tasks/main.yml) — so a placeholder never
+# breaks a provision run.
 enable_cloudflared: false
 
 # Cloudflare cloudflared container image.
-# TODO: Pin to a specific digest or tag for production use.
-# See: https://hub.docker.com/r/cloudflare/cloudflared/tags
+# Pin to a release tag (or @sha256 digest) for reproducible deploys; bump
+# deliberately. See: https://hub.docker.com/r/cloudflare/cloudflared/tags
 cloudflared_image: "docker.io/cloudflare/cloudflared:latest"
+
+# Let `podman auto-update` pull a newer image on its timer. Set false once you
+# pin cloudflared_image to a specific tag/digest and want strict version control.
+cloudflared_autoupdate: true

@@ -6,9 +6,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=blewis
-Group=blewis
-Environment=HOME=/home/blewis
+User={{ node_user }}
+Group={{ node_user }}
+Environment=HOME={{ node_home }}
 Environment=HERMES_HOME={{ hermes_home }}
 # Secrets (LLM provider API key, etc.) sourced from vault-managed environment file.
 # The leading dash means systemd ignores a missing file (graceful degradation).

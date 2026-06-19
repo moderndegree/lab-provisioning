@@ -49,25 +49,25 @@
     cmd: "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"
     executable: /bin/bash
   environment:
-    HOME: /home/blewis
+    HOME: "{{ node_home }}"
     HERMES_HOME: "{{ hermes_home }}"
-    USER: blewis
+    USER: "{{ node_user }}"
   become: true
-  become_user: blewis
+  become_user: "{{ node_user }}"
   when: not hermes_binary_stat.stat.exists
   # TODO: The installer installs the latest published version. Pin to a
   # specific version once Hermes installer supports a --version flag.
   # Track: https://github.com/NousResearch/hermes-agent/releases
 
-- name: Ensure HERMES_HOME is set in blewis .bashrc
+- name: Ensure HERMES_HOME is set in the node user's .bashrc
   ansible.builtin.lineinfile:
-    path: /home/blewis/.bashrc
+    path: "{{ node_home }}/.bashrc"
     regexp: '^export HERMES_HOME='
     line: "export HERMES_HOME={{ hermes_home }}"
     state: present
     create: true
-    owner: blewis
-    group: blewis
+    owner: "{{ node_user }}"
+    group: "{{ node_user }}"
     mode: "0644"
 
 # ─── Hermes gateway secrets environment file ─────────────────────────────────
@@ -76,7 +76,7 @@
     path: /etc/hermes
     state: directory
     owner: root
-    group: blewis
+    group: "{{ node_user }}"
     mode: "0750"
 
 - name: Template Hermes environment file (vault secrets)
@@ -84,7 +84,7 @@
     src: hermes-environment.j2
     dest: /etc/hermes/environment
     owner: root
-    group: blewis
+    group: "{{ node_user }}"
     mode: "0640"
   notify:
     - restart hermes-gateway

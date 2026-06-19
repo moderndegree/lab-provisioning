@@ -8,7 +8,7 @@
 #   ollama      → Ollama LLM server (depends on amdgpu_rocm)
 #   harness     → Node.js, opencode, Hermes Agent + gateway service
 #   tailscale   → tailnet access
-#   cloudflared → Cloudflare Zero Trust tunnel stub (off by default)
+#   cloudflared → Cloudflare Tunnel (enabled; starts once a real token is vaulted)
 
 - name: Provision mini
   hosts: mini

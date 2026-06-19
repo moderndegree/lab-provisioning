@@ -46,9 +46,9 @@
 
 # Both backends need /dev/kfd + /dev/dri access: ROCm via HIP, RADV via Vulkan.
 # (render/video are stock Ubuntu groups, present regardless of the GPU stack.)
-- name: Add blewis to render and video groups (GPU device access)
+- name: Add the node user to render and video groups (GPU device access)
   ansible.builtin.user:
-    name: blewis
+    name: "{{ node_user }}"
     groups:
       - render
       - video

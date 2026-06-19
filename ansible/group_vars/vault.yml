@@ -10,9 +10,9 @@
 # NEVER commit this file in plaintext with real secrets.
 # ─────────────────────────────────────────────────────────────────────────────
 
-# NOTE: the blewis OS-user password hash is NOT here — it is set once at install
-# time in autoinstall/user-data and is not managed by Ansible. Nothing in the
-# playbook reads it from the vault, so it would be a dead secret if duplicated here.
+# NOTE: the OS-user (node_user) password hash is NOT here — it is set once at
+# install time in autoinstall/user-data and is not managed by Ansible. Nothing in
+# the playbook reads it from the vault, so it would be a dead secret if duplicated.
 
 # Tailscale auth key (reusable or ephemeral — from https://login.tailscale.com/admin/settings/keys)
 vault_tailscale_authkey: "PLACEHOLDER_TAILSCALE_AUTH_KEY"
@@ -20,5 +20,9 @@ vault_tailscale_authkey: "PLACEHOLDER_TAILSCALE_AUTH_KEY"
 # Hermes Agent LLM provider API key (e.g. OpenRouter, OpenAI, Anthropic, Nous Portal)
 vault_hermes_api_key: "PLACEHOLDER_HERMES_API_KEY"
 
-# Cloudflare Zero Trust tunnel token (only required when enable_cloudflared: true)
+# Cloudflare Tunnel connector token. Create a tunnel in the Cloudflare Zero Trust
+# dashboard (Networks → Tunnels → Create a tunnel → Cloudflared) and paste the
+# token here. This is the ONLY Cloudflare secret in the repo; hostnames and Access
+# policies are configured in the dashboard, not here. While this stays a
+# PLACEHOLDER the tunnel is left stopped (provision still succeeds).
 vault_cloudflared_token: "PLACEHOLDER_CLOUDFLARED_TOKEN"

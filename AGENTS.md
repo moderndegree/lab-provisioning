@@ -23,7 +23,7 @@ ansible/
   inventory.ini          single host: mini
   requirements.yml       Galaxy collection deps
   group_vars/
-    all.yml              pinned versions, Ollama env, gpu_backend, feature flags
+    all.yml              node identity, pinned versions, Ollama env, gpu_backend, flags
     vault.yml            ansible-vault encrypted secrets
   roles/
     base/                kernel cmdline (GRUB), firmware pin, packages, UFW, data disk
@@ -31,7 +31,7 @@ ansible/
     ollama/              Ollama server + systemd override
     harness/             Node.js, opencode-ai, Hermes Agent + gateway service
     tailscale/           tailnet join
-    cloudflared/         Cloudflare tunnel stub (off by default)
+    cloudflared/         Cloudflare Tunnel (Podman quadlet; remote-managed token)
 ```
 
 Role execution order is fixed in `site.yml`:
@@ -40,15 +40,20 @@ top-to-bottom (e.g. `ollama` assumes ROCm is already installed).
 
 ## Commands
 
-Run from the repo root. The provisioning host runs Ansible (typically WSL/Linux);
-these tools are **not** installed on the Windows side.
+Run from the repo root on the Linux/WSL control node. Ansible **cannot execute on the
+Windows side** (it errors out even if the package is present) — `yamllint` is the only
+check that runs there.
+
+The Makefile auto-detects a gitignored `.vault_pass` file: if present it is used for all
+vault operations (no prompts, and `syntax-check`/`lint` can load the encrypted vault);
+if absent, `make provision` falls back to prompting (`--ask-vault-pass`).
 
 | Command | Purpose |
 |---------|---------|
 | `make install-deps` | Install Galaxy collections (run once) |
-| `make syntax-check` | Validate playbook syntax — no host connection or vault |
+| `make syntax-check` | Validate playbook syntax (uses `.vault_pass` if present) |
 | `make lint` | `ansible-lint` + `yamllint` |
-| `make provision` | Converge mini (idempotent; prompts for vault pass) |
+| `make provision` | Converge mini (idempotent; `.vault_pass` or prompts) |
 | `make ping` | SSH connectivity check |
 | `make vault-edit` / `make vault-encrypt` | Manage `group_vars/vault.yml` |
 
@@ -69,6 +74,11 @@ Always run `make lint` and `make syntax-check` after editing roles or vars.
   table in `README.md` too.
 - **Tunables are variables, not literals.** Ollama env, GPU backend, disk paths, etc.
   are vars consumed by templates (e.g. `ollama/templates/override.conf.j2`).
+- **Node identity is single-source.** The OS user/home/hostname come from `node_user`,
+  `node_home`, `node_hostname` in `group_vars/all.yml` (and `ansible_user` derives from
+  `node_user`). Never hardcode the username, `/home/<user>`, or the hostname in a role —
+  reference these vars. `autoinstall/user-data` is static cloud-init and must be kept in
+  sync by hand (its `username:`/`hostname:` must match).
 - **Comment the non-obvious.** This box runs an officially-unsupported GPU; explain
   *why* for any gfx1151/ROCm/kernel workaround, not just *what*.
 - Match the existing YAML style: two-space indent, `name:` on every task,

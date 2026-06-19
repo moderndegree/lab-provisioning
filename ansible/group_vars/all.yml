@@ -1,5 +1,19 @@
 ---
 # ─────────────────────────────────────────────────────────────────────────────
+# Node identity
+# Single source of truth for the OS user and home dir used by service accounts,
+# file ownership, home paths, and the Ansible SSH login (ansible_user, below).
+# node_user MUST match `username:` in autoinstall/user-data (cloud-init is static
+# and cannot read this var). node_hostname likewise matches the autoinstall hostname.
+# ─────────────────────────────────────────────────────────────────────────────
+node_user: "blewis"
+node_home: "/home/{{ node_user }}"
+node_hostname: "{{ inventory_hostname }}"
+
+# Drive the Ansible SSH login from node_user (overrides any value in inventory.ini).
+ansible_user: "{{ node_user }}"
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Pinned versions
 # Update these values when upgrading; re-run `make provision` to converge.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -59,7 +73,7 @@ skip_data_disk_format: false
 # Hermes Agent
 # ─────────────────────────────────────────────────────────────────────────────
 hermes_home: "{{ data_mount }}/hermes"
-hermes_bin: "/home/blewis/.local/bin/hermes"
+hermes_bin: "{{ node_home }}/.local/bin/hermes"
 
 # Informational only — the firewall allows the whole tailscale0 interface, so this
 # port is not used in any UFW rule. Community reports 8080; verify against the
@@ -77,6 +91,16 @@ hermes_dashboard_port: 8080
 auto_reboot: true
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Optional roles (off by default)
+# Cloudflare Tunnel (browser-reachable, public "from anywhere" path)
 # ─────────────────────────────────────────────────────────────────────────────
-enable_cloudflared: false
+# Tailscale (above) is the primary, fully-private path. Enable cloudflared as well
+# for browser access without a VPN client. The tunnel only *starts* once a real
+# vault_cloudflared_token is set, so leaving this true with a placeholder token is
+# safe (it won't break a provision). Hostname→service mapping and — importantly —
+# Cloudflare Access policies are configured in the Zero Trust dashboard, so your
+# domain and routes never live in this repo. See README "Remote access".
+enable_cloudflared: true
+
+# Pin to a release tag/digest for reproducible deploys (default is :latest).
+cloudflared_image: "docker.io/cloudflare/cloudflared:latest"
+cloudflared_autoupdate: true

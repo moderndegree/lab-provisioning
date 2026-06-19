@@ -5,7 +5,8 @@ Bare-metal IaC for the Minisforum MS-S1 Max (AMD Ryzen AI Max+ 395 "Strix Halo",
 26.04 LTS node (kernel 7.0) — from a freshly wiped disk to a fully configured state.
 
 **Primary GPU backend: AMD ROCm** (with RADV/Vulkan fallback via a single var flip).  
-**Remote access: Tailscale** (all services reachable over the tailnet).
+**Remote access: Tailscale** (private tailnet; primary) **+ optional Cloudflare Tunnel**
+(public, browser-reachable, gated by Cloudflare Access). See [Remote access](#remote-access).
 
 ---
 
@@ -47,7 +48,7 @@ lab-provisioning/
     inventory.ini                   single host: mini
     site.yml                        master playbook
     group_vars/
-      all.yml                       pinned versions, Ollama env, gpu_backend, feature flags
+      all.yml                       node identity, pinned versions, Ollama env, gpu_backend, flags
       vault.yml                     ansible-vault encrypted secrets (NEVER commit plaintext)
     roles/
       base/                         kernel cmdline (GRUB), firmware pin, packages, UFW, data disk
@@ -55,7 +56,7 @@ lab-provisioning/
       ollama/                       Ollama LLM server + systemd override
       harness/                      Node.js, opencode-ai, Hermes Agent + gateway service
       tailscale/                    tailnet join
-      cloudflared/                  Cloudflare Zero Trust tunnel stub (off by default)
+      cloudflared/                  Cloudflare Tunnel (Podman quadlet; token-gated start)
 ```
 
 ---
@@ -101,6 +102,20 @@ once before the first autoinstall:
 
 4. **Before flashing**: fill in the two placeholders in `autoinstall/user-data`
    (SSH public key and password hash — see Placeholder Table below).
+
+---
+
+## Node identity (user / hostname)
+
+The OS user and hostname are parameterized in `ansible/group_vars/all.yml` as a single
+source of truth — `node_user` (default `blewis`), `node_home`, and `node_hostname`
+(defaults to the inventory host name). Everything Ansible touches (service accounts,
+file ownership, home paths, the SSH login via `ansible_user`, the Tailscale hostname)
+derives from these.
+
+cloud-init is static and **cannot** read these vars, so if you change `node_user` /
+`node_hostname` you must also edit the matching `username:` / `hostname:` in
+`autoinstall/user-data` to keep them aligned.
 
 ---
 
@@ -199,14 +214,58 @@ Vulkan/RADV is the ceiling (~98–103 tok/s on Qwen3-30B; ~170 tok/s on small Mo
 
 ---
 
-## Optional: cloudflared (disabled by default)
+## Remote access
 
-Exposes services via Cloudflare Zero Trust without opening inbound ports.
+Two complementary paths reach mini from anywhere — **nothing inbound is ever opened
+on your router** in either case.
 
-To enable:
-1. Add your tunnel token to `vault_cloudflared_token` in `vault.yml`
-2. Set `enable_cloudflared: true` in `ansible/group_vars/all.yml`
-3. Run `make provision`
+| | Tailscale (primary) | Cloudflare Tunnel (secondary) |
+|---|---|---|
+| Reaches | Your own enrolled devices | Anyone — via a browser/URL |
+| Public exposure | **None** (private tailnet) | Public hostname **gated by Cloudflare Access** |
+| Client needed | Tailscale app | Just a browser |
+| Use it for | Day-to-day secure access | Browser access without a VPN client; sharing |
+
+UFW denies all inbound except SSH (22) and the entire `tailscale0` interface, so the
+services themselves stay off the LAN/WAN; the tunnel reaches them via loopback.
+
+### Tailscale (already on by default)
+
+Provisioned by the `tailscale` role. Put a reusable/ephemeral auth key in
+`vault_tailscale_authkey`, provision, then install Tailscale on your laptop/phone and
+log in to the same tailnet. Reach mini at `mini` (MagicDNS) or its `100.x.y.z` address.
+
+### Cloudflare Tunnel (`enable_cloudflared: true`)
+
+> **Security:** a tunnel hostname is **public by default**, and the Ollama API / Hermes
+> dashboard have **no auth of their own** — anyone with the URL could use your GPU. You
+> **must** put a Cloudflare Access policy in front of every hostname. With Access, only
+> people you allow (e.g. your Google account) ever reach mini.
+
+This repo uses a **remote-managed (token) tunnel**: the only secret in the repo is the
+connector token (vaulted). Your domain, the hostname→service routes, and the Access
+policies all live in the Cloudflare Zero Trust dashboard — **never in this repo.**
+
+One-time setup (you already have Cloudflare DNS, which is the prerequisite):
+
+1. **Create the tunnel** — Zero Trust dashboard → *Networks → Tunnels → Create a tunnel
+   → Cloudflared*. Copy the connector **token**.
+2. **Store the token** — `make vault-edit`, set `vault_cloudflared_token` to that token.
+   (`enable_cloudflared` is already `true` in `group_vars/all.yml`. Until the token is
+   real, the tunnel stays stopped and provisioning still succeeds.)
+3. **Add public hostnames** to the tunnel (in the dashboard), each routing to a local
+   service on mini — for example:
+   - `ollama.<your-domain>` → `http://localhost:11434`
+   - `hermes.<your-domain>` → `http://localhost:8080`  *(or whatever port `hermes gateway` binds)*
+
+   Cloudflare creates the DNS records for you (since your DNS is on Cloudflare).
+4. **Gate each hostname with Access** — Zero Trust → *Access → Applications → Add a
+   self-hosted app* for each hostname, with a policy that allows only you (e.g. your
+   email / Google login). Do this **before** relying on the tunnel.
+5. `make provision` — the tunnel comes up and stays running (`Restart=always`).
+
+Tuning (optional, in `group_vars/all.yml`): pin `cloudflared_image` to a release
+tag/digest for reproducibility and set `cloudflared_autoupdate: false`.
 
 ---
 
@@ -221,7 +280,7 @@ Search for `PLACEHOLDER_` in the repo to find each one.
 | 2 | `PLACEHOLDER_PASSWORD_HASH` | `autoinstall/user-data` | `mkpasswd --method=SHA-512` (from the `whois` package) — set once at install; not managed by Ansible |
 | 3 | `PLACEHOLDER_TAILSCALE_AUTH_KEY` | `vault.yml` → `vault_tailscale_authkey` | https://login.tailscale.com/admin/settings/keys |
 | 4 | `PLACEHOLDER_HERMES_API_KEY` | `vault.yml` → `vault_hermes_api_key` | Your LLM provider (OpenRouter, OpenAI, Nous Portal, etc.) |
-| 5 | `PLACEHOLDER_CLOUDFLARED_TOKEN` | `vault.yml` → `vault_cloudflared_token` | Cloudflare Zero Trust dashboard (only needed if enabling cloudflared) |
+| 5 | `PLACEHOLDER_CLOUDFLARED_TOKEN` | `vault.yml` → `vault_cloudflared_token` | Cloudflare Zero Trust → Networks → Tunnels → Create a tunnel → Cloudflared (tunnel stays stopped until set) |
 | 6 | `PLACEHOLDER_MINI_IP` | `ansible/inventory.ini` | IP address or hostname of mini after autoinstall |
 | 7 | `PLACEHOLDER_MINI_IP` | `ansible/inventory.ini` → `ansible_host` | Run `ip a` on mini after install |
 | 8 | `data_disk_device` | `ansible/group_vars/all.yml` | Confirm with `lsblk -d` — default `/dev/nvme1n1` |

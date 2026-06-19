@@ -1,17 +1,16 @@
 ---
-# ─── cloudflared — Podman + systemd quadlet stub ─────────────────────────────
-# Status:  DISABLED  (enable_cloudflared: false in group_vars/all.yml)
+# ─── cloudflared — Cloudflare Zero Trust tunnel (Podman + systemd quadlet) ────
+# Exposes selected services to the public internet WITHOUT opening inbound ports:
+# cloudflared makes an outbound-only connection to Cloudflare's edge. Use this as
+# the "from anywhere, in a browser" path; Tailscale remains the primary, fully
+# private path. SECURITY: a tunnel hostname is public by default — gate every
+# hostname with a Cloudflare Access policy in the Zero Trust dashboard, because
+# the Ollama API and Hermes dashboard have no auth of their own.
 #
-# Purpose: Expose services through Cloudflare Zero Trust without opening
-#          inbound firewall ports. Tunnel token sourced from ansible-vault.
-#
-# To enable:
-#   1. Set  enable_cloudflared: true  in ansible/group_vars/all.yml
-#   2. Add your Cloudflare tunnel token to vault_cloudflared_token in vault.yml
-#   3. Run: make provision
-#
-# References:
-#   https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/
+# This uses a REMOTE-MANAGED (token) tunnel: the only secret is the connector
+# token (vaulted). Hostname→service mapping and Access policies are configured in
+# the Cloudflare Zero Trust dashboard, so your domain and routes never live in
+# this repo. See README "Remote access" for the dashboard steps.
 
 - name: cloudflared stub — role is disabled
   ansible.builtin.debug:
@@ -20,7 +19,17 @@
       Set enable_cloudflared: true in group_vars/all.yml to activate.
   when: not (enable_cloudflared | bool)
 
-# ─── Tasks below only execute when enable_cloudflared: true ──────────────────
+# ─── Everything below only runs when enable_cloudflared: true ────────────────
+
+# Only start the tunnel once a real token is present — a PLACEHOLDER token (or an
+# empty/undefined one) means "configured but not yet wired up": we still install
+# Podman and lay down the unit, but we do not start a container that would crashloop.
+- name: Determine whether a real cloudflared token is set
+  ansible.builtin.set_fact:
+    cloudflared_token_ready: >-
+      {{ (vault_cloudflared_token | default('') | length > 0)
+         and not (vault_cloudflared_token | default('') is search('^PLACEHOLDER')) }}
+  when: enable_cloudflared | bool
 
 - name: Install Podman
   ansible.builtin.apt:
@@ -37,6 +46,29 @@
     mode: "0755"
   when: enable_cloudflared | bool
 
+# Token lives in a root-only env file (NOT inline in the 0644 quadlet, which would
+# leave the connector token world-readable on disk). Referenced via EnvironmentFile.
+- name: Create /etc/cloudflared directory (token store)
+  ansible.builtin.file:
+    path: /etc/cloudflared
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  when: enable_cloudflared | bool
+
+- name: Write cloudflared connector token (root-only)
+  ansible.builtin.copy:
+    dest: /etc/cloudflared/token.env
+    owner: root
+    group: root
+    mode: "0600"
+    content: |
+      TUNNEL_TOKEN={{ vault_cloudflared_token }}
+  when: enable_cloudflared | bool
+  no_log: true
+  notify: restart cloudflared
+
 - name: Template cloudflared quadlet unit
   ansible.builtin.template:
     src: cloudflared.container.j2
@@ -44,7 +76,40 @@
     owner: root
     group: root
     mode: "0644"
+  when: enable_cloudflared | bool
   notify:
     - daemon-reload
-    - enable cloudflared
-  when: enable_cloudflared | bool
+    - restart cloudflared
+
+# Quadlet-generated units are enabled at boot via the [Install] section in the
+# .container file (do NOT `systemctl enable` them — they live in /run). We only
+# need to start it now, and only when the token is real.
+- name: Ensure cloudflared tunnel is running
+  ansible.builtin.systemd:
+    name: cloudflared.service
+    state: started
+    daemon_reload: true
+  when:
+    - enable_cloudflared | bool
+    - cloudflared_token_ready | bool
+
+- name: cloudflared enabled but waiting on a token
+  ansible.builtin.debug:
+    msg: >
+      cloudflared is enabled but vault_cloudflared_token is still a placeholder.
+      Add the connector token to vault.yml (make vault-edit) and re-run
+      `make provision` to start the tunnel.
+  when:
+    - enable_cloudflared | bool
+    - not (cloudflared_token_ready | bool)
+
+# AutoUpdate=registry in the quadlet is only acted on by this timer — enable it so
+# image updates actually happen (no-op when cloudflared_autoupdate is false).
+- name: Enable podman auto-update timer (image updates)
+  ansible.builtin.systemd:
+    name: podman-auto-update.timer
+    enabled: true
+    state: started
+  when:
+    - enable_cloudflared | bool
+    - cloudflared_autoupdate | bool

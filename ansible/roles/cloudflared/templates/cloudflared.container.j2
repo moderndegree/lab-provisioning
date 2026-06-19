@@ -1,4 +1,4 @@
-# Podman quadlet unit — Cloudflare Zero Trust tunnel
+# Podman quadlet unit — Cloudflare Zero Trust tunnel (managed by Ansible)
 # Documentation: https://docs.podman.io/en/latest/markdown/podman-systemd.unit.5.html
 # Cloudflare tunnel docs: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/
 
@@ -10,15 +10,22 @@ Wants=network-online.target
 [Container]
 Image={{ cloudflared_image }}
 ContainerName=cloudflared
-# Tunnel token sourced from ansible-vault (vault_cloudflared_token)
-Environment=TUNNEL_TOKEN={{ vault_cloudflared_token }}
+# Connector token (TUNNEL_TOKEN) sourced from a root-only env file, not inlined
+# here — this quadlet is world-readable (0644).
+EnvironmentFile=/etc/cloudflared/token.env
+# `--no-autoupdate` disables cloudflared's *binary* self-update; image updates are
+# handled by Podman (see AutoUpdate below) so versions stay reproducible.
 Exec=tunnel --no-autoupdate run
-# Auto-update container image (remove if you want strict version pinning)
+{% if cloudflared_autoupdate | bool %}
+# Pull a newer image on `podman auto-update` (podman-auto-update.timer).
 AutoUpdate=registry
+{% endif %}
 
 [Service]
 Restart=always
+RestartSec=5
 TimeoutStartSec=900
 
 [Install]
+# Quadlet enables the generated service at boot via this section.
 WantedBy=multi-user.target default.target

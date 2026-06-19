@@ -11,6 +11,8 @@ autoinstall:
     variant: ""
 
   identity:
+    # cloud-init is static and cannot read Ansible vars. These two MUST match
+    # node_hostname / node_user in ansible/group_vars/all.yml.
     hostname: mini
     realname: ""
     username: blewis

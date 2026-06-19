@@ -157,8 +157,8 @@
   ansible.builtin.file:
     path: "{{ data_mount }}/{{ item }}"
     state: directory
-    owner: blewis
-    group: blewis
+    owner: "{{ node_user }}"
+    group: "{{ node_user }}"
     mode: "0755"
   loop:
     - ollama

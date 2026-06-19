@@ -1,6 +1,6 @@
 ---
 # Binary path of the hermes CLI (set by the NousResearch installer).
-hermes_bin: "/home/blewis/.local/bin/hermes"
+hermes_bin: "{{ node_home }}/.local/bin/hermes"
 
 # Data directory for Hermes; installer and service use HERMES_HOME.
 hermes_home: "{{ data_mount }}/hermes"
