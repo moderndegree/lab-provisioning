@@ -10,11 +10,9 @@
 # NEVER commit this file in plaintext with real secrets.
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Password hash for the blewis OS user.
-# Generate: python3 -c "import crypt; print(crypt.crypt('yourpassword', crypt.mksalt(crypt.METHOD_SHA512)))"
-# Or:       mkpasswd --method=SHA-512
-# Must match the password hash in autoinstall/user-data.
-vault_blewis_password_hash: "PLACEHOLDER_PASSWORD_HASH"
+# NOTE: the blewis OS-user password hash is NOT here — it is set once at install
+# time in autoinstall/user-data and is not managed by Ansible. Nothing in the
+# playbook reads it from the vault, so it would be a dead secret if duplicated here.
 
 # Tailscale auth key (reusable or ephemeral — from https://login.tailscale.com/admin/settings/keys)
 vault_tailscale_authkey: "PLACEHOLDER_TAILSCALE_AUTH_KEY"

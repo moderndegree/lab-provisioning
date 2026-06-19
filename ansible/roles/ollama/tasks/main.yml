@@ -18,16 +18,15 @@
 
 # ─── GPU device access for the service account ────────────────────────────────
 # The `ollama` user (created by the installer above) needs render + video group
-# membership to reach /dev/kfd and /dev/dri for ROCm. Takes effect on the next
-# service restart (notified below).
-- name: Add ollama user to render and video groups (ROCm device access)
+# membership to reach /dev/kfd and /dev/dri — required by both the ROCm (HIP) and
+# Vulkan (RADV) backends. Takes effect on the next service restart (notified below).
+- name: Add ollama user to render and video groups (GPU device access)
   ansible.builtin.user:
     name: ollama
     groups:
       - render
       - video
     append: true
-  when: gpu_backend == "rocm"
   notify: restart ollama
 
 # ─── Ollama model directory on data disk ──────────────────────────────────────

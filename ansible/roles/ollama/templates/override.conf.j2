@@ -6,10 +6,18 @@ Environment="OLLAMA_FLASH_ATTENTION={{ ollama_flash_attention }}"
 Environment="OLLAMA_KV_CACHE_TYPE={{ ollama_kv_cache_type }}"
 Environment="OLLAMA_KEEP_ALIVE={{ ollama_keep_alive }}"
 Environment="OLLAMA_MAX_LOADED_MODELS={{ ollama_max_loaded_models }}"
-# gfx1151 ROCm workaround — not on AMD's official support matrix
-Environment="HSA_OVERRIDE_GFX_VERSION={{ hsa_override_gfx_version }}"
+# Bind address. systemd services do NOT read /etc/environment, so the backend/host
+# env must live here in the unit override to actually reach the ollama process.
+Environment="OLLAMA_HOST={{ ollama_host }}"
 # Store model blobs on the data disk (second NVMe), not the OS disk
 Environment="OLLAMA_MODELS={{ data_mount }}/ollama"
+{% if gpu_backend == "rocm" %}
+# gfx1151 ROCm workaround — not on AMD's official support matrix
+Environment="HSA_OVERRIDE_GFX_VERSION={{ hsa_override_gfx_version }}"
+{% elif gpu_backend == "vulkan" %}
+# Vulkan/RADV fallback backend (flip gpu_backend: vulkan in group_vars/all.yml)
+Environment="OLLAMA_GPU_DRIVER=vulkan"
+{% endif %}
 # Legacy gfx1151 hang workarounds — likely unneeded on kernel 7.0.
 # Uncomment only if you observe ROCm hangs after a kernel/ROCm bump:
 # Environment="HSA_ENABLE_SDMA=0"

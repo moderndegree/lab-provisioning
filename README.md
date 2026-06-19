@@ -24,6 +24,12 @@ Bare-metal IaC for the Minisforum MS-S1 Max (AMD Ryzen AI Max+ 395 "Strix Halo",
 After the first provision: `make provision` is the single converge command. Re-run it
 after any change to roles or vars to bring mini to the desired state.
 
+> **Heads-up:** the **first** `make provision` ends by rebooting mini once, to apply the
+> gfx1151 kernel cmdline (`amd_iommu`/`gttsize`/`ttm.pages_limit`). Ansible waits for the
+> box to come back, so the run still completes cleanly. Steady-state re-runs do **not**
+> reboot (the cmdline is unchanged). Set `auto_reboot: false` in `group_vars/all.yml` to
+> handle the reboot yourself.
+
 ---
 
 ## Repo Layout
@@ -142,11 +148,12 @@ only** (`amdgpu-install --no-dkms`); the in-tree `amdgpu` driver that ships with
 
 ## Verify after boot
 
-After the first provision (and after any kernel or ROCm bump), confirm the GPU stack
-on mini before trusting it:
+After the first provision (which reboots mini automatically — see above) and after any
+kernel or ROCm bump, confirm the GPU stack on mini before trusting it:
 
 ```bash
 cat /proc/cmdline                 # confirm amd_iommu=off + GTT/ttm flags applied
+                                  # (these only appear after the reboot)
 rocminfo | grep -i gfx1151        # ROCm sees the GPU
 dmesg | grep -i gtt               # GTT sizing
 id ollama                         # service account has render + video groups
@@ -172,6 +179,9 @@ Vulkan/RADV is the ceiling (~98–103 tok/s on Qwen3-30B; ~170 tok/s on small Mo
   upgrade before trusting the node.
 - **gfx1151 is community-supported only.** Pin versions; nothing here is on AMD's
   official ROCm support matrix.
+- **Services are tailnet-only.** UFW denies all inbound except SSH (port 22) and the
+  entire `tailscale0` interface. Ollama binds `0.0.0.0` (`ollama_host`) so it is reachable
+  to tailnet peers but **not** the LAN. Set `ollama_host: 127.0.0.1` to keep it loopback-only.
 
 ---
 
@@ -208,7 +218,7 @@ Search for `PLACEHOLDER_` in the repo to find each one.
 | # | Placeholder | Where | How to generate |
 |---|-------------|-------|-----------------|
 | 1 | `PLACEHOLDER_SSH_PUBLIC_KEY` | `autoinstall/user-data` | `cat ~/.ssh/id_ed25519.pub` |
-| 2 | `PLACEHOLDER_PASSWORD_HASH` | `autoinstall/user-data` + `vault.yml` | `mkpasswd --method=SHA-512` (from the `whois` package) |
+| 2 | `PLACEHOLDER_PASSWORD_HASH` | `autoinstall/user-data` | `mkpasswd --method=SHA-512` (from the `whois` package) — set once at install; not managed by Ansible |
 | 3 | `PLACEHOLDER_TAILSCALE_AUTH_KEY` | `vault.yml` → `vault_tailscale_authkey` | https://login.tailscale.com/admin/settings/keys |
 | 4 | `PLACEHOLDER_HERMES_API_KEY` | `vault.yml` → `vault_hermes_api_key` | Your LLM provider (OpenRouter, OpenAI, Nous Portal, etc.) |
 | 5 | `PLACEHOLDER_CLOUDFLARED_TOKEN` | `vault.yml` → `vault_cloudflared_token` | Cloudflare Zero Trust dashboard (only needed if enabling cloudflared) |
@@ -237,8 +247,10 @@ installs no extra kernel package. **Do NOT install `linux-firmware-20251125`** �
 breaks ROCm on Strix Halo; the `base` role pins that build out via apt preferences.
 
 **TODO 3 — Hermes Agent gateway dashboard port**  
-`hermes_dashboard_port: 8080` is based on community reports. Verify the port by running
-`hermes gateway start` on mini and checking the output, then update `group_vars/all.yml`.
+`hermes_dashboard_port: 8080` is based on community reports and is now **informational
+only** — the firewall allows the whole `tailscale0` interface, so the dashboard is
+reachable to tailnet peers on whatever port the gateway binds. Verify the real port by
+running `hermes gateway start` on mini, then update `group_vars/all.yml` for accuracy.
 
 **TODO 4 — Hermes Agent version pinning**  
 The NousResearch installer always installs the latest published version. The documented

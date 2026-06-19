@@ -25,6 +25,10 @@ gpu_backend: "rocm"
 # ─────────────────────────────────────────────────────────────────────────────
 # Ollama service environment (written to systemd override.conf)
 # ─────────────────────────────────────────────────────────────────────────────
+# Bind address. 0.0.0.0 makes the API reachable over the tailnet; UFW restricts
+# inbound to the tailscale0 interface, so nothing is actually exposed on the LAN.
+# Set to 127.0.0.1 to keep Ollama local-only (Hermes still reaches it via loopback).
+ollama_host: "0.0.0.0"
 ollama_context_length: 131072
 ollama_num_parallel: 1
 ollama_flash_attention: 1
@@ -46,6 +50,9 @@ data_mount: "/data"
 
 # Set true to skip first-time partition+format (disk is already prepared).
 # When false: Ansible partitions + formats only if the disk has no filesystem.
+# NOTE: the disk is mounted/added to fstab by LABEL=data regardless of this flag.
+# If you set skip_data_disk_format: true for an externally-prepared disk, ensure
+# its partition is labelled `data` (e.g. `e2label /dev/nvme1n1p1 data`).
 skip_data_disk_format: false
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -54,9 +61,20 @@ skip_data_disk_format: false
 hermes_home: "{{ data_mount }}/hermes"
 hermes_bin: "/home/blewis/.local/bin/hermes"
 
-# TODO: PLACEHOLDER — confirm the Hermes gateway dashboard port.
-# Community reports 8080; verify against `hermes gateway start` output.
+# Informational only — the firewall allows the whole tailscale0 interface, so this
+# port is not used in any UFW rule. Community reports 8080; verify against the
+# `hermes gateway start` output and keep this accurate for documentation.
 hermes_dashboard_port: 8080
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Converge behaviour
+# ─────────────────────────────────────────────────────────────────────────────
+# When the gfx1151 kernel cmdline changes (first provision, or any later edit),
+# the new flags only take effect after a reboot. With auto_reboot: true the play
+# reboots mini at the very end — after update-grub/update-initramfs have run — so a
+# single `make provision` fully converges and `cat /proc/cmdline` reflects reality.
+# Set false if you prefer to schedule the reboot yourself.
+auto_reboot: true
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Optional roles (off by default)

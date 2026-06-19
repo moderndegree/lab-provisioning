@@ -21,3 +21,20 @@
     - role: harness
     - role: tailscale
     - role: cloudflared
+
+# Reboot last — after the provision play's handlers (update-grub, update-initramfs)
+# have flushed — so the gfx1151 kernel cmdline is regenerated *then* applied in one
+# `make provision`. reboot_needed is set by the base role only when the cmdline
+# actually changed, so steady-state re-runs never reboot.
+- name: Apply kernel changes
+  hosts: mini
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Reboot to apply gfx1151 kernel cmdline
+      ansible.builtin.reboot:
+        msg: "Rebooting to apply gfx1151 kernel cmdline (amd_iommu/gtt/ttm)"
+        reboot_timeout: 600
+      when:
+        - reboot_needed | default(false) | bool
+        - auto_reboot | bool

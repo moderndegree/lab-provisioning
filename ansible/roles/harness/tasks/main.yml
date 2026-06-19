@@ -65,7 +65,10 @@
     regexp: '^export HERMES_HOME='
     line: "export HERMES_HOME={{ hermes_home }}"
     state: present
-    create: false
+    create: true
+    owner: blewis
+    group: blewis
+    mode: "0644"
 
 # ─── Hermes gateway secrets environment file ─────────────────────────────────
 - name: Create /etc/hermes directory for environment secrets
@@ -99,13 +102,9 @@
     - enable hermes-gateway
     - restart hermes-gateway
 
-# ─── UFW: allow Hermes dashboard port ────────────────────────────────────────
-- name: Allow Hermes dashboard port through UFW
-  community.general.ufw:
-    rule: allow
-    port: "{{ hermes_dashboard_port | string }}"
-    proto: tcp
-    comment: "Hermes Agent gateway dashboard (tailnet access)"
+# No per-port UFW rule for the Hermes dashboard: the base role already allows the
+# whole tailscale0 interface, so the dashboard is reachable to tailnet peers while
+# staying off the LAN. Add a scoped rule here only if you bind it elsewhere.
 
 # ─── Ensure service is running ────────────────────────────────────────────────
 - name: Ensure hermes-gateway service is enabled and started

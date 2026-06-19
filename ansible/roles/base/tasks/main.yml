@@ -41,9 +41,15 @@
     state: present
     create: true
     mode: "0644"
-  notify:
-    - update grub
-    - reboot required
+  register: grub_cmdline
+  notify: update grub
+
+# These flags only take effect after a reboot. Flag it here; the final play in
+# site.yml performs the reboot (once update-grub has run) when auto_reboot is true.
+- name: Flag that a reboot is needed (kernel cmdline changed)
+  ansible.builtin.set_fact:
+    reboot_needed: true
+  when: grub_cmdline is changed
 
 # ─── Base packages ────────────────────────────────────────────────────────────
 - name: Install base packages
@@ -74,6 +80,17 @@
     port: "22"
     proto: tcp
     comment: "SSH"
+
+# All node services (Ollama, Hermes dashboard, etc.) are reached over the tailnet.
+# Allowing the whole tailscale0 interface keeps them off the LAN/WAN while making
+# every service reachable to tailnet peers — no per-port rules to maintain. The
+# rule is valid before tailscaled exists; it simply matches once the iface appears.
+- name: Allow all inbound on the tailscale interface
+  community.general.ufw:
+    rule: allow
+    direction: in
+    interface: tailscale0
+    comment: "tailnet (all services)"
 
 - name: Enable UFW
   community.general.ufw:
@@ -125,14 +142,16 @@
     group: root
     mode: "0755"
 
+# Mount unconditionally: skip_data_disk_format only skips partition+format, NOT the
+# mount. After an OS reflash the data disk keeps its filesystem but /etc/fstab is
+# gone, so a "prepared" disk (skip=true) still must be (re)mounted and re-added here.
 - name: Mount data disk and add to fstab
   ansible.posix.mount:
     path: "{{ data_mount }}"
-    src: "{{ data_disk_device }}p1"
+    src: "LABEL=data"
     fstype: ext4
     opts: defaults,noatime
     state: mounted
-  when: not (skip_data_disk_format | bool)
 
 - name: Create standard data subdirectories
   ansible.builtin.file:

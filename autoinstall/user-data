@@ -30,7 +30,7 @@ autoinstall:
   storage:
     # Explicit config: only disk0 (/dev/nvme0n1) is referenced.
     # The second NVMe (/dev/nvme1n1) is intentionally absent — it is never
-    # touched by autoinstall and will be formatted by Ansible (harness role).
+    # touched by autoinstall and will be formatted by Ansible (base role).
     #
     # TODO: PLACEHOLDER — verify /dev/nvme0n1 is the correct OS disk in your
     # environment. Boot the live ISO, open a shell, and run `lsblk -d -o NAME,SIZE,MODEL`

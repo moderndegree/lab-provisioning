@@ -44,14 +44,15 @@
   when: gpu_backend == "rocm"
   notify: update initramfs
 
-- name: Add blewis to render and video groups (required for ROCm device access)
+# Both backends need /dev/kfd + /dev/dri access: ROCm via HIP, RADV via Vulkan.
+# (render/video are stock Ubuntu groups, present regardless of the GPU stack.)
+- name: Add blewis to render and video groups (GPU device access)
   ansible.builtin.user:
     name: blewis
     groups:
       - render
       - video
     append: true
-  when: gpu_backend == "rocm"
 
 - name: Install ROCm environment profile (gfx1151 override)
   ansible.builtin.copy:
@@ -75,20 +76,6 @@
     state: absent
   when: gpu_backend == "vulkan"
 
-# ─── Vulkan backend env (gpu_backend == vulkan) ───────────────────────────────
-- name: Set OLLAMA_GPU_DRIVER=vulkan in /etc/environment
-  ansible.builtin.lineinfile:
-    path: /etc/environment
-    regexp: '^OLLAMA_GPU_DRIVER='
-    line: 'OLLAMA_GPU_DRIVER=vulkan'
-    state: present
-    create: true
-    mode: "0644"
-  when: gpu_backend == "vulkan"
-
-- name: Remove OLLAMA_GPU_DRIVER from /etc/environment (ROCm mode)
-  ansible.builtin.lineinfile:
-    path: /etc/environment
-    regexp: '^OLLAMA_GPU_DRIVER='
-    state: absent
-  when: gpu_backend == "rocm"
+# The Vulkan backend selector (OLLAMA_GPU_DRIVER) is set in the ollama systemd
+# override (roles/ollama/templates/override.conf.j2), NOT /etc/environment —
+# systemd units do not source /etc/environment, so it would never reach the service.

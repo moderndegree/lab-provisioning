@@ -88,8 +88,9 @@ Always run `make lint` and `make syntax-check` after editing roles or vars.
 - **Never install `linux-firmware-20251125`** — it breaks ROCm. The `base` role pins it
   out via `/etc/apt/preferences.d/no-bad-firmware`.
 - Kernel cmdline (`amd_iommu=off amdgpu.gttsize=131072 ttm.pages_limit=33554432`) is
-  managed in `base` via `/etc/default/grub`; changing it requires `update-grub` + reboot
-  (both wired to handlers).
+  managed in `base` via `/etc/default/grub`. A change notifies the `update-grub` handler
+  and sets the `reboot_needed` fact; the final play in `site.yml` then reboots the host
+  (when `auto_reboot: true`, the default) so one `make provision` fully applies it.
 - BIOS settings (latest BIOS, UMA 512MB, IOMMU off, power mode) are a **manual one-time
   prerequisite** — out of Ansible's scope. See `README.md`.
 - `gpu_backend: vulkan` in `group_vars/all.yml` is a one-line fallback if ROCm regresses.
