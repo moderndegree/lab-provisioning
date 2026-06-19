@@ -11,13 +11,12 @@
     name:
       - libvirt-daemon-system
       - libvirt-clients
-      - qemu-kvm
+      - qemu-system-x86
       - qemu-utils
       - virt-manager
       - bridge-utils
       - virtinst
-      # TODO: verify package names are unchanged in Ubuntu 26.04
-      # On 24.04 all are present; check https://packages.ubuntu.com if needed
+      # qemu-kvm is a virtual package in Ubuntu 26.04 — qemu-system-x86 provides KVM support
     state: present
 
 - name: Enable and start libvirtd

@@ -12,27 +12,22 @@
     state: directory
     mode: '0755'
 
-- name: Check if data disk partition exists and has a filesystem
-  ansible.builtin.command: blkid {{ data_disk_partition }}
+- name: Check if data disk partition has an ext4 filesystem
+  ansible.builtin.command: blkid -o value -s TYPE {{ data_disk_partition }}
   register: data_disk_blkid
   changed_when: false
   failed_when: false
 
 - name: Prepare data disk (first-time partition + format)
   when:
-    - data_disk_blkid.rc != 0
+    - (data_disk_blkid.rc != 0) or ((data_disk_blkid.stdout | trim) != 'ext4')
     - not (skip_data_disk_format | bool)
   block:
-    - name: Create GPT partition table on data disk
-      community.general.parted:
-        device: "{{ data_disk }}"
-        label: gpt
-        state: present
-
-    - name: Create single partition covering full data disk
+    - name: Create GPT partition table and single data partition
       community.general.parted:
         device: "{{ data_disk }}"
         number: 1
+        label: gpt
         state: present
         part_end: "100%"
 
@@ -41,7 +36,7 @@
         fstype: ext4
         dev: "{{ data_disk_partition }}"
         opts: "-L data"
-        force: false
+        force: true
 
 - name: Get data partition UUID
   ansible.builtin.command: blkid -o value -s UUID {{ data_disk_partition }}

@@ -2,31 +2,34 @@
 # Join the Tailscale tailnet.
 # Requires vault_tailscale_authkey from ansible/group_vars/vault.yml (encrypted).
 # After a successful `tailscale up`, this box appears in your tailnet alongside mini.
-#
-# TODO: Verify Tailscale GPG key URL for the Ubuntu 26.04 release codename.
-#       The URL below uses {{ ansible_distribution_release }} which resolves at runtime.
-#       If 26.04's codename is not yet in Tailscale's repo, substitute the closest
-#       prior LTS codename and open an issue to update once Tailscale adds it.
 
-- name: Download Tailscale GPG signing key
-  ansible.builtin.get_url:
-    url: "https://pkgs.tailscale.com/stable/ubuntu/{{ ansible_distribution_release }}.noarch.gpg"
-    dest: /usr/share/keyrings/tailscale-archive-keyring.gpg
-    mode: '0644'
+# Tailscale repo pinned to 'noble' — no 'resolute' (26.04) release in their repo yet.
+# Update this once https://pkgs.tailscale.com/stable/ubuntu/ lists resolute.
+- name: Download and dearmor Tailscale GPG signing key
+  ansible.builtin.shell:
+    cmd: >
+      curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/noble.gpg
+      | gpg --dearmor -o /usr/share/keyrings/tailscale-archive-keyring.gpg
+    creates: /usr/share/keyrings/tailscale-archive-keyring.gpg
 
 - name: Add Tailscale apt repository
   ansible.builtin.apt_repository:
     repo: >-
       deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg]
-      https://pkgs.tailscale.com/stable/ubuntu {{ ansible_distribution_release }} main
+      https://pkgs.tailscale.com/stable/ubuntu noble main
     state: present
     filename: tailscale
 
-- name: Install Tailscale (pinned version)
+- name: Install Tailscale
   ansible.builtin.apt:
-    name: "tailscale={{ tailscale_version }}"
-    state: present
+    name: "tailscale{{ '' if _ts_latest else '=' + tailscale_version }}"
+    state: "{{ 'latest' if _ts_latest else 'present' }}"
     update_cache: true
+    # Tailscale's apt repo only keeps recent releases, so an exact pin can age out.
+    # allow_downgrade lets a valid pin be enforced even if a newer build slipped in.
+    allow_downgrade: true
+  vars:
+    _ts_latest: "{{ (tailscale_version | default('latest') | trim) in ['', 'latest'] }}"
 
 - name: Enable and start tailscaled
   ansible.builtin.systemd:

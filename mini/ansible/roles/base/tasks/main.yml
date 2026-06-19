@@ -109,10 +109,10 @@
   failed_when: false
   when: not (skip_data_disk_format | bool)
 
-- name: Partition and format data disk (first-time only — no filesystem detected)
+- name: Partition and format data disk (when missing or not ext4)
   when:
     - not (skip_data_disk_format | bool)
-    - data_fs_check.rc != 0 or data_fs_check.stdout | trim == ""
+    - data_fs_check.rc != 0 or (data_fs_check.stdout | trim) != 'ext4'
   block:
     - name: Create GPT label and single partition spanning full disk
       ansible.builtin.command:

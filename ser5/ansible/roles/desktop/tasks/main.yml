@@ -23,3 +23,82 @@
     name: gdm3
     enabled: true
     state: started
+
+# ─── Wi-Fi via NetworkManager ────────────────────────────────────────────────
+# GNOME ships NetworkManager, which is the robust, long-term way to manage
+# Wi-Fi on this workstation. Configured only when wifi_ssid and the vault PSK
+# are set; otherwise skipped (e.g. wired-only hosts).
+- name: Configure Wi-Fi (NetworkManager)
+  when:
+    - wifi_ssid | default('') | length > 0
+    - vault_wifi_psk | default('') | length > 0
+  block:
+    - name: Detect Wi-Fi interface
+      ansible.builtin.shell: >-
+        set -o pipefail;
+        nmcli -t -f DEVICE,TYPE device
+        | awk -F: '$2 == "wifi" { print $1; exit }'
+      args:
+        executable: /bin/bash
+      register: wifi_iface
+      changed_when: false
+      failed_when: false
+
+    # Create the NetworkManager profile first (works even while the adapter is
+    # still networkd-managed/unmanaged by NM) so it's ready to take over the
+    # instant the adapter is released below.
+    - name: Create/Update Wi-Fi connection profile
+      community.general.nmcli:
+        type: wifi
+        conn_name: "{{ wifi_ssid }}"
+        ifname: "{{ wifi_iface.stdout | trim }}"
+        ssid: "{{ wifi_ssid }}"
+        wifi_sec:
+          key-mgmt: wpa-psk
+          psk: "{{ vault_wifi_psk }}"
+        autoconnect: true
+        state: present
+      no_log: true
+      when: wifi_iface.stdout | default('') | trim | length > 0
+
+    # On a Wi-Fi-only first boot the server is connected via systemd-networkd
+    # (the autoinstall late-command dropped /etc/netplan/90-wifi.yaml). networkd
+    # claims the adapter through a udev rule, so NetworkManager reports it
+    # "unmanaged via udev rule". Hand the adapter over by removing that file and
+    # re-applying netplan. This briefly drops the link — so when we're provisioning
+    # over that very Wi-Fi, run it detached and reconnect with wait_for_connection.
+    - name: Check for the networkd first-boot Wi-Fi netplan
+      ansible.builtin.stat:
+        path: /etc/netplan/90-wifi.yaml
+      register: networkd_wifi
+
+    - name: Hand Wi-Fi off from networkd to NetworkManager (detached — may drop link)
+      ansible.builtin.shell: |
+        set -e
+        rm -f /etc/netplan/90-wifi.yaml
+        netplan apply
+        nmcli connection up "{{ wifi_ssid }}" || true
+      args:
+        executable: /bin/bash
+      async: 90
+      poll: 0
+      when:
+        - networkd_wifi.stat.exists
+        - wifi_iface.stdout | default('') | trim | length > 0
+
+    - name: Wait for the host to return on NetworkManager-managed Wi-Fi
+      ansible.builtin.wait_for_connection:
+        delay: 5
+        timeout: 180
+      when:
+        - networkd_wifi.stat.exists
+        - wifi_iface.stdout | default('') | trim | length > 0
+
+    - name: Ensure Wi-Fi connection is active
+      ansible.builtin.command: nmcli connection up "{{ wifi_ssid }}"
+      register: wifi_up
+      changed_when: "'successfully activated' in wifi_up.stdout"
+      # Don't fail the whole converge if the AP is briefly unreachable; the
+      # autoconnect profile will retry on its own.
+      failed_when: false
+      when: wifi_iface.stdout | default('') | trim | length > 0

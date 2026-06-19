@@ -26,6 +26,17 @@ autoinstall:
       # TODO: PLACEHOLDER — paste your SSH public key here (ssh-ed25519 AAAA...)
       - "PLACEHOLDER_SSH_PUBLIC_KEY"
 
+  network:
+    # Headless Ethernet-only server — no Wi-Fi needed.
+    # Explicit ethernet block; Subiquity persists this to the installed system.
+    version: 2
+    ethernets:
+      all-en:
+        match:
+          name: "en*"
+        dhcp4: true
+        optional: true
+
   packages:
     - openssh-server
 
@@ -42,17 +53,18 @@ autoinstall:
         id: disk0
         path: /dev/nvme0n1
         ptable: gpt
-        wipe: superblock
-        grub_device: false
+        wipe: superblock-recursive
+        grub_device: true
         preserve: false
 
       # EFI system partition — 1 GB (generous; holds multiple kernel generations)
       - type: partition
         id: part-efi
         device: disk0
+        number: 1
         size: 1G
         flag: boot
-        grub_device: false
+        grub_device: true
         preserve: false
 
       - type: format
@@ -70,6 +82,7 @@ autoinstall:
       - type: partition
         id: part-root
         device: disk0
+        number: 2
         size: -1
         grub_device: false
         preserve: false

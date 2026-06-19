@@ -37,6 +37,35 @@ autoinstall:
     layout: ${KEYBOARD_LAYOUT}
     variant: ""
 
+  network:
+    # Wi-Fi-only capable. Two independent paths give connectivity with no wired link:
+    #   1. The installer itself attempts Wi-Fi via the wifis block below (best-effort;
+    #      both links are optional so the install proceeds even if neither comes up
+    #      — the base system installs from the ISO without a network).
+    #   2. The late-command injects a systemd-networkd netplan into the installed
+    #      system so it connects over Wi-Fi on FIRST BOOT, before NetworkManager
+    #      exists, letting Ansible reach it. The desktop role then hands the adapter
+    #      over to NetworkManager (the long-term owner of Wi-Fi on the workstation).
+    # Wired (en*) is still accepted when present and takes over automatically.
+    version: 2
+    ethernets:
+      all-en:
+        match:
+          name: "en*"
+        dhcp4: true
+        optional: true
+    # >>> WIFI (this whole block is stripped by `make render` when WIFI_SSID is blank) >>>
+    wifis:
+      all-wl:
+        match:
+          name: "wl*"
+        dhcp4: true
+        optional: true
+        access-points:
+          "${WIFI_SSID}":
+            password: "${WIFI_PSK}"
+    # <<< WIFI <<<
+
   identity:
     hostname: ${HOSTNAME}
     realname: ""
@@ -53,6 +82,9 @@ autoinstall:
 
   packages:
     - openssh-server
+    # wpa_supplicant is the WPA backend NetworkManager uses for Wi-Fi on the
+    # installed desktop (the full OS has the firmware the installer lacks).
+    - wpasupplicant
     # GNOME desktop is installed by Ansible (desktop role), not here.
 
   storage:
@@ -63,17 +95,18 @@ autoinstall:
         id: disk0
         path: ${OS_DISK}
         ptable: gpt
-        wipe: superblock
-        grub_device: false
+        wipe: superblock-recursive
+        grub_device: true
         preserve: false
 
       # EFI system partition — 1 GB (holds multiple kernel generations)
       - type: partition
         id: part-efi
         device: disk0
+        number: 1
         size: 1G
         flag: boot
-        grub_device: false
+        grub_device: true
         preserve: false
 
       - type: format
@@ -91,8 +124,8 @@ autoinstall:
       - type: partition
         id: part-root
         device: disk0
+        number: 2
         size: -1
-        grub_device: false
         preserve: false
 
       - type: format
@@ -112,6 +145,46 @@ autoinstall:
     - curtin in-target -- systemctl enable ssh
     # Disable any autoinstall-default UFW rules; Ansible configures firewall
     - curtin in-target -- ufw disable || true
+    # >>> WIFI-LATE (this list item is stripped by `make render` when WIFI_SSID is blank) >>>
+    # Keep the installer's persistent netplan ethernet-only. Subiquity copies the
+    # autoinstall network config (including the wifis block) to 00-installer-config.yaml
+    # under systemd-networkd; left there it would claim the Wi-Fi adapter via a udev
+    # rule and block NetworkManager. Rewriting it to ethernet-only keeps Wi-Fi in the
+    # single removable 90-wifi.yaml below, so the desktop role's hand-off to
+    # NetworkManager is clean. (Ethernet stays as a first-boot fallback.)
+    - |
+      cat > /target/etc/netplan/00-installer-config.yaml <<'NETCFG'
+      network:
+        version: 2
+        ethernets:
+          all-en:
+            match:
+              name: "en*"
+            dhcp4: true
+            optional: true
+      NETCFG
+      chmod 600 /target/etc/netplan/00-installer-config.yaml
+    # Inject a systemd-networkd Wi-Fi netplan so the installed server connects over
+    # Wi-Fi on FIRST BOOT — before NetworkManager is installed — so Ansible can reach
+    # it with no wired link. The desktop role removes this file and hands the adapter
+    # to NetworkManager during the first converge. ${WIFI_SSID}/${WIFI_PSK} are
+    # substituted at render time by envsubst.
+    - |
+      cat > /target/etc/netplan/90-wifi.yaml <<'NETPLAN'
+      network:
+        version: 2
+        wifis:
+          wl-all:
+            match:
+              name: "wl*"
+            dhcp4: true
+            optional: true
+            access-points:
+              "${WIFI_SSID}":
+                password: "${WIFI_PSK}"
+      NETPLAN
+      chmod 600 /target/etc/netplan/90-wifi.yaml
+    # <<< WIFI-LATE <<<
 
   updates: security
   shutdown: reboot

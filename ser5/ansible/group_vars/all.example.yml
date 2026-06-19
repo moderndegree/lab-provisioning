@@ -31,6 +31,11 @@ keyboard_layout: "us"
 ssh_authorized_keys:
   - "ssh-ed25519 AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA your_comment_here"
 
+# ─── Wi-Fi (optional) ─────────────────────────────────────────────────────────
+# Managed by NetworkManager in the desktop role. Leave wifi_ssid blank to skip
+# (wired-only hosts). The password lives in the vault as vault_wifi_psk.
+wifi_ssid: ""
+
 # ─── Disk layout ──────────────────────────────────────────────────────────────
 # Verify device names before running: lsblk -d -o NAME,SIZE,MODEL,TRAN
 #
@@ -49,9 +54,11 @@ data_mount: "/data"
 skip_data_disk_format: false
 
 # ─── Tailscale ────────────────────────────────────────────────────────────────
-# TODO: verify latest stable version at https://pkgs.tailscale.com/stable/
-# Update before provisioning; re-run make provision to upgrade in place.
-tailscale_version: "1.80.0"
+# "latest" installs/upgrades to the current stable release (recommended — the
+# Tailscale apt repo only keeps recent versions, so exact pins can age out).
+# To pin, set an exact version that exists at https://pkgs.tailscale.com/stable/
+# (e.g. "1.98.4"); re-run make provision to apply.
+tailscale_version: "latest"
 
 # ─── Feature flags ───────────────────────────────────────────────────────────
 # Optional roles — disabled by default. Flip to true to activate.

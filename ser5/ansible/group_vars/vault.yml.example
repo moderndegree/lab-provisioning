@@ -24,3 +24,7 @@ vault_user_password_hash: "PLACEHOLDER_SHA512_CRYPT_HASH"
 
 # Tailscale ephemeral auth key (from Tailscale admin console → Settings → Keys)
 vault_tailscale_authkey: "tskey-auth-PLACEHOLDER"
+
+# Wi-Fi WPA2 passphrase for the SSID set in all.yml (wifi_ssid).
+# Leave as-is / empty if the host is wired-only.
+vault_wifi_psk: "PLACEHOLDER_WIFI_PASSWORD"

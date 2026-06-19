@@ -25,7 +25,7 @@ help:
 
 ## provision: Converge the host — idempotent, safe to re-run
 provision:
-	ansible-playbook -i $(INVENTORY) $(PLAYBOOK) $(VAULT_ARG)
+	ansible-playbook -i $(INVENTORY) $(PLAYBOOK) $(VAULT_ARG) -e @$(VAULT_FILE)
 
 ## ping: Verify SSH connectivity to mini
 ping:

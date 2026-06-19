@@ -10,7 +10,7 @@ BOOTSTRAP   := .bootstrap.env
 # Listing them explicitly prevents accidental substitution of unrelated shell vars.
 RENDER_VARS := $${USERNAME} $${USER_FULL_NAME} $${HOSTNAME} $${PASSWORD_HASH} \
                $${SSH_PUBLIC_KEY} $${OS_DISK} $${TIMEZONE} $${LOCALE} \
-               $${KEYBOARD_LAYOUT} $${HOST_IP}
+			   $${KEYBOARD_LAYOUT} $${HOST_IP} $${WIFI_SSID} $${WIFI_PSK}
 
 # Vault auth: use .vault_pass file if present; otherwise prompt interactively.
 VAULT_PASS_FILE := $(wildcard .vault_pass)
@@ -22,7 +22,7 @@ else
   VAULT_ARG_RO := --vault-password-file $(VAULT_PASS_FILE)
 endif
 
-.PHONY: init render provision ping syntax-check lint \
+.PHONY: init render provision preflight ping syntax-check lint \
         vault-edit vault-encrypt install-deps help
 
 ## help           List available make targets
@@ -47,7 +47,14 @@ render:
 	@echo "==> Rendering templates from $(BOOTSTRAP)..."
 	@set -a; source $(BOOTSTRAP); set +a; \
 	  envsubst '$(RENDER_VARS)' < autoinstall/user-data.example > autoinstall/user-data; \
-	  envsubst '$(RENDER_VARS)' < ansible/inventory.example.ini > ansible/inventory.ini
+	  envsubst '$(RENDER_VARS)' < ansible/inventory.example.ini > ansible/inventory.ini; \
+	  if [ -z "$${WIFI_SSID}" ]; then \
+	    sed -i -e '/>>> WIFI /,/<<< WIFI <<</d' -e '/>>> WIFI-LATE /,/<<< WIFI-LATE <<</d' autoinstall/user-data; \
+	    echo "==> No WIFI_SSID set — removed Wi-Fi blocks (install will use wired ethernet)."; \
+	  else \
+	    sed -i -e '/>>> WIFI/d' -e '/<<< WIFI/d' autoinstall/user-data; \
+	    echo "==> Wi-Fi configured for SSID: $${WIFI_SSID}"; \
+	  fi
 	@echo "==> Generated:"
 	@echo "    autoinstall/user-data   (flash to USB for autoinstall)"
 	@echo "    ansible/inventory.ini   (Ansible target host)"
@@ -55,9 +62,24 @@ render:
 	@echo "    Validate autoinstall config:"
 	@echo "    cloud-init schema --config-file autoinstall/user-data"
 
+## preflight      Check that config placeholders have been filled in
+preflight:
+	@echo "==> Preflight: scanning for unfilled placeholders..."
+	@bad=0; \
+	if grep -qE 'YOUR_USERNAME|YOUR_HOSTNAME|Your Full Name|your_comment_here|YOUR_GH_USERNAME' ansible/group_vars/all.yml; then \
+	  echo "ERROR: placeholders remain in ansible/group_vars/all.yml"; bad=1; fi; \
+	if head -n1 $(VAULT_FILE) | grep -q '\$$ANSIBLE_VAULT'; then \
+	  echo "    vault.yml is encrypted — skipping secret placeholder scan"; \
+	else \
+	  if grep -qE 'PLACEHOLDER_SHA512_CRYPT_HASH|tskey-auth-PLACEHOLDER|PLACEHOLDER_WIFI_PASSWORD' $(VAULT_FILE); then \
+	    echo "ERROR: placeholders remain in $(VAULT_FILE) (run: make vault-edit)"; bad=1; fi; \
+	fi; \
+	if [ "$$bad" -ne 0 ]; then echo "==> Fill the values above, then re-run."; exit 1; fi; \
+	echo "==> Preflight passed."
+
 ## provision      Converge ser5 end-to-end — idempotent, safe to re-run
-provision:
-	ansible-playbook -i $(INVENTORY) $(PLAYBOOK) $(VAULT_ARG)
+provision: preflight
+	ansible-playbook -i $(INVENTORY) $(PLAYBOOK) $(VAULT_ARG) -e @$(VAULT_FILE)
 
 ## ping           Verify SSH connectivity to ser5
 ping:
