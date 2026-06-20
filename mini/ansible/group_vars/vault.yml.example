@@ -1,0 +1,27 @@
+---
+# Ansible Vault secret stubs for mini.
+# This file (vault.yml.example) is tracked with placeholder values.
+# vault.yml (the real file with secrets) is gitignored.
+#
+# ─── First-time setup ─────────────────────────────────────────────────────────
+#   1. make init           → copies this file to ansible/group_vars/vault.yml
+#   2. Edit vault.yml      → fill in real values (see notes below)
+#   3. make vault-encrypt  → encrypts vault.yml in-place with ansible-vault
+#
+# ─── Generating values ────────────────────────────────────────────────────────
+# Tailscale auth key:
+#   https://login.tailscale.com/admin/settings/keys
+#   Use a reusable or one-off key tagged for mini.
+#
+# Cloudflare Tunnel token:
+#   https://one.dash.cloudflare.com → Networks → Tunnels → Create tunnel
+#   Copy the token from the connector install step.
+#   Leave as PLACEHOLDER to skip tunnel startup (safe; provision won't fail).
+
+# Tailscale ephemeral auth key (from Tailscale admin console → Settings → Keys)
+vault_tailscale_authkey: "tskey-auth-PLACEHOLDER"
+
+# Cloudflare Tunnel token (from Zero Trust dashboard → Networks → Tunnels)
+# The cloudflared role only starts the tunnel when this is non-empty and
+# does not begin with "PLACEHOLDER" — safe to leave as-is until you need it.
+vault_cloudflared_token: "PLACEHOLDER_CLOUDFLARE_TUNNEL_TOKEN"

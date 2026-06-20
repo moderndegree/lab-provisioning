@@ -1,4 +1,10 @@
 ---
+# mini group_vars — copy to all.yml and fill in real values.
+# all.yml is gitignored; all.example.yml (this file, with placeholders) is tracked.
+#
+# Run: make init   → copies this file to ansible/group_vars/all.yml
+# Then edit ansible/group_vars/all.yml with your real values.
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Node identity
 # Single source of truth for the OS user and home dir used by service accounts,

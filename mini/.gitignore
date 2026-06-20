@@ -3,6 +3,8 @@
 .bootstrap.env
 autoinstall/user-data
 ansible/inventory.ini
+ansible/group_vars/all.yml
+ansible/group_vars/vault.yml
 
 # ─── Vault password files — NEVER commit ─────────────────────────────────────
 .vault_pass

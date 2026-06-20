@@ -32,9 +32,11 @@ help:
 
 ## init: Copy *.example files to their real (gitignored) counterparts
 init:
-	@test -f $(BOOTSTRAP)          || cp .bootstrap.env.example $(BOOTSTRAP)
-	@test -f ansible/inventory.ini || cp ansible/inventory.example.ini ansible/inventory.ini
-	@echo "==> Done. Fill in $(BOOTSTRAP), then run: make render"
+	@test -f $(BOOTSTRAP)                              || cp .bootstrap.env.example $(BOOTSTRAP)
+	@test -f ansible/inventory.ini                     || cp ansible/inventory.example.ini ansible/inventory.ini
+	@test -f ansible/group_vars/all.yml                || cp ansible/group_vars/all.example.yml ansible/group_vars/all.yml
+	@test -f ansible/group_vars/vault.yml              || cp ansible/group_vars/vault.yml.example ansible/group_vars/vault.yml
+	@echo "==> Done. Fill in $(BOOTSTRAP) and ansible/group_vars/all.yml, then run: make render"
 
 ## render: Generate autoinstall/user-data and inventory.ini from .bootstrap.env
 render:
