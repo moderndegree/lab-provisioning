@@ -28,7 +28,7 @@ After the first provision: `make provision` is the single converge command. Re-r
 after any change to roles or vars to bring mini to the desired state.
 
 > **Heads-up:** the **first** `make provision` ends by rebooting mini once, to apply the
-> gfx1151 kernel cmdline (`amd_iommu`/`gttsize`/`ttm.pages_limit`). Ansible waits for the
+> gfx1151 kernel cmdline (`iommu=pt`/`amd_iommu=on`/`gttsize`/`ttm.pages_limit`). Ansible waits for the
 > box to come back, so the run still completes cleanly. Steady-state re-runs do **not**
 > reboot (the cmdline is unchanged). Set `auto_reboot: false` in `group_vars/all.yml` to
 > handle the reboot yourself.
@@ -50,10 +50,12 @@ lab-provisioning/
     inventory.ini                   single host: mini
     site.yml                        master playbook
     group_vars/
-      all.yml                       node identity, pinned versions, Ollama env, gpu_backend, flags
-      vault.yml                     ansible-vault encrypted secrets (NEVER commit plaintext)
+      all.example.yml               placeholder template → copied to all.yml by make init
+      all.yml                       (gitignored) node identity, pinned versions, Ollama env, gpu_backend, flags
+      vault.yml.example             placeholder secrets → copied to vault.yml by make init
+      vault.yml                     (gitignored) ansible-vault encrypted secrets (NEVER commit plaintext)
     roles/
-      base/                         kernel cmdline (GRUB), firmware pin, packages, UFW, data disk
+      base/                         kernel cmdline (GRUB), packages, UFW, data disk
       amdgpu_rocm/                  ROCm stack + Vulkan fallback drivers
       ollama/                       Ollama LLM server + systemd override
       harness/                      Node.js, opencode-ai, Hermes Agent + gateway service
@@ -84,8 +86,10 @@ once before the first autoinstall:
 
 1. **Update to the latest BIOS first** (fixes idle noise + DPC latency).
 2. Integrated Graphics / **UMA Frame Buffer Size → 512MB**.
-3. **Disable IOMMU.** (Ansible also passes `amd_iommu=off` on the kernel cmdline as
-   belt-and-suspenders; this kills VFIO passthrough, which is fine for headless inference.)
+3. **Enable IOMMU** (or leave at BIOS default — do **not** disable it). Ansible passes
+   `iommu=pt amd_iommu=on` on the kernel cmdline; IOMMU pass-through mode is required
+   for SVA (Shared Virtual Addressing), which the amdxdna NPU driver uses to avoid
+   "SVA bind device failed" on kernel 7.0. Disabling IOMMU in the BIOS would break this.
 4. **Power mode: Performance** (130W sustained / 160W peak) or **Rack** (140W sustained).
    A headless box should take the throughput and ignore fan noise.
 
@@ -167,7 +171,7 @@ After the first provision (which reboots mini automatically — see above) and a
 kernel or ROCm bump, confirm the GPU stack on mini before trusting it:
 
 ```bash
-cat /proc/cmdline                 # confirm amd_iommu=off + GTT/ttm flags applied
+cat /proc/cmdline                 # confirm iommu=pt amd_iommu=on + GTT/ttm flags applied
                                   # (these only appear after the reboot)
 rocminfo | grep -i gfx1151        # ROCm sees the GPU
 dmesg | grep -i gtt               # GTT sizing
@@ -186,8 +190,6 @@ Vulkan/RADV is the ceiling (~98–103 tok/s on Qwen3-30B; ~170 tok/s on small Mo
 
 - **No ROCm nightlies (7.9–7.12).** They cap memory allocation at 64 GB — useless on
   this 128 GB box. Stay on the pinned 7.2.x production stream.
-- **Never install `linux-firmware-20251125`** — it breaks ROCm on Strix Halo. The `base`
-  role pins that build out via `/etc/apt/preferences.d/no-bad-firmware`.
 - **Leave RAM headroom.** Very large context (e.g. 200k on a 30B) can OOM and crash the
   whole box on unified memory.
 - **Re-verify after any bump.** Re-run the verify block above after any kernel or ROCm
@@ -274,8 +276,10 @@ tag/digest for reproducibility and set `cloudflared_autoupdate: false`.
 All operator-specific values live in `.bootstrap.env` (gitignored). Run once:
 
 ```bash
-make init        # copies .bootstrap.env.example → .bootstrap.env
-                 #        inventory.example.ini  → ansible/inventory.ini
+make init        # copies .bootstrap.env.example  → .bootstrap.env
+                 #        inventory.example.ini    → ansible/inventory.ini
+                 #        all.example.yml          → ansible/group_vars/all.yml
+                 #        vault.yml.example        → ansible/group_vars/vault.yml
 ```
 
 Then edit `.bootstrap.env`. If you already have `ser5/.bootstrap.env` with your
@@ -321,8 +325,8 @@ Change the codename in `roles/amdgpu_rocm/defaults/main.yml` if AMD ships a 26.0
 **TODO 2 — Minimum kernel version for gfx1151 — RESOLVED**
 The gfx1151 stability floor is kernel **>= 6.18.4**. Ubuntu Server 26.04 LTS ships
 kernel 7.0, which clears it with no HWE or mainline-PPA juggling — so the `base` role
-installs no extra kernel package. **Do NOT install `linux-firmware-20251125`** — it
-breaks ROCm on Strix Halo; the `base` role pins that build out via apt preferences.
+installs no extra kernel package. The `linux-firmware-20251125` ROCm breakage was fixed
+upstream in 2026; no apt pin is required.
 
 **TODO 3 — Hermes Agent gateway dashboard port**  
 `hermes_dashboard_port: 8080` is based on community reports and is now **informational

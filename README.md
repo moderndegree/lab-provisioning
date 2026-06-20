@@ -44,14 +44,14 @@ lab-provisioning/
 │   ├── Makefile
 │   └── ansible/
 │       ├── site.yml
-│       ├── inventory.ini
+│       ├── inventory.example.ini
 │       ├── requirements.yml
 │       ├── group_vars/
-│       │   ├── all.yml      node identity, pinned versions, Ollama/ROCm config
-│       │   └── vault.yml    ansible-vault encrypted secrets
+│       │   ├── all.example.yml      placeholder template (tracked); all.yml is gitignored
+│       │   └── vault.yml.example    placeholder secrets (tracked); vault.yml is gitignored
 │       └── roles/{base,amdgpu_rocm,ollama,harness,tailscale,cloudflared}/
 │   └── autoinstall/
-│       ├── user-data        cloud-init NoCloud
+│       ├── user-data.example    ${PLACEHOLDER} template (tracked); user-data is gitignored
 │       └── meta-data
 └── ser5/                    Beelink SER5 — workstation + companion
     ├── README.md
