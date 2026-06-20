@@ -53,6 +53,13 @@ data_mount: "/data"
 # When true, ensure the partition has label 'data': e2label /dev/sda1 data
 skip_data_disk_format: false
 
+# ─── Node.js / opencode-ai ───────────────────────────────────────────────────
+# Node version installed by `n` into the user prefix (~/.n). Use "lts", "latest",
+# or a pinned version like "22.14.0". Re-run make provision to change.
+node_version: "lts"
+# opencode-ai pinned npm version. Update and re-run make provision to upgrade.
+opencode_version: "1.17.8"
+
 # ─── Tailscale ────────────────────────────────────────────────────────────────
 # "latest" installs/upgrades to the current stable release (recommended — the
 # Tailscale apt repo only keeps recent versions, so exact pins can age out).

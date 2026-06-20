@@ -96,10 +96,8 @@
   community.general.ufw:
     state: enabled
 
-# ─── Data disk (second NVMe) ─────────────────────────────────────────────────
-# The OS disk is /dev/nvme0n1 (autoinstall). The data disk is /dev/nvme1n1.
-# Ansible partitions and formats it exactly once (idempotency guard below).
-# Set skip_data_disk_format: true in group_vars/all.yml if already prepared.
+# ─── Data disk ───────────────────────────────────────────────────────────────
+# Skipped entirely when has_data_disk: false — /data is a plain dir on root.
 
 - name: Check if data partition already has a filesystem
   ansible.builtin.command:
@@ -107,10 +105,13 @@
   register: data_fs_check
   changed_when: false
   failed_when: false
-  when: not (skip_data_disk_format | bool)
+  when:
+    - has_data_disk | bool
+    - not (skip_data_disk_format | bool)
 
 - name: Partition and format data disk (when missing or not ext4)
   when:
+    - has_data_disk | bool
     - not (skip_data_disk_format | bool)
     - data_fs_check.rc != 0 or (data_fs_check.stdout | trim) != 'ext4'
   block:
@@ -142,9 +143,6 @@
     group: root
     mode: "0755"
 
-# Mount unconditionally: skip_data_disk_format only skips partition+format, NOT the
-# mount. After an OS reflash the data disk keeps its filesystem but /etc/fstab is
-# gone, so a "prepared" disk (skip=true) still must be (re)mounted and re-added here.
 - name: Mount data disk and add to fstab
   ansible.posix.mount:
     path: "{{ data_mount }}"
@@ -152,6 +150,7 @@
     fstype: ext4
     opts: defaults,noatime
     state: mounted
+  when: has_data_disk | bool
 
 - name: Create standard data subdirectories
   ansible.builtin.file:

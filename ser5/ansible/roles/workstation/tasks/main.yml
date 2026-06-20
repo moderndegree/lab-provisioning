@@ -52,5 +52,130 @@
   register: galaxy_install
   changed_when: "'Nothing to do' not in galaxy_install.stdout"
 
-# TODO: Optionally install a pinned Node.js / pnpm here if the user's dev workflow
-# requires it. Omitted from the base workstation role to keep it minimal.
+# ─── Node.js via NodeSource LTS (v22.x) — bootstrap only ─────────────────────
+# Provides a recent npm to bootstrap the user-space toolchain below. After this,
+# `n` manages Node versions under the user's own prefix (no sudo).
+- name: Check if NodeSource apt repository is configured
+  ansible.builtin.stat:
+    path: /etc/apt/sources.list.d/nodesource.list
+  register: nodesource_list
+
+- name: Download NodeSource LTS setup script
+  ansible.builtin.get_url:
+    url: "https://deb.nodesource.com/setup_lts.x"
+    dest: /tmp/nodesource_setup.sh
+    mode: "0700"
+  when: not nodesource_list.stat.exists
+
+- name: Run NodeSource setup script (configures apt repo)
+  ansible.builtin.command:
+    cmd: bash /tmp/nodesource_setup.sh
+  changed_when: true
+  when: not nodesource_list.stat.exists
+
+- name: Install Node.js
+  ansible.builtin.apt:
+    name: nodejs
+    state: present
+    update_cache: true
+
+# ─── Migration cleanup: remove old root-owned global packages ────────────────
+# Earlier versions of this role installed n / opencode-ai into the system prefix
+# (/usr/lib/node_modules, root-owned, sudo to update). Remove them so the
+# user-owned copies below are the only ones. Idempotent: no-op once gone.
+- name: Remove old system-global n / opencode-ai (pre-user-prefix installs)
+  community.general.npm:
+    name: "{{ item }}"
+    global: true
+    state: absent
+  loop:
+    - n
+    - opencode-ai
+
+# ─── User-owned npm/n prefixes (no-sudo global installs) ─────────────────────
+# Split layout: `n` manages Node under ~/.n (N_PREFIX); npm installs globals into
+# ~/.npm-global. Both are user-owned, so Node version installs and global npm
+# packages never need sudo.
+- name: Ensure user-owned n + npm prefix directories exist
+  ansible.builtin.file:
+    path: "{{ user_home }}/{{ item }}"
+    state: directory
+    owner: "{{ username }}"
+    group: "{{ username }}"
+    mode: "0755"
+  loop:
+    - .n
+    - .npm-global
+
+- name: Configure npm to use the user-owned global prefix
+  ansible.builtin.copy:
+    dest: "{{ user_home }}/.npmrc"
+    content: "prefix={{ user_home }}/.npm-global\n"
+    owner: "{{ username }}"
+    group: "{{ username }}"
+    mode: "0644"
+
+- name: Set N_PREFIX and PATH for the user's interactive shells
+  ansible.builtin.blockinfile:
+    path: "{{ user_home }}/.bashrc"
+    create: true
+    owner: "{{ username }}"
+    group: "{{ username }}"
+    mode: "0644"
+    marker: "# {mark} ANSIBLE MANAGED — node (n) user prefix"
+    block: |
+      export N_PREFIX="$HOME/.n"
+      export PATH="$N_PREFIX/bin:$HOME/.npm-global/bin:$PATH"
+
+# ─── n (Node.js version manager) — user space ────────────────────────────────
+- name: Install n (Node.js version manager) into the npm user prefix
+  community.general.npm:
+    name: n
+    global: true
+    state: present
+  become: true
+  become_user: "{{ username }}"
+  environment:
+    HOME: "{{ user_home }}"
+    npm_config_prefix: "{{ user_home }}/.npm-global"
+  # Switch Node versions with `n latest` / `n lts` — installs into ~/.n, no sudo.
+
+# ─── Node.js runtime via n (installs into ~/.n) ──────────────────────────────
+- name: Check the active Node version under N_PREFIX
+  ansible.builtin.command:
+    cmd: "{{ user_home }}/.n/bin/node --version"
+  become: true
+  become_user: "{{ username }}"
+  register: n_node_version
+  changed_when: false
+  failed_when: false
+
+- name: Install the target Node version with n
+  ansible.builtin.command:
+    cmd: "{{ user_home }}/.npm-global/bin/n {{ node_version }}"
+  become: true
+  become_user: "{{ username }}"
+  environment:
+    HOME: "{{ user_home }}"
+    N_PREFIX: "{{ user_home }}/.n"
+  register: n_install
+  # Re-run n when no Node is active yet, or when the install/download actually ran.
+  changed_when: >-
+    ('installed' in (n_install.stdout | lower))
+    or ('installing' in (n_install.stdout | lower))
+    or ('downloading' in ((n_install.stdout ~ n_install.stderr) | lower))
+  when: n_node_version.rc != 0 or node_version not in ('lts', 'latest')
+
+# ─── opencode-ai (global npm package) — user space ───────────────────────────
+- name: Install opencode-ai into the npm user prefix
+  community.general.npm:
+    name: opencode-ai
+    version: "{{ opencode_version }}"
+    global: true
+    state: present
+  become: true
+  become_user: "{{ username }}"
+  environment:
+    HOME: "{{ user_home }}"
+    npm_config_prefix: "{{ user_home }}/.npm-global"
+  # Pinned to {{ opencode_version }} — update opencode_version in group_vars/all.yml to upgrade

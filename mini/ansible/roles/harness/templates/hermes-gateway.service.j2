@@ -6,14 +6,18 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User={{ node_user }}
-Group={{ node_user }}
+# Hermes' system-level gateway requires root (see `hermes gateway start --system`).
+# Runs as root, but HOME/HERMES_HOME still point at the node user's config + data.
+User=root
+Group=root
 Environment=HOME={{ node_home }}
 Environment=HERMES_HOME={{ hermes_home }}
 # Secrets (LLM provider API key, etc.) sourced from vault-managed environment file.
 # The leading dash means systemd ignores a missing file (graceful degradation).
 EnvironmentFile=-/etc/hermes/environment
-ExecStart={{ hermes_bin }} gateway start
+# --system: run the Linux system-level gateway service.
+# --all:    clear any stale gateway processes before starting (avoids restart loops).
+ExecStart={{ hermes_bin }} gateway start --system --all
 Restart=on-failure
 RestartSec=15
 StandardOutput=journal

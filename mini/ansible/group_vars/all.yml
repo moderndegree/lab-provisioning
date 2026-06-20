@@ -6,7 +6,7 @@
 # node_user MUST match `username:` in autoinstall/user-data (cloud-init is static
 # and cannot read this var). node_hostname likewise matches the autoinstall hostname.
 # ─────────────────────────────────────────────────────────────────────────────
-node_user: "blewis"
+node_user: "YOUR_USERNAME"
 node_home: "/home/{{ node_user }}"
 node_hostname: "{{ inventory_hostname }}"
 
@@ -44,11 +44,11 @@ gpu_backend: "rocm"
 # Set to 127.0.0.1 to keep Ollama local-only (Hermes still reaches it via loopback).
 ollama_host: "0.0.0.0"
 ollama_context_length: 131072
-ollama_num_parallel: 1
+ollama_num_parallel: 3
 ollama_flash_attention: 1
 ollama_kv_cache_type: "q8_0"
 ollama_keep_alive: "30m"
-ollama_max_loaded_models: 1
+ollama_max_loaded_models: 3
 
 # Required for gfx1151 — Strix Halo is NOT on AMD's official ROCm support matrix.
 # HSA_OVERRIDE_GFX_VERSION tricks ROCm into using the closest supported target (RDNA3/gfx1100).
@@ -56,17 +56,18 @@ ollama_max_loaded_models: 1
 hsa_override_gfx_version: "11.5.1"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Data disk — second NVMe (never touched by autoinstall)
+# Data disk
 # ─────────────────────────────────────────────────────────────────────────────
-# TODO: PLACEHOLDER — confirm the device path after OS install (run: lsblk -d)
+# Set false when there is no dedicated data disk (single-disk node).
+# /data will be a plain directory on the root filesystem instead.
+has_data_disk: false
+
+# Only used when has_data_disk: true.
 data_disk_device: "/dev/nvme1n1"
 data_mount: "/data"
 
 # Set true to skip first-time partition+format (disk is already prepared).
-# When false: Ansible partitions + formats only if the disk has no filesystem.
-# NOTE: the disk is mounted/added to fstab by LABEL=data regardless of this flag.
-# If you set skip_data_disk_format: true for an externally-prepared disk, ensure
-# its partition is labelled `data` (e.g. `e2label /dev/nvme1n1p1 data`).
+# Only relevant when has_data_disk: true.
 skip_data_disk_format: false
 
 # ─────────────────────────────────────────────────────────────────────────────

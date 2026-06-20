@@ -15,11 +15,13 @@ Bare-metal IaC for the Minisforum MS-S1 Max (AMD Ryzen AI Max+ 395 "Strix Halo",
 ```
 1.  Wipe the OS disk and boot the autoinstall USB
 2.  Autoinstall runs unattended → SSH-reachable box (≈ 10 min)
-3.  From your laptop:  git clone <REPO_URL>  &&  cd lab-provisioning
-4.  Edit ansible/inventory.ini  →  set ansible_host= to mini's IP
-5.  make install-deps            (once — installs Ansible collections)
-6.  make vault-encrypt           (once — encrypt vault.yml after filling in secrets)
-7.  make provision               (idempotent — safe to re-run at any time)
+3.  From your laptop:  git clone https://github.com/moderndegree/lab-provisioning  &&  cd lab-provisioning/mini
+4.  make init                    (once — copies *.example files to local gitignored counterparts)
+5.  Edit .bootstrap.env          (credentials, OS disk, mini's IP — copy from ser5/.bootstrap.env and change HOSTNAME + HOST_IP)
+6.  make render                  (generates autoinstall/user-data and ansible/inventory.ini)
+7.  make install-deps            (once — installs Ansible collections)
+8.  make vault-encrypt           (once — encrypt vault.yml after filling in secrets)
+9.  make provision               (idempotent — safe to re-run at any time)
 ```
 
 After the first provision: `make provision` is the single converge command. Re-run it
@@ -93,22 +95,20 @@ once before the first autoinstall:
 
 1. Download Ubuntu Server 26.04 LTS ISO
 2. Flash to USB (Balena Etcher, `dd`, or Ventoy)
-3. Replace the ISO's `NoCloud` data source with the files in `autoinstall/`:
-   - `autoinstall/user-data` → the autoinstall config
+3. Run `make init` then fill in `.bootstrap.env`, then `make render` to generate `autoinstall/user-data`
+4. Replace the ISO's `NoCloud` data source with the files in `autoinstall/`:
+   - `autoinstall/user-data` → the rendered autoinstall config
    - `autoinstall/meta-data` → empty file (required)
 
    The standard approach is to serve them via a second partition or a local HTTP
    server at boot. See: https://ubuntu.com/server/docs/install/autoinstall
-
-4. **Before flashing**: fill in the two placeholders in `autoinstall/user-data`
-   (SSH public key and password hash — see Placeholder Table below).
 
 ---
 
 ## Node identity (user / hostname)
 
 The OS user and hostname are parameterized in `ansible/group_vars/all.yml` as a single
-source of truth — `node_user` (default `blewis`), `node_home`, and `node_hostname`
+source of truth — `node_user` (default `YOUR_USERNAME`), `node_home`, and `node_hostname`
 (defaults to the inventory host name). Everything Ansible touches (service accounts,
 file ownership, home paths, the SSH login via `ansible_user`, the Tailscale hostname)
 derives from these.
@@ -269,22 +269,41 @@ tag/digest for reproducibility and set `cloudflared_autoupdate: false`.
 
 ---
 
+## Bootstrap Setup
+
+All operator-specific values live in `.bootstrap.env` (gitignored). Run once:
+
+```bash
+make init        # copies .bootstrap.env.example → .bootstrap.env
+                 #        inventory.example.ini  → ansible/inventory.ini
+```
+
+Then edit `.bootstrap.env`. If you already have `ser5/.bootstrap.env` with your
+credentials, copy it and change just two lines:
+
+```bash
+cp ../ser5/.bootstrap.env .bootstrap.env
+# then edit:
+#   HOSTNAME=mini
+#   HOST_IP=<mini’s IP after autoinstall>
+```
+
+Finally render the generated files:
+
+```bash
+make render
+```
+
+---
+
 ## Placeholder Table
 
-Every value that must be supplied before provisioning is listed here.
-Search for `PLACEHOLDER_` in the repo to find each one.
+After `make render`, only the vault secrets still need manual entry:
 
-| # | Placeholder | Where | How to generate |
-|---|-------------|-------|-----------------|
-| 1 | `PLACEHOLDER_SSH_PUBLIC_KEY` | `autoinstall/user-data` | `cat ~/.ssh/id_ed25519.pub` |
-| 2 | `PLACEHOLDER_PASSWORD_HASH` | `autoinstall/user-data` | `mkpasswd --method=SHA-512` (from the `whois` package) — set once at install; not managed by Ansible |
-| 3 | `PLACEHOLDER_TAILSCALE_AUTH_KEY` | `vault.yml` → `vault_tailscale_authkey` | https://login.tailscale.com/admin/settings/keys |
-| 4 | `PLACEHOLDER_HERMES_API_KEY` | `vault.yml` → `vault_hermes_api_key` | Your LLM provider (OpenRouter, OpenAI, Nous Portal, etc.) |
-| 5 | `PLACEHOLDER_CLOUDFLARED_TOKEN` | `vault.yml` → `vault_cloudflared_token` | Cloudflare Zero Trust → Networks → Tunnels → Create a tunnel → Cloudflared (tunnel stays stopped until set) |
-| 6 | `PLACEHOLDER_MINI_IP` | `ansible/inventory.ini` | IP address or hostname of mini after autoinstall |
-| 7 | `PLACEHOLDER_MINI_IP` | `ansible/inventory.ini` → `ansible_host` | Run `ip a` on mini after install |
-| 8 | `data_disk_device` | `ansible/group_vars/all.yml` | Confirm with `lsblk -d` — default `/dev/nvme1n1` |
-| 9 | `<REPO_URL>` | Makefile / README | Your git remote URL |
+| # | Placeholder | Where | How to get it |
+|---|-------------|-------|---------------|
+| 1 | `PLACEHOLDER_TAILSCALE_AUTH_KEY` | `vault.yml` → `vault_tailscale_authkey` | https://login.tailscale.com/admin/settings/keys |
+| 2 | `PLACEHOLDER_CLOUDFLARED_TOKEN` | `vault.yml` → `vault_cloudflared_token` | Cloudflare Zero Trust → Networks → Tunnels → Create a tunnel → Cloudflared (tunnel stays stopped until set) |
 
 ---
 

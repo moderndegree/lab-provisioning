@@ -46,7 +46,9 @@
 
 - name: Install Hermes Agent via official NousResearch installer
   ansible.builtin.shell:
-    cmd: "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"
+    # Redirect stdin from /dev/null so the installer's interactive `hermes setup`
+    # wizard gets immediate EOF instead of blocking forever (no TTY under Ansible).
+    cmd: "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash </dev/null"
     executable: /bin/bash
   environment:
     HOME: "{{ node_home }}"

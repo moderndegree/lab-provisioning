@@ -17,9 +17,6 @@
 # Tailscale auth key (reusable or ephemeral — from https://login.tailscale.com/admin/settings/keys)
 vault_tailscale_authkey: "PLACEHOLDER_TAILSCALE_AUTH_KEY"
 
-# Hermes Agent LLM provider API key (e.g. OpenRouter, OpenAI, Anthropic, Nous Portal)
-vault_hermes_api_key: "PLACEHOLDER_HERMES_API_KEY"
-
 # Cloudflare Tunnel connector token. Create a tunnel in the Cloudflare Zero Trust
 # dashboard (Networks → Tunnels → Create a tunnel → Cloudflared) and paste the
 # token here. This is the ONLY Cloudflare secret in the repo; hostnames and Access

@@ -4,6 +4,13 @@ INVENTORY   := $(ANSIBLE_DIR)/inventory.ini
 PLAYBOOK    := $(ANSIBLE_DIR)/site.yml
 VAULT_FILE  := $(ANSIBLE_DIR)/group_vars/vault.yml
 REQS_FILE   := $(ANSIBLE_DIR)/requirements.yml
+BOOTSTRAP   := .bootstrap.env
+
+# Variables that envsubst will substitute in template files.
+# Listing them explicitly prevents accidental substitution of unrelated shell vars.
+RENDER_VARS := $${USERNAME} $${USER_FULL_NAME} $${HOSTNAME} $${PASSWORD_HASH} \
+               $${SSH_PUBLIC_KEY} $${OS_DISK} $${TIMEZONE} $${LOCALE} \
+               $${KEYBOARD_LAYOUT} $${HOST_IP} $${WIFI_SSID} $${WIFI_PSK}
 
 # Vault auth: if a gitignored .vault_pass file exists, use it automatically
 # (no prompts — and lets `make syntax-check`/`lint` load the encrypted vault).
@@ -17,11 +24,34 @@ else
   VAULT_ARG_RO := --vault-password-file $(VAULT_PASS_FILE)
 endif
 
-.PHONY: provision ping syntax-check lint vault-edit vault-encrypt install-deps help
+.PHONY: provision ping syntax-check lint vault-edit vault-encrypt install-deps init render help
 
 ## help: List available targets
 help:
 	@grep -E '^##' Makefile | sed 's/^## //'
+
+## init: Copy *.example files to their real (gitignored) counterparts
+init:
+	@test -f $(BOOTSTRAP)          || cp .bootstrap.env.example $(BOOTSTRAP)
+	@test -f ansible/inventory.ini || cp ansible/inventory.example.ini ansible/inventory.ini
+	@echo "==> Done. Fill in $(BOOTSTRAP), then run: make render"
+
+## render: Generate autoinstall/user-data and inventory.ini from .bootstrap.env
+render:
+	@test -f $(BOOTSTRAP) || { echo "ERROR: $(BOOTSTRAP) not found. Run: make init first"; exit 1; }
+	@echo "==> Rendering templates from $(BOOTSTRAP)..."
+	@set -a; source $(BOOTSTRAP); set +a; \
+	  envsubst '$(RENDER_VARS)' < autoinstall/user-data.example > autoinstall/user-data; \
+	  envsubst '$(RENDER_VARS)' < ansible/inventory.example.ini > ansible/inventory.ini; \
+	  if [ -z "$${WIFI_SSID}" ]; then \
+	    sed -i '/>>> WIFI /,/<<< WIFI <<</d' autoinstall/user-data; \
+	    echo "==> No WIFI_SSID set — removed Wi-Fi block (wired ethernet only)."; \
+	  else \
+	    sed -i -e '/>>> WIFI/d' -e '/<<< WIFI/d' autoinstall/user-data; \
+	    echo "==> Wi-Fi configured for SSID: $${WIFI_SSID}"; \
+	  fi
+	@echo "==> Generated: autoinstall/user-data  ansible/inventory.ini"
+	@echo "    Validate:  cloud-init schema --config-file autoinstall/user-data"
 
 ## provision: Converge the host — idempotent, safe to re-run
 provision:
