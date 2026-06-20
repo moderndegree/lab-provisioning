@@ -10,34 +10,22 @@
 # stability floor of >= 6.18.4 with no HWE/mainline-PPA juggling. The GA kernel is
 # sufficient — no extra kernel package is installed here.
 
-# ─── gfx1151 bad firmware block ───────────────────────────────────────────────
-# linux-firmware build 20251125 breaks ROCm on Strix Halo. Pin it to a negative
-# priority so apt will never select that specific version, while still allowing
-# all other linux-firmware updates.
-- name: Block known-bad linux-firmware build (breaks ROCm on Strix Halo)
-  ansible.builtin.copy:
-    dest: /etc/apt/preferences.d/no-bad-firmware
-    owner: root
-    group: root
-    mode: "0644"
-    content: |
-      # Managed by Ansible (base role).
-      # linux-firmware 20251125 breaks ROCm on gfx1151 — never install it.
-      Package: linux-firmware
-      Pin: version 20251125*
-      Pin-Priority: -1
-
 # ─── Kernel cmdline (GRUB) ────────────────────────────────────────────────────
-# gfx1151 unified-memory tuning, reapplied on every provision (lives on the SSD):
-#   amd_iommu=off            belt-and-suspenders with the BIOS IOMMU-off setting
-#                            (kills VFIO passthrough; fine for headless inference)
+# gfx1151 unified-memory tuning + NPU/SVA fix, reapplied on every provision:
+#   iommu=pt                 IOMMU pass-through mode — required for SVA (Shared
+#                            Virtual Addressing) used by the amdxdna NPU driver.
+#                            Fixes "SVA bind device failed" on kernel 7.0.
+#                            NOTE: replaces the earlier amd_iommu=off approach;
+#                            pass-through still exposes no devices to guests so
+#                            it is safe on this headless inference node.
+#   amd_iommu=on             Explicitly enable AMD IOMMU (SVA requires it).
 #   amdgpu.gttsize=131072    128 GB GTT (deprecated on newer kernels but harmless)
 #   ttm.pages_limit=33554432 128 GB TTM page pool — the load-bearing flag
-- name: Set gfx1151 kernel cmdline in GRUB
+- name: Set gfx1151 kernel cmdline in GRUB (IOMMU/SVA + unified-memory tuning)
   ansible.builtin.lineinfile:
     path: /etc/default/grub
     regexp: '^GRUB_CMDLINE_LINUX_DEFAULT='
-    line: 'GRUB_CMDLINE_LINUX_DEFAULT="amd_iommu=off amdgpu.gttsize=131072 ttm.pages_limit=33554432"'
+    line: 'GRUB_CMDLINE_LINUX_DEFAULT="quiet splash iommu=pt amd_iommu=on amdgpu.gttsize=131072 ttm.pages_limit=33554432"'
     state: present
     create: true
     mode: "0644"
