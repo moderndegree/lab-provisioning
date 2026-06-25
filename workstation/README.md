@@ -16,11 +16,11 @@ symlink into, your development machine.
 
 ## The split that drives everything
 
-`oracle-32k` (Qwen, text-only, reasoning-on) hosts the tool-free reasoning agents
-(planner, architect, reviewer, security-auditor, doc-writer). `toolcaller-32k`
+`oracle-64k` (Qwen, text-only, reasoning-on) hosts the tool-free reasoning agents
+(planner, architect, reviewer, security-auditor, doc-writer). `toolcaller-64k`
 (Nemotron, sole tool-caller, reasoning-off) hosts the orchestrator and the
 coder/tester/devops agents. Two async escalations — `oracle-batch-192k` (whole-repo
-reads) and `heavy-64k` (120B hard calls) — are routed by the orchestrator and
+reads) and `heavy-128k` (120B hard calls) — are routed by the orchestrator and
 accepted at minutes-per-response.
 
 All four model variants are built on `mini` by the `ollama` role

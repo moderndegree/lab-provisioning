@@ -8,7 +8,7 @@ in the Hermes gateway (`ser5/ansible/roles/hermes`), not by per-session discipli
 
 | Tier | Route | Use for |
 |---|---|---|
-| **L — Sovereign** | Ollama on `mini` (`oracle-32k` / `toolcaller-32k`) | Default for all client-confidential work |
+| **L — Sovereign** | Ollama on `mini` (`oracle-64k` / `toolcaller-64k`) | Default for all client-confidential work |
 | **B — Governed** | Claude via AWS Bedrock (zero-retention, prompt caching, Flex) | Vision-critical, frontier overflow, high-stakes deliverables |
 | **Z — Throwaway** | OpenCode Zen free models | OSS / scaffolding only — **never** client deliverables |
 

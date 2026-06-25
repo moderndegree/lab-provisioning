@@ -2,76 +2,129 @@
   "provider": {
     "ollama": {
       "npm": "@ai-sdk/openai-compatible",
-      "options": { "baseURL": "http://mini:11434/v1" },
+      "options": {
+        "baseURL": "http://mini:11434/v1"
+      },
       "models": {
-        "oracle-32k":        { "options": { "stream": false }, "limit": { "context": 32768,  "output": 4096 } },
-        "toolcaller-32k":    { "options": { "stream": false, "think": false }, "limit": { "context": 32768,  "output": 2048 } },
-        "oracle-batch-192k": { "options": { "stream": false }, "limit": { "context": 196608, "output": 8192 } },
-        "heavy-64k":         { "options": { "stream": false }, "limit": { "context": 65536,  "output": 8192 } }
+        "oracle-batch-192k": {
+          "options": {
+            "stream": false
+          },
+          "limit": {
+            "context": 196608,
+            "output": 8192
+          }
+        },
+        "oracle-64k": {
+          "options": {
+            "stream": false
+          },
+          "limit": {
+            "context": 65536,
+            "output": 8192
+          }
+        },
+        "toolcaller-64k": {
+          "options": {
+            "stream": false,
+            "think": false
+          },
+          "limit": {
+            "context": 65536,
+            "output": 8192
+          }
+        },
+        "heavy-128k": {
+          "options": {
+            "stream": false
+          },
+          "limit": {
+            "context": 131072,
+            "output": 8192
+          }
+        }
       }
     }
   },
-  "model": "ollama/toolcaller-32k",
-  "small_model": "ollama/oracle-32k",
-  "compaction": { "auto": true, "prune": true, "tail_turns": 2, "reserved": 8192 },
-  "instructions": ["AGENTS.md", ".moderndegree/skills/*.md"],
+  "model": "ollama/toolcaller-64k",
+  "small_model": "ollama/oracle-64k",
+  "compaction": {
+    "auto": true,
+    "prune": true,
+    "tail_turns": 2,
+    "reserved": 8192
+  },
+  "instructions": [
+    "AGENTS.md",
+    ".moderndegree/skills/*.md"
+  ],
   "agent": {
     "build": {
       "mode": "primary",
-      "model": "ollama/toolcaller-32k",
+      "model": "ollama/toolcaller-64k",
       "description": "Orchestrator. Gathers context, dispatches subagents, gates on @@RESULT.",
       "prompt": "{file:./.moderndegree/prompts/orchestrator.md}"
     },
     "planner": {
       "mode": "subagent",
-      "model": "ollama/oracle-32k",
+      "model": "ollama/oracle-64k",
       "description": "Produces an implementation plan from context provided in-prompt. Reasoning only.",
-      "permission": { "*": "deny" },
+      "permission": {
+        "*": "deny"
+      },
       "prompt": "{file:./.moderndegree/prompts/planner.md}"
     },
     "architect": {
       "mode": "subagent",
-      "model": "ollama/oracle-32k",
+      "model": "ollama/oracle-64k",
       "description": "Designs structure from provided context. Reasoning only.",
-      "permission": { "*": "deny" },
+      "permission": {
+        "*": "deny"
+      },
       "prompt": "{file:./.moderndegree/prompts/architect.md}"
     },
     "reviewer": {
       "mode": "subagent",
-      "model": "ollama/oracle-32k",
+      "model": "ollama/oracle-64k",
       "description": "Critiques diffs handed to it. Reasoning only.",
-      "permission": { "*": "deny" },
+      "permission": {
+        "*": "deny"
+      },
       "prompt": "{file:./.moderndegree/prompts/reviewer.md}"
     },
     "security-auditor": {
       "mode": "subagent",
-      "model": "ollama/oracle-32k",
+      "model": "ollama/oracle-64k",
       "description": "Audits provided diffs for security issues. Reasoning only.",
-      "permission": { "*": "deny" },
+      "permission": {
+        "*": "deny"
+      },
       "prompt": "{file:./.moderndegree/prompts/security.md}"
     },
     "doc-writer": {
       "mode": "subagent",
-      "model": "ollama/oracle-32k",
+      "model": "ollama/oracle-64k",
       "description": "Writes docs from provided material. Reasoning only.",
-      "permission": { "*": "deny" },
+      "permission": {
+        "*": "deny"
+      },
       "prompt": "{file:./.moderndegree/prompts/docs.md}"
     },
     "coder": {
       "mode": "subagent",
-      "model": "ollama/toolcaller-32k",
+      "model": "ollama/toolcaller-64k",
       "description": "Implements changes. Edits files.",
       "prompt": "{file:./.moderndegree/prompts/coder.md}"
     },
     "tester": {
       "mode": "subagent",
-      "model": "ollama/toolcaller-32k",
+      "model": "ollama/toolcaller-64k",
       "description": "Writes and runs tests, reads results.",
       "prompt": "{file:./.moderndegree/prompts/tester.md}"
     },
     "devops": {
       "mode": "subagent",
-      "model": "ollama/toolcaller-32k",
+      "model": "ollama/toolcaller-64k",
       "description": "Infra and shell operations.",
       "prompt": "{file:./.moderndegree/prompts/devops.md}"
     }

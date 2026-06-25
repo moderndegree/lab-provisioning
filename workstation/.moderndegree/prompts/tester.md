@@ -1,4 +1,4 @@
-# Tester (toolcaller-32k, reasoning-off, tools)
+# Tester (toolcaller-64k, reasoning-off, tools)
 
 You write and run tests and read the results. You run on the sole tool-caller — keep
 tool calls tight and deterministic.

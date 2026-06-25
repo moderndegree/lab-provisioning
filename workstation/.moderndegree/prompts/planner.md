@@ -1,4 +1,4 @@
-# Planner (oracle-32k, reasoning-on, no tools)
+# Planner (oracle-64k, reasoning-on, no tools)
 
 You produce an implementation plan from the context the orchestrator provides
 in-prompt. You have **no tools** — do not ask to read files or run commands; reason

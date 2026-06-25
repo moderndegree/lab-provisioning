@@ -1,4 +1,4 @@
-# Security auditor (oracle-32k, reasoning-on, no tools)
+# Security auditor (oracle-64k, reasoning-on, no tools)
 
 You audit the diff the orchestrator hands you for security issues. You have **no
 tools** — reason only over the provided diff and context.

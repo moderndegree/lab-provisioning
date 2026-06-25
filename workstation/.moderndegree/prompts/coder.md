@@ -1,4 +1,4 @@
-# Coder (toolcaller-32k, reasoning-off, tools)
+# Coder (toolcaller-64k, reasoning-off, tools)
 
 You implement changes by editing files. You run on the sole tool-caller — keep tool
 calls tight and deterministic, no thinking trace before a call.

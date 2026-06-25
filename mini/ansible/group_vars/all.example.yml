@@ -69,17 +69,17 @@ hsa_override_gfx_version: "11.5.1"
 # ─────────────────────────────────────────────────────────────────────────────
 # The context tier IS the design. Reasoning is baked into each variant where
 # possible. Qwen3.6 toggles with /think in SYSTEM (ON for all oracle variants).
-# The toolcaller's reasoning is disabled at the API level via think:false in
-# opencode.json (see workstation/opencode.json) — no SYSTEM directive needed.
+# All models now use qwen3.6 as base — toolcaller gets /think and a system prompt;
+# think:false remains in opencode.json to keep the orchestrator reasoning-off.
 # Built only when missing — to rebuild a variant, `ollama rm <name>` then re-provision.
 # NOTE: the `from:` base tags must be pullable/present locally; adjust to the exact
 # tags your model store carries.
 ollama_manage_models: true
 ollama_models:
-  - name: oracle-32k
+  - name: oracle-64k
     from: "qwen3.6:35b-a3b-mtp-q4_K_M"
-    num_ctx: 32768
-    num_predict: 4096
+    num_ctx: 65536
+    num_predict: 8192
     system: |
       /think
       You are a reasoning oracle. Think step by step before answering.
@@ -90,16 +90,16 @@ ollama_models:
     system: |
       /think
       You are a long-context analysis oracle. Think step by step before answering.
-  - name: toolcaller-32k
-    from: "nemotron3:33b"
-    num_ctx: 32768
-    num_predict: 2048
-    # No SYSTEM directive — reasoning is disabled via think:false in opencode.json
-    # (Ollama API parameter, documented at https://ollama.com/blog/thinking).
-    system: ""
-  - name: heavy-64k
-    from: "nemotron-3-super:120b"
+  - name: toolcaller-64k
+    from: "qwen3.6:35b-a3b-mtp-q4_K_M"
     num_ctx: 65536
+    num_predict: 8192
+    system: |
+      You are the tool-calling orchestrator. Gather context, dispatch subagents, and gate on @@RESULT blocks.
+      Reasoning is disabled at the API level (think:false) — produce terse, deterministic outputs.
+  - name: heavy-128k
+    from: "nemotron-3-super:120b"
+    num_ctx: 131072
     num_predict: 8192
     system: "You are a high-stakes reasoning escalation. Reason thoroughly before answering."
 

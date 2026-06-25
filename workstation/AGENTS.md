@@ -15,9 +15,9 @@ coder/tester/devops agents touch the filesystem or shell.
 
 ## Placement rule (the architectural backbone)
 
-An agent goes on Qwen (`oracle-32k`) **only if it needs zero tools**. The moment an
+An agent goes on Qwen (`oracle-64k`) **only if it needs zero tools**. The moment an
 agent must read a file, run bash, edit, or fetch, it goes on Nemotron
-(`toolcaller-32k`). Qwen is text-only and breaks if handed a tools array; Nemotron
+(`toolcaller-64k`). Qwen is text-only and breaks if handed a tools array; Nemotron
 is the sole tool-caller. Reasoning mode is a property of the model, not the agent:
 oracle variants are reasoning-on, the tool-caller is reasoning-off.
 
