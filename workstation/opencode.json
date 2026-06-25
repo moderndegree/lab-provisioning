@@ -1,9 +1,4 @@
 {
-  // moderndegree local agent stack — opencode config (Step 4 of the runbook).
-  // Place at the opencode project root, or merge into ~/.config/opencode/opencode.json.
-  // opencode parses JSONC, so the comments below are intentional documentation.
-  "$schema": "https://opencode.ai/config.json",
-
   "provider": {
     "ollama": {
       "npm": "@ai-sdk/openai-compatible",
@@ -16,20 +11,10 @@
       }
     }
   },
-
-  // Primary defaults to the tool-caller — the orchestrator needs the task tool.
   "model": "ollama/toolcaller-32k",
-  // Title/summary gen is pure text; oracle is faster. If you ever see a tool-schema
-  // error on title generation, move this to toolcaller-32k.
   "small_model": "ollama/oracle-32k",
-
-  // KV shifting is DISABLED on the a3b model — there is no graceful window slide.
-  // Compaction must keep you off the 32K ceiling itself. reserved=8192 fires it
-  // with real headroom; prune drops old tool outputs (the main window-filler).
   "compaction": { "auto": true, "prune": true, "tail_turns": 2, "reserved": 8192 },
-
   "instructions": ["AGENTS.md", ".moderndegree/skills/*.md"],
-
   "agent": {
     "build": {
       "mode": "primary",
@@ -37,7 +22,6 @@
       "description": "Orchestrator. Gathers context, dispatches subagents, gates on @@RESULT.",
       "prompt": "{file:./.moderndegree/prompts/orchestrator.md}"
     },
-
     "planner": {
       "mode": "subagent",
       "model": "ollama/oracle-32k",
@@ -73,7 +57,6 @@
       "permission": "deny",
       "prompt": "{file:./.moderndegree/prompts/docs.md}"
     },
-
     "coder": {
       "mode": "subagent",
       "model": "ollama/toolcaller-32k",

@@ -12,6 +12,7 @@ Image=docker.io/grafana/grafana:{{ grafana_version }}
 ContainerName=grafana
 Network=obs.network
 UserNS=keep-id
+User=root
 # Accessible on ser5 at http://localhost:{{ grafana_port }}.
 # Expose via Cloudflare tunnel or tailscale-serve if remote access is needed.
 PublishPort=127.0.0.1:{{ grafana_port }}:{{ grafana_port }}

@@ -16,11 +16,13 @@ scrape_configs:
           instance: mini
 
   # mini Ollama inference metrics (token throughput, active requests, queue depth)
-  # Ollama exposes Prometheus metrics at /metrics on the same port as the API.
-  - job_name: mini-ollama
-    static_configs:
-      - targets:
-          - "{{ mini_host }}:{{ mini_ollama_port }}"
-        labels:
-          instance: mini
-    metrics_path: /metrics
+  # Ollama exposes Prometheus metrics at /metrics on the same port as the API
+  # ONLY when started with OLLAMA_METRICS=true (not enabled by default).
+  # Uncomment below and set OLLAMA_METRICS=true on mini to enable.
+  # - job_name: mini-ollama
+  #   static_configs:
+  #     - targets:
+  #         - "{{ mini_host }}:{{ mini_ollama_port }}"
+  #       labels:
+  #         instance: mini
+  #     metrics_path: /metrics
