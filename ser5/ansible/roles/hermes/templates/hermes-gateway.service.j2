@@ -1,0 +1,23 @@
+[Unit]
+Description=Hermes Agent Gateway
+Documentation=https://hermes-agent.nousresearch.com/docs/user-guide/messaging
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=HOME={{ user_home }}
+Environment=HERMES_HOME={{ hermes_home }}
+# Point Hermes at the inference node (mini) over the tailnet for Tier L (Sovereign)
+# inference. The Hermes gateway running here on ser5 is the routing layer; mini
+# is the actual inference node.
+Environment=OLLAMA_BASE_URL={{ hermes_ollama_base_url }}
+ExecStart={{ hermes_bin }} gateway start --all
+Restart=on-failure
+RestartSec=15
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=60
+
+[Install]
+WantedBy=default.target

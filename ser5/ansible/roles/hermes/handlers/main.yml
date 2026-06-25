@@ -1,0 +1,19 @@
+---
+- name: hermes daemon-reload
+  ansible.builtin.systemd:
+    daemon_reload: true
+    scope: user
+  become: true
+  become_user: "{{ username }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ hermes_user_uid.stdout }}"
+
+- name: restart hermes-gateway
+  ansible.builtin.systemd:
+    name: hermes-gateway.service
+    state: restarted
+    scope: user
+  become: true
+  become_user: "{{ username }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ hermes_user_uid.stdout }}"

@@ -1,0 +1,21 @@
+---
+# Hermes gateway — the remote agent surface, installed via the official NousResearch
+# installer and run as a systemd user service on ser5. It routes requests to mini
+# for Tier L (Sovereign) inference over the tailnet.
+#
+# Disabled by default — flip enable_hermes: true in group_vars/all.yml to activate.
+enable_hermes: false
+
+# Hermes CLI binary (placed here by the NousResearch installer).
+hermes_bin: "{{ user_home }}/.local/bin/hermes"
+
+# Data directory for Hermes; the installer and service both use HERMES_HOME.
+# Lives under the data disk services/ tree created by the storage role.
+hermes_home: "{{ data_mount }}/services/hermes"
+
+# Hermes points at mini's Ollama API over the tailnet (Tier L), NOT localhost.
+hermes_ollama_base_url: "http://mini:11434"
+
+# Version reference (installer always fetches latest; update when Hermes gains
+# a --version flag and pinning becomes possible).
+hermes_version: "0.16.0"

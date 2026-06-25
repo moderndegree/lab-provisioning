@@ -25,41 +25,83 @@ ansible_user: "{{ node_user }}"
 # ─────────────────────────────────────────────────────────────────────────────
 
 # NodeSource LTS stream (resolves to Node.js v22.x as of 2026-06)
-node_lts_stream: "lts"
-
-# opencode — verified npm version 2026-06-19 (npm i opencode-ai@{{ opencode_version }})
-opencode_version: "1.17.8"
-
-# Hermes Agent — NousResearch v0.16.0 (release tag v2026.6.5, released 2026-06-05)
-# Installed via official installer script; version is for documentation reference.
-# TODO: Hermes installer currently installs latest; pin once --version flag is supported.
-hermes_version: "0.16.0"
-
 # ─────────────────────────────────────────────────────────────────────────────
 # GPU backend
-#   rocm   → AMD ROCm stack (primary; requires amdgpu_rocm role)
-#   vulkan → Mesa RADV (fallback; flip this var if ROCm regresses on a kernel update)
+#   vulkan → Mesa RADV (COMMITTED primary — measured +7–26% decode vs ROCm)
+#   rocm   → AMD ROCm stack (fallback; flip this var to revert if Vulkan regresses)
+# The amdgpu_rocm role installs BOTH stacks; this var only chooses which backend
+# the Ollama systemd override activates. See the moderndegree agent-stack runbook.
 # ─────────────────────────────────────────────────────────────────────────────
-gpu_backend: "rocm"
+gpu_backend: "vulkan"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Ollama service environment (written to systemd override.conf)
 # ─────────────────────────────────────────────────────────────────────────────
 # Bind address. 0.0.0.0 makes the API reachable over the tailnet; UFW restricts
 # inbound to the tailscale0 interface, so nothing is actually exposed on the LAN.
-# Set to 127.0.0.1 to keep Ollama local-only (Hermes still reaches it via loopback).
+# Set to 127.0.0.1 to keep Ollama local-only. The Hermes gateway runs on ser5 and
+# reaches this API over the tailnet (http://mini:11434).
 ollama_host: "0.0.0.0"
-ollama_context_length: 131072
-ollama_num_parallel: 3
+# Modest GLOBAL floor only — per-model windows are baked into the Modelfile
+# variants below. A 16K floor stops an unguarded model grabbing a huge default
+# window and eating a multi-minute prefill (prefill is the wall at ~205 t/s).
+ollama_context_length: 16384
+# Single interactive stream — the warm pair is sized for one agent loop at a time.
+ollama_num_parallel: 1
 ollama_flash_attention: 1
 ollama_kv_cache_type: "q8_0"
-ollama_keep_alive: "30m"
+# -1 pins the warm pair resident across handoffs (no idle eviction).
+ollama_keep_alive: "-1"
+# Two models stay warm (oracle + toolcaller); the third slot lets an async swap-in
+# (batch/heavy) load alongside the warm pair instead of evicting it.
 ollama_max_loaded_models: 3
 
-# Required for gfx1151 — Strix Halo is NOT on AMD's official ROCm support matrix.
-# HSA_OVERRIDE_GFX_VERSION tricks ROCm into using the closest supported target (RDNA3/gfx1100).
-# The gfx1151 stability floor is kernel >= 6.18.4; Ubuntu 26.04's GA kernel 7.0 clears it.
+# Vulkan ICD selector for the committed Vulkan path (RADV = Mesa's AMD driver).
+ollama_vulkan_icd: "RADV"
+
+# Used only on the ROCm fallback path (gpu_backend: rocm). Strix Halo is NOT on
+# AMD's official ROCm support matrix; HSA_OVERRIDE_GFX_VERSION tricks ROCm into the
+# closest supported target (RDNA3/gfx1100). Kernel 7.0 clears the >=6.18.4 floor.
 hsa_override_gfx_version: "11.5.1"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Ollama model variants (built by the ollama role via `ollama create`)
+# ─────────────────────────────────────────────────────────────────────────────
+# The context tier IS the design. Reasoning is baked into each variant where
+# possible. Qwen3.6 toggles with /think in SYSTEM (ON for all oracle variants).
+# The toolcaller's reasoning is disabled at the API level via think:false in
+# opencode.json (see workstation/opencode.json) — no SYSTEM directive needed.
+# Built only when missing — to rebuild a variant, `ollama rm <name>` then re-provision.
+# NOTE: the `from:` base tags must be pullable/present locally; adjust to the exact
+# tags your model store carries.
+ollama_manage_models: true
+ollama_models:
+  - name: oracle-32k
+    from: "qwen3.6:35b-a3b-mtp-q4_K_M"
+    num_ctx: 32768
+    num_predict: 4096
+    system: |
+      /think
+      You are a reasoning oracle. Think step by step before answering.
+  - name: oracle-batch-192k
+    from: "qwen3.6:35b-a3b-mtp-q4_K_M"
+    num_ctx: 196608
+    num_predict: 8192
+    system: |
+      /think
+      You are a long-context analysis oracle. Think step by step before answering.
+  - name: toolcaller-32k
+    from: "nemotron3:33b"
+    num_ctx: 32768
+    num_predict: 2048
+    # No SYSTEM directive — reasoning is disabled via think:false in opencode.json
+    # (Ollama API parameter, documented at https://ollama.com/blog/thinking).
+    system: ""
+  - name: heavy-64k
+    from: "nemotron-3-super:120b"
+    num_ctx: 65536
+    num_predict: 8192
+    system: "You are a high-stakes reasoning escalation. Reason thoroughly before answering."
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Data disk
@@ -75,17 +117,6 @@ data_mount: "/data"
 # Set true to skip first-time partition+format (disk is already prepared).
 # Only relevant when has_data_disk: true.
 skip_data_disk_format: false
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Hermes Agent
-# ─────────────────────────────────────────────────────────────────────────────
-hermes_home: "{{ data_mount }}/hermes"
-hermes_bin: "{{ node_home }}/.local/bin/hermes"
-
-# Informational only — the firewall allows the whole tailscale0 interface, so this
-# port is not used in any UFW rule. Community reports 8080; verify against the
-# `hermes gateway start` output and keep this accurate for documentation.
-hermes_dashboard_port: 8080
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Converge behaviour

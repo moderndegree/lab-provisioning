@@ -33,7 +33,7 @@ ansible/
     base/                kernel cmdline (GRUB), firmware pin, packages, UFW, data disk
     amdgpu_rocm/         ROCm 7.2.4 userspace (--no-dkms) + Vulkan fallback
     ollama/              Ollama server + systemd override
-    harness/             Node.js, opencode-ai, Hermes Agent + gateway service
+    harness/             (empty — opencode and Hermes both on ser5/workstation)
     tailscale/           tailnet join
     cloudflared/         Cloudflare Tunnel (Podman quadlet; remote-managed token)
 ```

@@ -5,10 +5,8 @@
 # Role execution order (dependencies flow top-to-bottom):
 #   base        → kernel, packages, UFW, data disk mount
 #   amdgpu_rocm → ROCm stack + Vulkan fallback drivers
-#   ollama      → Ollama LLM server (depends on amdgpu_rocm)
-#   harness     → Node.js, opencode, Hermes Agent + gateway service
+#   ollama      → Ollama LLM server + model variants (depends on amdgpu_rocm)
 #   tailscale   → tailnet access
-#   cloudflared → Cloudflare Tunnel (enabled; starts once a real token is vaulted)
 
 - name: Provision mini
   hosts: mini
@@ -18,9 +16,7 @@
     - role: base
     - role: amdgpu_rocm
     - role: ollama
-    - role: harness
     - role: tailscale
-    - role: cloudflared
 
 # Reboot last — after the provision play's handlers (update-grub, update-initramfs)
 # have flushed — so the gfx1151 kernel cmdline is regenerated *then* applied in one

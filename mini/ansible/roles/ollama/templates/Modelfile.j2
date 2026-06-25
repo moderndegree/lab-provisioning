@@ -1,0 +1,8 @@
+{#- Ollama Modelfile variant — rendered per entry in ollama_models (ollama role). -#}
+{#- Context window + reasoning mode are baked here so agents can't flip them. -#}
+FROM {{ item.from }}
+PARAMETER num_ctx {{ item.num_ctx }}
+PARAMETER num_predict {{ item.num_predict }}
+{% if (item.system | default('') | trim) | length > 0 %}
+SYSTEM """{{ item.system | trim }}"""
+{% endif %}

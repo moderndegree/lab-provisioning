@@ -1,24 +1,57 @@
 [Service]
 # Ollama environment overrides for mini (MS-S1 Max, gfx1151, 128 GB unified RAM)
+
+# Modest GLOBAL floor. Per-model windows are baked into the Modelfile variants the
+# ollama role builds (oracle-32k / toolcaller-32k / oracle-batch-192k / heavy-64k),
+# which override this. Keeps an unguarded model from grabbing a huge default window
+# and eating a multi-minute prefill before first token (prefill is the wall at
+# ~205 t/s — a 256K window costs ~21 min before first token).
 Environment="OLLAMA_CONTEXT_LENGTH={{ ollama_context_length }}"
+
 Environment="OLLAMA_NUM_PARALLEL={{ ollama_num_parallel }}"
 Environment="OLLAMA_FLASH_ATTENTION={{ ollama_flash_attention }}"
 Environment="OLLAMA_KV_CACHE_TYPE={{ ollama_kv_cache_type }}"
-Environment="OLLAMA_KEEP_ALIVE={{ ollama_keep_alive }}"
 Environment="OLLAMA_MAX_LOADED_MODELS={{ ollama_max_loaded_models }}"
-# Bind address. systemd services do NOT read /etc/environment, so the backend/host
-# env must live here in the unit override to actually reach the ollama process.
+
+# Warm interactive pair (oracle-32k + toolcaller-32k) stays pinned across handoffs
+# with KEEP_ALIVE=-1. Batch + heavy are async swap-ins; loading one may evict per
+# LRU into the third MAX_LOADED_MODELS slot, which is fine.
+Environment="OLLAMA_KEEP_ALIVE={{ ollama_keep_alive }}"
+
+# Keep the integrated GPU. Strix Halo enumerates as an iGPU and Ollama drops
+# integrated devices by default ("to enable, set OLLAMA_IGPU_ENABLE=1") — on BOTH
+# the ROCm and Vulkan paths. Master switch that lets the device survive discovery.
+Environment="OLLAMA_IGPU_ENABLE=1"
+
+# Bind address + model store. systemd services do NOT read /etc/environment, so
+# these must live here in the unit override to actually reach the ollama process.
 Environment="OLLAMA_HOST={{ ollama_host }}"
-# Store model blobs on the data disk (second NVMe), not the OS disk
 Environment="OLLAMA_MODELS={{ data_mount }}/ollama"
-{% if gpu_backend == "rocm" %}
-# gfx1151 ROCm workaround — not on AMD's official support matrix
-Environment="HSA_OVERRIDE_GFX_VERSION={{ hsa_override_gfx_version }}"
-{% elif gpu_backend == "vulkan" %}
-# Vulkan/RADV fallback backend (flip gpu_backend: vulkan in group_vars/all.yml)
-Environment="OLLAMA_GPU_DRIVER=vulkan"
-{% endif %}
-# Legacy gfx1151 hang workarounds — likely unneeded on kernel 7.0.
-# Uncomment only if you observe ROCm hangs after a kernel/ROCm bump:
+{% if gpu_backend == "vulkan" %}
+
+# --- Vulkan (committed path) ---
+# Committed to Vulkan/RADV on mini: measured +7–26% decode vs ROCm. HIP is turned
+# OFF here so Ollama selects the Vulkan backend instead of bundled ROCm.
+Environment="OLLAMA_VULKAN=1"
+Environment="HIP_VISIBLE_DEVICES=-1"
+Environment="AMD_VULKAN_ICD={{ ollama_vulkan_icd }}"
+
+# --- ROCm fallback (DISABLED while HIP is off above) ---
+# The amdgpu_rocm role still installs the ROCm stack as a fallback. To revert, set
+# gpu_backend: rocm in group_vars/all.yml and re-run make provision — this file
+# regenerates automatically. The lines below are dead config on the Vulkan path
+# and are shown only to document the revert target:
+# Environment="HSA_OVERRIDE_GFX_VERSION={{ hsa_override_gfx_version }}"
 # Environment="HSA_ENABLE_SDMA=0"
 # Environment="HSA_USE_SVM=0"
+{% elif gpu_backend == "rocm" %}
+
+# --- ROCm (committed path) ---
+# Required for gfx1151 — Strix Halo is NOT on AMD's official ROCm support matrix.
+# HSA_OVERRIDE_GFX_VERSION tricks ROCm into the closest supported target.
+Environment="HSA_OVERRIDE_GFX_VERSION={{ hsa_override_gfx_version }}"
+# Legacy gfx1151 hang workarounds — likely unneeded on kernel 7.0. Uncomment only
+# if you observe ROCm hangs after a kernel/ROCm bump:
+# Environment="HSA_ENABLE_SDMA=0"
+# Environment="HSA_USE_SVM=0"
+{% endif %}

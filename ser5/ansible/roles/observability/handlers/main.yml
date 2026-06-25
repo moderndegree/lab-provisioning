@@ -1,0 +1,38 @@
+---
+- name: prometheus daemon-reload
+  ansible.builtin.systemd:
+    daemon_reload: true
+    scope: user
+  become: true
+  become_user: "{{ username }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ obs_user_uid.stdout }}"
+
+- name: restart prometheus
+  ansible.builtin.systemd:
+    name: prometheus.service
+    state: restarted
+    scope: user
+  become: true
+  become_user: "{{ username }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ obs_user_uid.stdout }}"
+
+- name: grafana daemon-reload
+  ansible.builtin.systemd:
+    daemon_reload: true
+    scope: user
+  become: true
+  become_user: "{{ username }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ obs_user_uid.stdout }}"
+
+- name: restart grafana
+  ansible.builtin.systemd:
+    name: grafana.service
+    state: restarted
+    scope: user
+  become: true
+  become_user: "{{ username }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ obs_user_uid.stdout }}"

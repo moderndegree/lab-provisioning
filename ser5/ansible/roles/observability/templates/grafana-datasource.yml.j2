@@ -1,0 +1,13 @@
+# Grafana Prometheus datasource — provisioned by Ansible, do not edit by hand.
+# Grafana loads this from /etc/grafana/provisioning/datasources/ at startup.
+# To add dashboards, import from https://grafana.com/grafana/dashboards/1860
+# (node-exporter-full) and https://grafana.com/grafana/dashboards/20728 (Ollama).
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    # Container-name DNS within the 'obs' Podman network (both containers joined).
+    url: "http://prometheus:{{ prometheus_port }}"
+    isDefault: true
+    editable: false

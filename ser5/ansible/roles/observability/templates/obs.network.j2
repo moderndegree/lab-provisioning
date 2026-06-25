@@ -1,0 +1,4 @@
+# Podman bridge network for the observability stack (Ansible-managed, do not edit by hand).
+# Both the prometheus and grafana quadlets join this network; Grafana resolves
+# Prometheus by container name (http://prometheus:9090) within this network.
+[Network]

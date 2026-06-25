@@ -10,6 +10,8 @@
 #   virtualization → libvirt + qemu-kvm + virt-manager; IaC test-lab pool on {{ data_mount }}/vms
 #   containers     → rootless Podman; user lingering; quadlet support
 #   tailscale      → join tailnet with authkey from vault
+#   cloudflared    → Cloudflare Zero Trust tunnel (enable_cloudflared: true to activate)
+#   hermes         → Hermes gateway quadlet (enable_hermes: true to activate)
 #   observability  → Prometheus + Grafana quadlets (enable_observability: true to activate)
 #   backups        → restic repo at {{ data_mount }}/backups (enable_backups: true to activate)
 
@@ -25,6 +27,10 @@
     - role: virtualization
     - role: containers
     - role: tailscale
+    - role: cloudflared
+      when: enable_cloudflared | bool
+    - role: hermes
+      when: enable_hermes | bool
     - role: observability
       when: enable_observability | bool
     - role: backups

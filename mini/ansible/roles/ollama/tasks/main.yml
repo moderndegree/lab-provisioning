@@ -67,3 +67,55 @@
     enabled: true
     state: started
     daemon_reload: true
+
+# ─── Model variants (oracle / toolcaller / batch / heavy) ─────────────────────
+# The context tier IS the design (see runbook Step 2). Each variant bakes its
+# num_ctx + reasoning mode via a Modelfile so agents can't flip them per-request.
+# Variants are built only when missing; `ollama rm <name>` then re-provision to
+# rebuild one after editing its definition in group_vars.
+- name: Create Ollama Modelfile directory
+  ansible.builtin.file:
+    path: "{{ data_mount }}/ollama/modelfiles"
+    state: directory
+    owner: ollama
+    group: ollama
+    mode: "0755"
+  when: ollama_manage_models | bool
+
+- name: Template Ollama Modelfile variants
+  ansible.builtin.template:
+    src: Modelfile.j2
+    dest: "{{ data_mount }}/ollama/modelfiles/Modelfile.{{ item.name }}"
+    owner: ollama
+    group: ollama
+    mode: "0644"
+  loop: "{{ ollama_models }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: ollama_manage_models | bool
+
+# `ollama create` is a client call: the running service (ollama user) resolves the
+# FROM tag and writes the blobs, so running the client as root is safe. Querying
+# the existing list first keeps this idempotent — large base pulls won't re-run.
+- name: List existing Ollama models
+  ansible.builtin.command: ollama list
+  register: ollama_list
+  changed_when: false
+  environment:
+    OLLAMA_HOST: "127.0.0.1:11434"
+  when: ollama_manage_models | bool
+
+- name: Build Ollama model variants (only when missing)
+  ansible.builtin.command:
+    cmd: "ollama create {{ item.name }} -f {{ data_mount }}/ollama/modelfiles/Modelfile.{{ item.name }}"
+  loop: "{{ ollama_models }}"
+  loop_control:
+    label: "{{ item.name }}"
+  environment:
+    OLLAMA_HOST: "127.0.0.1:11434"
+  register: ollama_create
+  changed_when: ollama_create.rc == 0
+  # The FROM base tag is pulled if absent — the 120B variant can take a long time.
+  when:
+    - ollama_manage_models | bool
+    - item.name not in ollama_list.stdout

@@ -1,0 +1,96 @@
+{
+  // moderndegree local agent stack — opencode config (Step 4 of the runbook).
+  // Place at the opencode project root, or merge into ~/.config/opencode/opencode.json.
+  // opencode parses JSONC, so the comments below are intentional documentation.
+  "$schema": "https://opencode.ai/config.json",
+
+  "provider": {
+    "ollama": {
+      "npm": "@ai-sdk/openai-compatible",
+      "options": { "baseURL": "http://mini:11434/v1" },
+      "models": {
+        "oracle-32k":        { "options": { "stream": false }, "limit": { "context": 32768,  "output": 4096 } },
+        "toolcaller-32k":    { "options": { "stream": false, "think": false }, "limit": { "context": 32768,  "output": 2048 } },
+        "oracle-batch-192k": { "options": { "stream": false }, "limit": { "context": 196608, "output": 8192 } },
+        "heavy-64k":         { "options": { "stream": false }, "limit": { "context": 65536,  "output": 8192 } }
+      }
+    }
+  },
+
+  // Primary defaults to the tool-caller — the orchestrator needs the task tool.
+  "model": "ollama/toolcaller-32k",
+  // Title/summary gen is pure text; oracle is faster. If you ever see a tool-schema
+  // error on title generation, move this to toolcaller-32k.
+  "small_model": "ollama/oracle-32k",
+
+  // KV shifting is DISABLED on the a3b model — there is no graceful window slide.
+  // Compaction must keep you off the 32K ceiling itself. reserved=8192 fires it
+  // with real headroom; prune drops old tool outputs (the main window-filler).
+  "compaction": { "auto": true, "prune": true, "tail_turns": 2, "reserved": 8192 },
+
+  "instructions": ["AGENTS.md", ".moderndegree/skills/*.md"],
+
+  "agent": {
+    "build": {
+      "mode": "primary",
+      "model": "ollama/toolcaller-32k",
+      "description": "Orchestrator. Gathers context, dispatches subagents, gates on @@RESULT.",
+      "prompt": "{file:./.moderndegree/prompts/orchestrator.md}"
+    },
+
+    "planner": {
+      "mode": "subagent",
+      "model": "ollama/oracle-32k",
+      "description": "Produces an implementation plan from context provided in-prompt. Reasoning only.",
+      "permission": "deny",
+      "prompt": "{file:./.moderndegree/prompts/planner.md}"
+    },
+    "architect": {
+      "mode": "subagent",
+      "model": "ollama/oracle-32k",
+      "description": "Designs structure from provided context. Reasoning only.",
+      "permission": "deny",
+      "prompt": "{file:./.moderndegree/prompts/architect.md}"
+    },
+    "reviewer": {
+      "mode": "subagent",
+      "model": "ollama/oracle-32k",
+      "description": "Critiques diffs handed to it. Reasoning only.",
+      "permission": "deny",
+      "prompt": "{file:./.moderndegree/prompts/reviewer.md}"
+    },
+    "security-auditor": {
+      "mode": "subagent",
+      "model": "ollama/oracle-32k",
+      "description": "Audits provided diffs for security issues. Reasoning only.",
+      "permission": "deny",
+      "prompt": "{file:./.moderndegree/prompts/security.md}"
+    },
+    "doc-writer": {
+      "mode": "subagent",
+      "model": "ollama/oracle-32k",
+      "description": "Writes docs from provided material. Reasoning only.",
+      "permission": "deny",
+      "prompt": "{file:./.moderndegree/prompts/docs.md}"
+    },
+
+    "coder": {
+      "mode": "subagent",
+      "model": "ollama/toolcaller-32k",
+      "description": "Implements changes. Edits files.",
+      "prompt": "{file:./.moderndegree/prompts/coder.md}"
+    },
+    "tester": {
+      "mode": "subagent",
+      "model": "ollama/toolcaller-32k",
+      "description": "Writes and runs tests, reads results.",
+      "prompt": "{file:./.moderndegree/prompts/tester.md}"
+    },
+    "devops": {
+      "mode": "subagent",
+      "model": "ollama/toolcaller-32k",
+      "description": "Infra and shell operations.",
+      "prompt": "{file:./.moderndegree/prompts/devops.md}"
+    }
+  }
+}

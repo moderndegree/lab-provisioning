@@ -5,7 +5,7 @@
 # the "from anywhere, in a browser" path; Tailscale remains the primary, fully
 # private path. SECURITY: a tunnel hostname is public by default — gate every
 # hostname with a Cloudflare Access policy in the Zero Trust dashboard, because
-# the Ollama API and Hermes dashboard have no auth of their own.
+# the Ollama API has no auth of its own.
 #
 # This uses a REMOTE-MANAGED (token) tunnel: the only secret is the connector
 # token (vaulted). Hostname→service mapping and Access policies are configured in

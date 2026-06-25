@@ -1,0 +1,28 @@
+# Prometheus quadlet — rootless Podman (Ansible-managed, do not edit by hand)
+# Joins the 'obs' bridge network so Grafana can reach it by container name.
+# Outbound connections (scraping mini over tailscale0) work via netavark's default
+# routing — no host-network mode required.
+# UserNS=keep-id maps container UID to {{ username }}'s UID so it can read/write
+# the volume mounts without subuid remapping headaches.
+[Unit]
+Description=Prometheus metrics server
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=docker.io/prom/prometheus:{{ prometheus_version }}
+ContainerName=prometheus
+Network=obs.network
+UserNS=keep-id
+PublishPort=127.0.0.1:{{ prometheus_port }}:{{ prometheus_port }}
+Volume={{ prometheus_data_dir }}:/prometheus:Z
+Volume={{ prometheus_config_dir }}/prometheus.yml:/etc/prometheus/prometheus.yml:Z,ro
+Exec=--config.file=/etc/prometheus/prometheus.yml --storage.tsdb.retention.time=15d
+AutoUpdate=registry
+
+[Service]
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

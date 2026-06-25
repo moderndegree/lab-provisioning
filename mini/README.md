@@ -58,7 +58,7 @@ lab-provisioning/
       base/                         kernel cmdline (GRUB), packages, UFW, data disk
       amdgpu_rocm/                  ROCm stack + Vulkan fallback drivers
       ollama/                       Ollama LLM server + systemd override
-      harness/                      Node.js, opencode-ai, Hermes Agent + gateway service
+      harness/                      (empty — opencode and Hermes both on ser5/workstation)
       tailscale/                    tailnet join
       cloudflared/                  Cloudflare Tunnel (Podman quadlet; token-gated start)
 ```
@@ -239,8 +239,8 @@ log in to the same tailnet. Reach mini at `mini` (MagicDNS) or its `100.x.y.z` a
 
 ### Cloudflare Tunnel (`enable_cloudflared: true`)
 
-> **Security:** a tunnel hostname is **public by default**, and the Ollama API / Hermes
-> dashboard have **no auth of their own** — anyone with the URL could use your GPU. You
+> **Security:** a tunnel hostname is **public by default**, and the Ollama API has
+> **no auth of its own** — anyone with the URL could use your GPU. You
 > **must** put a Cloudflare Access policy in front of every hostname. With Access, only
 > people you allow (e.g. your Google account) ever reach mini.
 
@@ -258,7 +258,6 @@ One-time setup (you already have Cloudflare DNS, which is the prerequisite):
 3. **Add public hostnames** to the tunnel (in the dashboard), each routing to a local
    service on mini — for example:
    - `ollama.<your-domain>` → `http://localhost:11434`
-   - `hermes.<your-domain>` → `http://localhost:8080`  *(or whatever port `hermes gateway` binds)*
 
    Cloudflare creates the DNS records for you (since your DNS is on Cloudflare).
 4. **Gate each hostname with Access** — Zero Trust → *Access → Applications → Add a
@@ -328,18 +327,6 @@ kernel 7.0, which clears it with no HWE or mainline-PPA juggling — so the `bas
 installs no extra kernel package. The `linux-firmware-20251125` ROCm breakage was fixed
 upstream in 2026; no apt pin is required.
 
-**TODO 3 — Hermes Agent gateway dashboard port**  
-`hermes_dashboard_port: 8080` is based on community reports and is now **informational
-only** — the firewall allows the whole `tailscale0` interface, so the dashboard is
-reachable to tailnet peers on whatever port the gateway binds. Verify the real port by
-running `hermes gateway start` on mini, then update `group_vars/all.yml` for accuracy.
-
-**TODO 4 — Hermes Agent version pinning**  
-The NousResearch installer always installs the latest published version. The documented
-version (0.16.0 / v2026.6.5) is for reference. Pinned installation will be possible once
-the installer supports a `--version` flag — track:
-https://github.com/NousResearch/hermes-agent/releases
-
 ---
 
 ## Pinned Versions (as of 2026-06-19)
@@ -348,9 +335,6 @@ https://github.com/NousResearch/hermes-agent/releases
 |-----------|---------|--------|
 | Ubuntu Server | 26.04 LTS | ubuntu.com |
 | Kernel (baseline) | 7.0 (GA) | 26.04 default — clears gfx1151 >= 6.18.4 floor |
-| Node.js | LTS v22.x | NodeSource setup_lts.x |
-| opencode-ai | 1.17.8 | npmjs.com |
-| Hermes Agent | 0.16.0 (v2026.6.5) | NousResearch |
 | amdgpu-install | 7.2.4.70204-1 (ROCm 7.2.4) | repo.radeon.com (noble) |
 | Ollama | latest (official installer) | ollama.com |
 | Tailscale | latest (official installer) | tailscale.com |

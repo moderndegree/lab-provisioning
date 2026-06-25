@@ -1,0 +1,103 @@
+---
+# Hermes gateway — NousResearch installer + systemd user service on ser5.
+# The containers role (which runs earlier in site.yml) already enables lingering
+# and creates ~/.config/systemd/user/, so this role just installs and wires up
+# the service.
+
+- name: hermes stub — role is disabled
+  ansible.builtin.debug:
+    msg: >
+      hermes role is disabled (enable_hermes: false).
+      Set enable_hermes: true in group_vars/all.yml to activate.
+  when: not (enable_hermes | bool)
+
+- name: Configure Hermes gateway
+  when: enable_hermes | bool
+  block:
+    - name: Resolve {{ username }} UID (needed for systemctl --user calls)
+      ansible.builtin.command: "id -u {{ username }}"
+      register: hermes_user_uid
+      changed_when: false
+
+    - name: Ensure Hermes home directory exists
+      ansible.builtin.file:
+        path: "{{ hermes_home }}"
+        state: directory
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0750"
+
+    # ─── Install Hermes Agent ─────────────────────────────────────────────────
+    - name: Check if Hermes Agent binary exists
+      ansible.builtin.stat:
+        path: "{{ hermes_bin }}"
+      register: hermes_binary_stat
+
+    # Download to a file (not stdin) so bash reads the script from the file path
+    # rather than stdin. `curl | bash </dev/null` was broken: </dev/null overrides
+    # the pipe so bash reads an empty stdin and exits 0 without installing anything.
+    # `--skip-setup` suppresses the interactive `hermes setup` wizard.
+    # Running as {{ username }} so the downloaded file is owned by that user.
+    - name: Install Hermes Agent via official NousResearch installer
+      ansible.builtin.shell:
+        cmd: >-
+          curl -fsSL https://hermes-agent.nousresearch.com/install.sh
+          -o /tmp/hermes-install-{{ username }}.sh &&
+          chmod 700 /tmp/hermes-install-{{ username }}.sh &&
+          bash /tmp/hermes-install-{{ username }}.sh --skip-setup
+        executable: /bin/bash
+      environment:
+        HOME: "{{ user_home }}"
+        HERMES_HOME: "{{ hermes_home }}"
+        USER: "{{ username }}"
+      become: true
+      become_user: "{{ username }}"
+      when: not hermes_binary_stat.stat.exists
+      register: hermes_install_result
+      failed_when: hermes_install_result.rc != 0
+
+    - name: Ensure HERMES_HOME is set in the user's .bashrc
+      ansible.builtin.lineinfile:
+        path: "{{ user_home }}/.bashrc"
+        regexp: '^export HERMES_HOME='
+        line: "export HERMES_HOME={{ hermes_home }}"
+        state: present
+        create: true
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0644"
+
+    # ─── Systemd user service ─────────────────────────────────────────────────
+    - name: Ensure user systemd directory exists
+      ansible.builtin.file:
+        path: "{{ user_home }}/.config/systemd/user"
+        state: directory
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0755"
+
+    - name: Template hermes-gateway user service unit
+      ansible.builtin.template:
+        src: hermes-gateway.service.j2
+        dest: "{{ user_home }}/.config/systemd/user/hermes-gateway.service"
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0644"
+      notify:
+        - hermes daemon-reload
+        - restart hermes-gateway
+
+    # Flush so daemon-reload runs before the enable/start task below.
+    - name: Flush handlers
+      ansible.builtin.meta: flush_handlers
+
+    - name: Ensure hermes-gateway user service is enabled and started
+      ansible.builtin.systemd:
+        name: hermes-gateway.service
+        enabled: true
+        state: started
+        scope: user
+      become: true
+      become_user: "{{ username }}"
+      environment:
+        XDG_RUNTIME_DIR: "/run/user/{{ hermes_user_uid.stdout }}"

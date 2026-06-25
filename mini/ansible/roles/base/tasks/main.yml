@@ -48,7 +48,7 @@
       - ufw
       - curl
       - ca-certificates
-      - python3-pip       # needed by Hermes Agent installer
+      - python3-pip       # general Python tooling
     state: present
 
 # ─── UFW firewall ─────────────────────────────────────────────────────────────
@@ -69,7 +69,7 @@
     proto: tcp
     comment: "SSH"
 
-# All node services (Ollama, Hermes dashboard, etc.) are reached over the tailnet.
+# All node services (Ollama API, etc.) are reached over the tailnet.
 # Allowing the whole tailscale0 interface keeps them off the LAN/WAN while making
 # every service reachable to tailnet peers — no per-port rules to maintain. The
 # rule is valid before tailscaled exists; it simply matches once the iface appears.
@@ -149,5 +149,52 @@
     mode: "0755"
   loop:
     - ollama
-    - hermes
     - worktrees
+
+# ─── amdgpu_top ──────────────────────────────────────────────────────────────
+# Not in Ubuntu apt; installed from upstream GitHub releases as a .deb.
+# https://github.com/Umio-Yasuno/amdgpu_top
+- name: Check if amdgpu_top is already installed
+  ansible.builtin.stat:
+    path: /usr/bin/amdgpu_top
+  register: amdgpu_top_stat
+
+- name: Download amdgpu_top .deb
+  ansible.builtin.get_url:
+    url: "https://github.com/Umio-Yasuno/amdgpu_top/releases/download/v{{ amdgpu_top_version }}/amdgpu-top_{{ amdgpu_top_version }}-1_amd64.deb"
+    dest: "/tmp/amdgpu-top_{{ amdgpu_top_version }}-1_amd64.deb"
+    mode: "0644"
+  when: not amdgpu_top_stat.stat.exists
+
+- name: Install amdgpu_top .deb
+  ansible.builtin.apt:
+    deb: "/tmp/amdgpu-top_{{ amdgpu_top_version }}-1_amd64.deb"
+    state: present
+  when: not amdgpu_top_stat.stat.exists
+
+# ─── Prometheus exporters ────────────────────────────────────────────────────
+# Exposes node (system + GPU) metrics over the tailnet for ser5's Prometheus to
+# scrape. The tailscale0 UFW allow-all rule above covers port 9100 — no extra
+# firewall rules needed.
+- name: Install prometheus-node-exporter
+  ansible.builtin.apt:
+    name: prometheus-node-exporter
+    state: present
+
+# Enable the drm collector for AMDGPU utilization + VRAM/GTT usage metrics.
+# hwmon collector (GPU temps, power draw) is already on by default.
+- name: Enable drm collector for prometheus-node-exporter
+  ansible.builtin.lineinfile:
+    path: /etc/default/prometheus-node-exporter
+    regexp: '^ARGS='
+    line: 'ARGS="--collector.drm"'
+    state: present
+    create: true
+    mode: "0644"
+  notify: restart node-exporter
+
+- name: Ensure prometheus-node-exporter is enabled and running
+  ansible.builtin.systemd:
+    name: prometheus-node-exporter
+    enabled: true
+    state: started

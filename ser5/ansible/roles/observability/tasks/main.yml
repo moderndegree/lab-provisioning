@@ -1,43 +1,148 @@
 ---
-# Observability — Prometheus + Grafana as rootless Podman quadlets.
-# Disabled by default; set enable_observability: true in group_vars/all.yml to activate.
-#
-# Purpose: monitor the mini inference box from ser5 —
-#   GPU temps, VRAM/GTT usage, and token throughput via Prometheus metrics.
-# Both services run as user-level systemd units (quadlets), no root required,
-# and survive reboots via user lingering (containers role must run first).
-#
-# STUB — set enable_observability: true and flesh out the TODOs below to build this out.
+# Observability — Prometheus + Grafana as rootless Podman quadlets on ser5.
+# Scrapes: mini node-exporter (:9100, system + GPU hwmon/drm) and Ollama (:11434/metrics).
+# Both services run as user-level systemd units (quadlets); the containers role must
+# run first (enables lingering and creates ~/.config/systemd/user/).
+# Access Grafana at http://localhost:3000 after provisioning.
+# Suggested dashboards to import manually:
+#   - https://grafana.com/grafana/dashboards/1860  (node-exporter-full)
+#   - https://grafana.com/grafana/dashboards/20728 (Ollama)
 
-- name: Observability role is a stub
+- name: Observability role is disabled
   ansible.builtin.debug:
-    msg: >
-      enable_observability: true but this role is not yet fully implemented.
-      See ansible/roles/observability/tasks/main.yml for TODOs.
+    msg: "enable_observability: false — skipping Prometheus + Grafana."
+  when: not (enable_observability | bool)
 
-# TODO: Install Prometheus as a Podman quadlet
-# Steps:
-#   1. Write {{ user_home }}/.config/systemd/user/prometheus.container
-#      [Container]
-#      Image=docker.io/prom/prometheus:v2.x.x   # pin version
-#      Volume={{ data_mount }}/services/prometheus:/prometheus:Z
-#      PublishPort=9090:9090
-#   2. Write prometheus.yml scrape config to {{ data_mount }}/services/prometheus/
-#      scrape_configs:
-#        - job_name: mini-node
-#          static_configs: [{targets: ['{{ mini_tailscale_ip }}:9100']}]
-#   3. systemctl --user daemon-reload && systemctl --user enable --now prometheus.service
-#   4. UFW: allow on tailscale0 interface only (no LAN exposure)
+- name: Deploy observability stack
+  when: enable_observability | bool
+  block:
+    - name: Resolve {{ username }} UID (needed for systemctl --user calls)
+      ansible.builtin.command: "id -u {{ username }}"
+      register: obs_user_uid
+      changed_when: false
 
-# TODO: Install Grafana as a Podman quadlet
-# Steps:
-#   1. Write {{ user_home }}/.config/systemd/user/grafana.container
-#      [Container]
-#      Image=docker.io/grafana/grafana:11.x.x   # pin version
-#      Volume={{ data_mount }}/services/grafana:/var/lib/grafana:Z
-#      PublishPort=3000:3000
-#      Environment=GF_AUTH_ANONYMOUS_ENABLED=true
-#   2. Provision Prometheus data source via Grafana provisioning file
-#   3. Import AMD node-exporter dashboard (community dashboard ID: 1860 or similar)
+    # ─── Data directories ──────────────────────────────────────────────────────
+    - name: Create Prometheus config directory
+      ansible.builtin.file:
+        path: "{{ prometheus_config_dir }}"
+        state: directory
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0755"
 
-# TODO: Add mini_tailscale_ip to group_vars/all.yml once mini's Tailscale IP is stable
+    - name: Create Prometheus data directory
+      ansible.builtin.file:
+        path: "{{ prometheus_data_dir }}"
+        state: directory
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0755"
+
+    - name: Create Grafana data directory
+      ansible.builtin.file:
+        path: "{{ grafana_data_dir }}"
+        state: directory
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0755"
+
+    - name: Create Grafana provisioning/datasources directory
+      ansible.builtin.file:
+        path: "{{ grafana_provisioning_dir }}/datasources"
+        state: directory
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0755"
+
+    # ─── Configuration ────────────────────────────────────────────────────────
+    - name: Write Prometheus scrape config
+      ansible.builtin.template:
+        src: prometheus.yml.j2
+        dest: "{{ prometheus_config_dir }}/prometheus.yml"
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0644"
+      notify:
+        - prometheus daemon-reload
+        - restart prometheus
+
+    - name: Write Grafana Prometheus datasource provisioning
+      ansible.builtin.template:
+        src: grafana-datasource.yml.j2
+        dest: "{{ grafana_provisioning_dir }}/datasources/prometheus.yml"
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0644"
+      notify:
+        - grafana daemon-reload
+        - restart grafana
+
+    # ─── Quadlet units ────────────────────────────────────────────────────────
+    # Podman's quadlet generator scans ~/.config/containers/systemd/ for .container
+    # and .network files (NOT ~/.config/systemd/user/ — that's for plain .service units).
+    - name: Ensure user containers/systemd quadlet directory exists
+      ansible.builtin.file:
+        path: "{{ user_home }}/.config/containers/systemd"
+        state: directory
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0755"
+
+    - name: Write obs Podman network quadlet
+      ansible.builtin.template:
+        src: obs.network.j2
+        dest: "{{ user_home }}/.config/containers/systemd/obs.network"
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0644"
+      notify:
+        - prometheus daemon-reload
+        - grafana daemon-reload
+
+    - name: Write Prometheus quadlet unit
+      ansible.builtin.template:
+        src: prometheus.container.j2
+        dest: "{{ user_home }}/.config/containers/systemd/prometheus.container"
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0644"
+      notify:
+        - prometheus daemon-reload
+        - restart prometheus
+
+    - name: Write Grafana quadlet unit
+      ansible.builtin.template:
+        src: grafana.container.j2
+        dest: "{{ user_home }}/.config/containers/systemd/grafana.container"
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0644"
+      notify:
+        - grafana daemon-reload
+        - restart grafana
+
+    - name: Flush handlers (daemon-reload before enable/start)
+      ansible.builtin.meta: flush_handlers
+
+    # ─── Enable and start services ────────────────────────────────────────────
+    - name: Ensure Prometheus user service is enabled and started
+      ansible.builtin.systemd:
+        name: prometheus.service
+        enabled: true
+        state: started
+        scope: user
+      become: true
+      become_user: "{{ username }}"
+      environment:
+        XDG_RUNTIME_DIR: "/run/user/{{ obs_user_uid.stdout }}"
+
+    - name: Ensure Grafana user service is enabled and started
+      ansible.builtin.systemd:
+        name: grafana.service
+        enabled: true
+        state: started
+        scope: user
+      become: true
+      become_user: "{{ username }}"
+      environment:
+        XDG_RUNTIME_DIR: "/run/user/{{ obs_user_uid.stdout }}"

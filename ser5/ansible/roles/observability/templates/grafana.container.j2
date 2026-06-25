@@ -1,0 +1,32 @@
+# Grafana quadlet — rootless Podman (Ansible-managed, do not edit by hand)
+# Joins the 'obs' bridge network; resolves Prometheus by container name.
+# UserNS=keep-id lets the container write to volumes owned by {{ username }}
+# without needing to pre-chown to the Grafana internal UID (472).
+[Unit]
+Description=Grafana dashboard
+After=network-online.target prometheus.service
+Wants=network-online.target
+
+[Container]
+Image=docker.io/grafana/grafana:{{ grafana_version }}
+ContainerName=grafana
+Network=obs.network
+UserNS=keep-id
+# Accessible on ser5 at http://localhost:{{ grafana_port }}.
+# Expose via Cloudflare tunnel or tailscale-serve if remote access is needed.
+PublishPort=127.0.0.1:{{ grafana_port }}:{{ grafana_port }}
+Volume={{ grafana_data_dir }}:/var/lib/grafana:Z
+Volume={{ grafana_provisioning_dir }}:/etc/grafana/provisioning:Z,ro
+Environment=GF_SERVER_HTTP_PORT={{ grafana_port }}
+# Anonymous admin for local lab use (no auth needed on a personal machine).
+Environment=GF_AUTH_ANONYMOUS_ENABLED=true
+Environment=GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+Environment=GF_AUTH_DISABLE_LOGIN_FORM=true
+AutoUpdate=registry
+
+[Service]
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

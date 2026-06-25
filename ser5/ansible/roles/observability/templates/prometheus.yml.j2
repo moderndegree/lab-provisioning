@@ -1,0 +1,26 @@
+# Prometheus scrape config — managed by Ansible, do not edit by hand.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # mini system + GPU metrics (prometheus-node-exporter)
+  # hwmon collector → GPU temps, power draw
+  # drm collector   → AMDGPU utilization, VRAM/GTT usage (enabled via ARGS in
+  #                   /etc/default/prometheus-node-exporter on mini)
+  - job_name: mini-node
+    static_configs:
+      - targets:
+          - "{{ mini_host }}:{{ mini_node_exporter_port }}"
+        labels:
+          instance: mini
+
+  # mini Ollama inference metrics (token throughput, active requests, queue depth)
+  # Ollama exposes Prometheus metrics at /metrics on the same port as the API.
+  - job_name: mini-ollama
+    static_configs:
+      - targets:
+          - "{{ mini_host }}:{{ mini_ollama_port }}"
+        labels:
+          instance: mini
+    metrics_path: /metrics

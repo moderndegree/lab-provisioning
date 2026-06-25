@@ -72,6 +72,21 @@ tailscale_version: "latest"
 enable_observability: false   # Prometheus + Grafana quadlets (monitors mini)
 enable_backups: false         # restic snapshots to {{ data_mount }}/backups
 
+# ─── Cloudflare Zero Trust tunnel ────────────────────────────────────────────
+# System-level Podman quadlet. Token lives in vault (vault_cloudflared_token).
+# The tunnel only STARTS once a real token is vaulted — a PLACEHOLDER never
+# crashes a provision run. Hostname→service routing is in the Zero Trust dashboard.
+enable_cloudflared: false
+cloudflared_image: "docker.io/cloudflare/cloudflared:latest"
+cloudflared_autoupdate: true
+
+# ─── Hermes gateway (remote agent surface) ───────────────────────────────────
+# Installed via the official NousResearch installer and run as a systemd user
+# service. Points at mini for Tier L (Sovereign) inference over the tailnet.
+# See roles/hermes/defaults/main.yml for hermes_home, hermes_bin, hermes_version.
+enable_hermes: false
+hermes_ollama_base_url: "http://mini:11434"
+
 # ─── Future stubs (not yet implemented) ───────────────────────────────────────
 # Set true only after the corresponding role is built.
 enable_postgres: false
