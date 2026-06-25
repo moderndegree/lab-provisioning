@@ -15,7 +15,7 @@ ContainerName=prometheus
 Network=obs.network
 UserNS=keep-id
 User=root
-PublishPort=127.0.0.1:{{ prometheus_port }}:{{ prometheus_port }}
+PublishPort=0.0.0.0:{{ prometheus_port }}:{{ prometheus_port }}
 Volume={{ prometheus_data_dir }}:/prometheus/data:Z
 Volume={{ prometheus_config_dir }}/prometheus.yml:/etc/prometheus/prometheus.yml:Z,ro
 Exec=--config.file=/etc/prometheus/prometheus.yml --storage.tsdb.retention.time=15d

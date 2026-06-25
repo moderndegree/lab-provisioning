@@ -26,35 +26,35 @@
       "mode": "subagent",
       "model": "ollama/oracle-32k",
       "description": "Produces an implementation plan from context provided in-prompt. Reasoning only.",
-      "permission": "deny",
+      "permission": { "*": "deny" },
       "prompt": "{file:./.moderndegree/prompts/planner.md}"
     },
     "architect": {
       "mode": "subagent",
       "model": "ollama/oracle-32k",
       "description": "Designs structure from provided context. Reasoning only.",
-      "permission": "deny",
+      "permission": { "*": "deny" },
       "prompt": "{file:./.moderndegree/prompts/architect.md}"
     },
     "reviewer": {
       "mode": "subagent",
       "model": "ollama/oracle-32k",
       "description": "Critiques diffs handed to it. Reasoning only.",
-      "permission": "deny",
+      "permission": { "*": "deny" },
       "prompt": "{file:./.moderndegree/prompts/reviewer.md}"
     },
     "security-auditor": {
       "mode": "subagent",
       "model": "ollama/oracle-32k",
       "description": "Audits provided diffs for security issues. Reasoning only.",
-      "permission": "deny",
+      "permission": { "*": "deny" },
       "prompt": "{file:./.moderndegree/prompts/security.md}"
     },
     "doc-writer": {
       "mode": "subagent",
       "model": "ollama/oracle-32k",
       "description": "Writes docs from provided material. Reasoning only.",
-      "permission": "deny",
+      "permission": { "*": "deny" },
       "prompt": "{file:./.moderndegree/prompts/docs.md}"
     },
     "coder": {

@@ -179,3 +179,37 @@
     HOME: "{{ user_home }}"
     npm_config_prefix: "{{ user_home }}/.npm-global"
   # Pinned to {{ opencode_version }} — update opencode_version in group_vars/all.yml to upgrade
+
+# ─── opencode global config ───────────────────────────────────────────────────
+- name: Ensure ~/.config/opencode directory exists
+  ansible.builtin.file:
+    path: "{{ user_home }}/.config/opencode"
+    state: directory
+    owner: "{{ username }}"
+    group: "{{ username }}"
+    mode: "0755"
+
+- name: Deploy opencode global config
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../workstation/opencode.json"
+    dest: "{{ user_home }}/.config/opencode/opencode.json"
+    owner: "{{ username }}"
+    group: "{{ username }}"
+    mode: "0644"
+
+- name: Deploy opencode AGENTS.md into config directory
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../workstation/AGENTS.md"
+    dest: "{{ user_home }}/.config/opencode/AGENTS.md"
+    owner: "{{ username }}"
+    group: "{{ username }}"
+    mode: "0644"
+
+- name: Deploy .moderndegree prompts and support files into config directory
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../workstation/.moderndegree/"
+    dest: "{{ user_home }}/.config/opencode/.moderndegree/"
+    owner: "{{ username }}"
+    group: "{{ username }}"
+    mode: "0644"
+    directory_mode: "0755"
