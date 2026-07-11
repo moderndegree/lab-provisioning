@@ -17,3 +17,13 @@
   become_user: "{{ username }}"
   environment:
     XDG_RUNTIME_DIR: "/run/user/{{ hermes_user_uid.stdout }}"
+
+- name: restart hermes-proxy
+  ansible.builtin.systemd:
+    name: hermes-proxy.service
+    state: restarted
+    scope: user
+  become: true
+  become_user: "{{ username }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ hermes_user_uid.stdout }}"

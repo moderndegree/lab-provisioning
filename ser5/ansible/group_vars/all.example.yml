@@ -87,6 +87,10 @@ cloudflared_autoupdate: true
 # See roles/hermes/defaults/main.yml for hermes_home, hermes_bin, hermes_version.
 enable_hermes: false
 hermes_ollama_base_url: "http://mini:11434"
+# Expose Hermes's OpenAI-compatible proxy (port 8645) to the tailnet so other
+# machines (AI Workstation, scripts) can chat through Hermes. UFW-scoped to
+# the tailscale0 interface. See roles/hermes/defaults/main.yml to tune.
+enable_hermes_proxy: true
 
 # ─── Future stubs (not yet implemented) ───────────────────────────────────────
 # Set true only after the corresponding role is built.

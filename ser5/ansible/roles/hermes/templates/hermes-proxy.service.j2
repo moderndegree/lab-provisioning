@@ -1,0 +1,23 @@
+[Unit]
+Description=Hermes Agent OpenAI-compatible proxy
+Documentation=https://hermes-agent.nousresearch.com/docs/reference/cli-commands
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=HOME={{ user_home }}
+Environment=HERMES_HOME={{ hermes_home }}
+# Same inference routing as the gateway: mini serves Tier L over the tailnet.
+Environment=OLLAMA_BASE_URL={{ hermes_ollama_base_url }}
+# Foreground mode; binds beyond localhost so tailnet peers can reach it
+# (UFW restricts the port to {{ hermes_tailnet_interface }}).
+ExecStart={{ hermes_bin }} proxy start --host {{ hermes_proxy_host }} --port {{ hermes_proxy_port }}
+Restart=on-failure
+RestartSec=15
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=60
+
+[Install]
+WantedBy=default.target

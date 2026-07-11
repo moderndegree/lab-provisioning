@@ -19,3 +19,16 @@ hermes_ollama_base_url: "http://mini:11434"
 # Version reference (installer always fetches latest; update when Hermes gains
 # a --version flag and pinning becomes possible).
 hermes_version: "0.16.0"
+
+# ─── OpenAI-compatible proxy (tailnet surface) ────────────────────────────────
+# `hermes proxy` exposes an OpenAI-compatible /v1 API (default 127.0.0.1:8645)
+# that other tailnet machines — e.g. the AI Workstation app — use to chat
+# through Hermes with its credentials/routing. The gateway alone exposes no
+# HTTP API, so without this the agent is unreachable from other hosts.
+enable_hermes_proxy: true
+hermes_proxy_host: "0.0.0.0"
+hermes_proxy_port: 8645
+
+# UFW is default-deny; this opens the proxy port on the tailnet interface only,
+# so the proxy is never reachable from the LAN or WAN.
+hermes_tailnet_interface: "tailscale0"

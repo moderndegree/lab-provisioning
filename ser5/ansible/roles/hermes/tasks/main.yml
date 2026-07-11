@@ -87,7 +87,19 @@
         - hermes daemon-reload
         - restart hermes-gateway
 
-    # Flush so daemon-reload runs before the enable/start task below.
+    - name: Template hermes-proxy user service unit
+      ansible.builtin.template:
+        src: hermes-proxy.service.j2
+        dest: "{{ user_home }}/.config/systemd/user/hermes-proxy.service"
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0644"
+      notify:
+        - hermes daemon-reload
+        - restart hermes-proxy
+      when: enable_hermes_proxy | bool
+
+    # Flush so daemon-reload runs before the enable/start tasks below.
     - name: Flush handlers
       ansible.builtin.meta: flush_handlers
 
@@ -101,3 +113,25 @@
       become_user: "{{ username }}"
       environment:
         XDG_RUNTIME_DIR: "/run/user/{{ hermes_user_uid.stdout }}"
+
+    - name: Ensure hermes-proxy user service is enabled and started
+      ansible.builtin.systemd:
+        name: hermes-proxy.service
+        enabled: true
+        state: started
+        scope: user
+      become: true
+      become_user: "{{ username }}"
+      environment:
+        XDG_RUNTIME_DIR: "/run/user/{{ hermes_user_uid.stdout }}"
+      when: enable_hermes_proxy | bool
+
+    # UFW is default-deny (base role); scope the proxy to the tailnet only.
+    - name: Allow Hermes proxy in from the tailnet interface
+      community.general.ufw:
+        rule: allow
+        direction: in
+        interface: "{{ hermes_tailnet_interface }}"
+        to_port: "{{ hermes_proxy_port }}"
+        proto: tcp
+      when: enable_hermes_proxy | bool
