@@ -35,10 +35,28 @@ loopkit eval suites/smoke.jsonl --strategy refine \
         --playbook pb.md --reflect                   # eval + evolving playbook
 loopkit star suites/smoke.jsonl --out sft.jsonl      # bootstrap training data
 loopkit stats                                        # compare runs
+loopkit stats --matrix                               # one row per suite x strategy x worker
+loopkit summary                                      # one-page markdown quality summary
 ```
 
 Environment: `LOOPKIT_BASE_URL` (default `http://mini:11434/v1`),
 `LOOPKIT_DATA` (default `~/.loopkit`; `/data/agentlab` on ser5).
+
+## Phase 1 suites and match modes
+
+`suites/extraction.jsonl`, `citation-qa.jsonl`, `structured-output.jsonl`, and
+`coding.jsonl` are the Phase 1 SMB-shaped benchmark set (`smoke.jsonl` stays a
+wiring check, not a benchmark). Beyond `exact`/`contains`/`regex`/`numeric`,
+two match modes support them:
+
+- `json_schema` — validates the answer's JSON against the task's `schema`
+  field (minimal stdlib validator: type/required/properties/items/enum).
+- `test` — executes the answer's fenced ```python``` code against the task's
+  `tests` field (asserts) in a sandboxed subprocess with a timeout.
+
+Run the full baseline matrix and generate the quality summary with
+`make loopkit-matrix` / `make loopkit-summary` from the repo root — see
+[`../../docs/ai-loops.md`](../../docs/ai-loops.md) for the bake-off ritual.
 
 ## The method that matters
 

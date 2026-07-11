@@ -95,6 +95,47 @@ Model routing guidance (matches the workstation agent stack):
 Both warm models have the full 256k window; there is no separate long-context
 variant. Prefill cost is the guardrail: pass what the task needs, not the corpus.
 
+## Phase 1 baseline matrix and the quarterly bake-off
+
+The Phase 1 suites live in `packages/loopkit/suites/`: `extraction.jsonl`,
+`citation-qa.jsonl`, `structured-output.jsonl`, `coding.jsonl` (plus the
+original `smoke.jsonl` for wiring checks, not a benchmark). Three extra match
+modes support them beyond exact/contains/regex/numeric:
+
+- `json_schema` — the answer's JSON (fenced ```json``` block, ANSWER: line, or
+  raw text, in that order) is validated against the task's `schema` field with
+  a minimal stdlib validator (type/required/properties/items/enum).
+- `test` — the answer's fenced ```python``` code block is executed alongside
+  the task's `tests` field (plain asserts) in a subprocess with a timeout;
+  scored 1.0 iff it exits clean. This runs model-generated code — sandboxed to
+  a throwaway temp dir, never on mini.
+
+Run the full 4-suite x 3-strategy x 2-worker matrix (single always establishes
+the baseline per combo):
+
+```bash
+make loopkit-matrix                    # from the repo root; needs mini reachable
+loopkit stats --matrix                 # one row per suite x strategy x worker (latest run)
+loopkit summary                        # one-page markdown: matrix + best-strategy deltas
+loopkit summary --out quality.md       # write it to a file instead of stdout
+```
+
+**Quarterly bake-off ritual** — when a new candidate base model shows up:
+
+1. Pull the candidate onto mini as a third, temporary model (or swap it into an
+   already-idle slot) — never disturb the warm pair mid-experiment.
+2. Run the same 4 suites against it: `loopkit eval <suite> --strategy single
+   --worker <candidate-tag>` (repeat for `refine`/`best_of_n` if the single
+   baseline looks competitive).
+3. `loopkit summary` — compare the candidate's row-for-row scores and token
+   cost against the current `general`/`coder` matrix.
+4. Adopt only on a measured win (better mean score at comparable or better
+   tokens/s); otherwise the candidate is rejected and the incumbent stays.
+   Record the decision (a line in this file or a run-store note) — the
+   two-model policy holds, only the *occupants* change.
+5. Re-run `make loopkit-matrix` fully once an occupant changes, so the baseline
+   matrix always reflects who's actually resident.
+
 ## Operational guardrails
 
 - **One interactive stream at a time on mini** (`ollama_num_parallel: 1`).

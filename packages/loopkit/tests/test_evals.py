@@ -17,6 +17,53 @@ def test_extract_answer_prefers_last_answer_line():
     assert extract_answer(text) == "final"
 
 
+def test_score_json_schema_mode():
+    schema = {
+        "type": "object",
+        "required": ["name", "age"],
+        "properties": {"name": {"type": "string"}, "age": {"type": "integer"}},
+    }
+    task = Task("t", "p", "", "json_schema", schema=schema)
+    good = 'reasoning...\n```json\n{"name": "Ana", "age": 30}\n```\nANSWER: done'
+    assert score(task, good) == 1.0
+
+    missing_field = 'ANSWER: {"name": "Ana"}'
+    assert score(task, missing_field) == 0.0
+
+    wrong_type = 'ANSWER: {"name": "Ana", "age": "thirty"}'
+    assert score(task, wrong_type) == 0.0
+
+    not_json = "ANSWER: sorry, no JSON here"
+    assert score(task, not_json) == 0.0
+
+
+def test_score_test_mode():
+    tests = "assert add(2, 3) == 5\nassert add(-1, 1) == 0\n"
+    task = Task("t", "p", "", "test", tests=tests)
+    passing = "```python\ndef add(a, b):\n    return a + b\n```\nANSWER: done"
+    assert score(task, passing) == 1.0
+
+    failing = "```python\ndef add(a, b):\n    return a - b\n```\nANSWER: done"
+    assert score(task, failing) == 0.0
+
+
+def test_load_suite_carries_schema_and_tests(tmp_path):
+    suite = tmp_path / "s.jsonl"
+    suite.write_text(
+        json.dumps({
+            "id": "a", "prompt": "p?", "match": "json_schema",
+            "schema": {"type": "object", "required": ["x"]},
+        }) + "\n"
+        + json.dumps({
+            "id": "b", "prompt": "p?", "match": "test",
+            "tests": "assert True",
+        }) + "\n"
+    )
+    tasks = load_suite(suite)
+    assert tasks[0].schema == {"type": "object", "required": ["x"]}
+    assert tasks[1].tests == "assert True"
+
+
 def test_load_suite_skips_comments(tmp_path):
     suite = tmp_path / "s.jsonl"
     suite.write_text(

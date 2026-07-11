@@ -6,7 +6,8 @@
   loopkit eval suite.jsonl --strategy refine [--playbook pb.md --reflect --limit 5]
   loopkit star suite.jsonl --out data.jsonl [--no-rationalize]
   loopkit playbook show|reflect pb.md ...
-  loopkit stats [--run-id ID]
+  loopkit stats [--run-id ID] [--matrix]
+  loopkit summary [--out FILE]
   loopkit models
 
 Environment:
@@ -89,6 +90,11 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("stats", help="summarize recorded runs")
     p.add_argument("--run-id")
+    p.add_argument("--matrix", action="store_true",
+                   help="one row per suite x strategy x worker (latest run of each)")
+
+    p = sub.add_parser("summary", help="one-page markdown quality summary from runs.db")
+    p.add_argument("--out", help="write to a file instead of stdout")
 
     sub.add_parser("models", help="list model aliases and their lab variants")
 
@@ -102,12 +108,24 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "stats":
         from loopkit.storage import RunStore
-        rows = RunStore().summary(args.run_id)
+        store = RunStore()
+        rows = store.matrix() if args.matrix else store.summary(args.run_id)
         if not rows:
             print("no recorded runs", file=sys.stderr)
             return 0
         for row in rows:
             print(json.dumps(row))
+        return 0
+
+    if args.command == "summary":
+        from loopkit.report import render_markdown_summary
+        from loopkit.storage import RunStore
+        text = render_markdown_summary(RunStore().matrix())
+        if args.out:
+            from pathlib import Path
+            Path(args.out).write_text(text, encoding="utf-8")
+        else:
+            print(text, end="")
         return 0
 
     if args.command == "playbook":

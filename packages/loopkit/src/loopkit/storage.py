@@ -103,3 +103,13 @@ class RunStore:
         ).fetchall()
         cols = ["run_id", "suite", "strategy", "worker", "tasks", "mean_score", "tokens", "started_at"]
         return [dict(zip(cols, r)) for r in rows]
+
+    def matrix(self) -> list[dict]:
+        """One row per (suite, strategy, worker) — the most recent run of each
+        combo. Feeds the Phase 1 baseline matrix / quality summary."""
+        latest: dict[tuple[str, str, str], dict] = {}
+        for row in self.summary():  # already newest-first
+            key = (row["suite"], row["strategy"], row["worker"])
+            if key not in latest:
+                latest[key] = row
+        return sorted(latest.values(), key=lambda r: (r["suite"], r["strategy"], r["worker"]))

@@ -3,7 +3,7 @@ SHELL := /bin/bash
 .PHONY: help \
         mini-provision mini-ping mini-syntax-check mini-lint mini-install-deps \
         ser5-init ser5-render ser5-provision ser5-ping ser5-syntax-check ser5-lint ser5-install-deps \
-        loopkit-venv loopkit-test
+        loopkit-venv loopkit-test loopkit-matrix loopkit-summary
 
 ## help               Show available targets
 help:
@@ -28,6 +28,8 @@ help:
 	@echo "  Loopkit (packages/loopkit) targets:"
 	@echo "    loopkit-venv         Create .venv and install loopkit (editable, with dev deps)"
 	@echo "    loopkit-test         Run the loopkit unit tests"
+	@echo "    loopkit-matrix       Run the Phase 1 baseline matrix (needs mini reachable)"
+	@echo "    loopkit-summary      Generate the one-page quality summary from runs.db"
 	@echo ""
 	@echo "  Most operations are best run from the machine directory directly:"
 	@echo "    cd mini && make provision"
@@ -82,3 +84,9 @@ loopkit-venv:
 
 loopkit-test: loopkit-venv
 	.venv/bin/pytest packages/loopkit/tests -q
+
+loopkit-matrix: loopkit-venv
+	LOOPKIT_BIN=$(CURDIR)/.venv/bin/loopkit packages/loopkit/suites/run-matrix.sh
+
+loopkit-summary: loopkit-venv
+	.venv/bin/loopkit summary
