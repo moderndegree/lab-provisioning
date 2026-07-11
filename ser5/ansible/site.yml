@@ -12,8 +12,9 @@
 #   tailscale      → join tailnet with authkey from vault
 #   cloudflared    → Cloudflare Zero Trust tunnel (enable_cloudflared: true to activate)
 #   hermes         → Hermes gateway quadlet (enable_hermes: true to activate)
+#   agentlab       → loopkit AI-loop experiment layer (enable_agentlab: true to activate)
 #   observability  → Prometheus + Grafana quadlets (enable_observability: true to activate)
-#   backups        → restic repo at {{ data_mount }}/backups (enable_backups: true to activate)
+#   backups        → restic snapshots + daily timer (enable_backups: true to activate)
 
 - name: Provision ser5
   hosts: ser5
@@ -31,6 +32,8 @@
       when: enable_cloudflared | bool
     - role: hermes
       when: enable_hermes | bool
+    - role: agentlab
+      when: enable_agentlab | bool
     - role: observability
       when: enable_observability | bool
     - role: backups

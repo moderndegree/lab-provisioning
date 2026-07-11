@@ -42,19 +42,25 @@ gpu_backend: "vulkan"
 # Set to 127.0.0.1 to keep Ollama local-only. The Hermes gateway runs on ser5 and
 # reaches this API over the tailnet (http://mini:11434).
 ollama_host: "0.0.0.0"
-# Modest GLOBAL floor only — per-model windows are baked into the Modelfile
-# variants below. A 16K floor stops an unguarded model grabbing a huge default
-# window and eating a multi-minute prefill (prefill is the wall at ~205 t/s).
-ollama_context_length: 16384
+# GLOBAL context window — applies to every model Ollama loads (per-request
+# num_ctx is not reachable through the /v1 endpoint opencode/loopkit use).
+# Maxed to the native window of both base models (262144). KV-cache budget at
+# 256k with q8_0:
+#   qwen3.6:27b      (65 layers, 4 KV heads × 256)  ≈ 34 GB
+#   qwen3.6:35b-a3b  (41 layers, 2 KV heads × 256)  ≈ 11 GB
+# → weights (18 + 23 GB) + KV ≈ 86 GB of the ~110 GB GPU pool. Headroom is
+# real but thin — if a third model ever needs to load, drop this to 131072
+# first. Prefill is the wall at ~205 t/s: a fully-packed 256k prompt costs
+# ~21 min before first token. The window is capacity, not a target.
+ollama_context_length: 262144
 # Single interactive stream — the warm pair is sized for one agent loop at a time.
 ollama_num_parallel: 1
 ollama_flash_attention: 1
 ollama_kv_cache_type: "q8_0"
 # -1 pins the warm pair resident across handoffs (no idle eviction).
 ollama_keep_alive: "-1"
-# Two models stay warm (oracle + toolcaller); the third slot lets an async swap-in
-# (batch/heavy) load alongside the warm pair instead of evicting it.
-ollama_max_loaded_models: 3
+# Exactly the warm pair — a third resident model would blow the KV budget above.
+ollama_max_loaded_models: 2
 
 # Vulkan ICD selector for the committed Vulkan path (RADV = Mesa's AMD driver).
 ollama_vulkan_icd: "RADV"
@@ -65,43 +71,29 @@ ollama_vulkan_icd: "RADV"
 hsa_override_gfx_version: "11.5.1"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Ollama model variants (built by the ollama role via `ollama create`)
+# Ollama models — two warm base models, no baked variants
 # ─────────────────────────────────────────────────────────────────────────────
-# The context tier IS the design. Reasoning is baked into each variant where
-# possible. Qwen3.6 toggles with /think in SYSTEM (ON for all oracle variants).
-# All models now use qwen3.6 as base — toolcaller gets /think and a system prompt;
-# think:false remains in opencode.json to keep the orchestrator reasoning-off.
-# Built only when missing — to rebuild a variant, `ollama rm <name>` then re-provision.
-# NOTE: the `from:` base tags must be pullable/present locally; adjust to the exact
-# tags your model store carries.
+# Policy (2026-07): exactly two base models stay resident, with NO baked system
+# prompts. Agent roles live in prompts (workstation/opencode.json agents,
+# loopkit strategy prompts), so one loaded model serves many differently-
+# prompted agents instead of one variant per role:
+#   qwen3.6:27b-mtp-q4_K_M      dense — complex coding + deep reasoning
+#   qwen3.6:35b-a3b-mtp-q4_K_M  MoE (3B active) — general tasks, orchestration
+# Reasoning is toggled per agent at the API level: reasoning_effort "none"
+# disables thinking on /v1 (verified on Ollama 0.31.2). The /no_think soft
+# switch and a think:false body field are BOTH ignored by /v1 — do not rely
+# on them; native /api/chat honours think:false if you need it from scripts.
+# NOTE: the tags must be pullable; adjust to the exact tags your store carries.
 ollama_manage_models: true
-ollama_models:
-  - name: oracle-64k
-    from: "qwen3.6:35b-a3b-mtp-q4_K_M"
-    num_ctx: 65536
-    num_predict: 8192
-    system: |
-      /think
-      You are a reasoning oracle. Think step by step before answering.
-  - name: oracle-batch-192k
-    from: "qwen3.6:35b-a3b-mtp-q4_K_M"
-    num_ctx: 196608
-    num_predict: 8192
-    system: |
-      /think
-      You are a long-context analysis oracle. Think step by step before answering.
-  - name: toolcaller-64k
-    from: "qwen3.6:35b-a3b-mtp-q4_K_M"
-    num_ctx: 65536
-    num_predict: 8192
-    system: |
-      You are the tool-calling orchestrator. Gather context, dispatch subagents, and gate on @@RESULT blocks.
-      Reasoning is disabled at the API level (think:false) — produce terse, deterministic outputs.
-  - name: heavy-128k
-    from: "nemotron-3-super:120b"
-    num_ctx: 131072
-    num_predict: 8192
-    system: "You are a high-stakes reasoning escalation. Reason thoroughly before answering."
+ollama_base_models:
+  - "qwen3.6:27b-mtp-q4_K_M"
+  - "qwen3.6:35b-a3b-mtp-q4_K_M"
+
+# Legacy Modelfile variants (built via `ollama create` when listed). Empty
+# under the two-base-model policy; the machinery stays for one-off experiments.
+# Reclaim disk from previously built variants with:
+#   ollama rm oracle-64k oracle-batch-192k toolcaller-64k heavy-128k coder-256k
+ollama_models: []
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Data disk

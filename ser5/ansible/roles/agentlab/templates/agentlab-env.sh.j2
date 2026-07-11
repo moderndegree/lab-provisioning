@@ -1,0 +1,5 @@
+# {{ ansible_managed }}
+# loopkit environment — experiments store runs/traces on the data disk and
+# talk to mini's Ollama OpenAI-compatible endpoint over the tailnet.
+export LOOPKIT_DATA="{{ agentlab_root }}"
+export LOOPKIT_BASE_URL="{{ agentlab_base_url }}"

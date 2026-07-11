@@ -34,3 +34,7 @@ vault_wifi_psk: "PLACEHOLDER_WIFI_PASSWORD"
 # does not begin with "PLACEHOLDER" — safe to leave as-is until you need it.
 vault_cloudflared_token: "PLACEHOLDER_CLOUDFLARE_TUNNEL_TOKEN"
 
+# restic repository password (only needed when enable_backups: true).
+# Generate:  openssl rand -base64 24   — and store a copy OFF this machine;
+# losing it makes every snapshot unrecoverable.
+vault_restic_password: "PLACEHOLDER_RESTIC_PASSWORD"

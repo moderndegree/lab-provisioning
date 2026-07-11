@@ -1,0 +1,10 @@
+# {{ ansible_managed }}
+[Unit]
+Description=restic backup of {{ restic_backup_paths | join(', ') }}
+Wants=restic-backup.timer
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/restic-backup.sh
+Nice=10
+IOSchedulingClass=idle

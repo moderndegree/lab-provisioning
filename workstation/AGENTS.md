@@ -15,11 +15,20 @@ coder/tester/devops agents touch the filesystem or shell.
 
 ## Placement rule (the architectural backbone)
 
-An agent goes on Qwen (`oracle-64k`) **only if it needs zero tools**. The moment an
-agent must read a file, run bash, edit, or fetch, it goes on Nemotron
-(`toolcaller-64k`). Qwen is text-only and breaks if handed a tools array; Nemotron
-is the sole tool-caller. Reasoning mode is a property of the model, not the agent:
-oracle variants are reasoning-on, the tool-caller is reasoning-off.
+Two warm base models on mini serve every agent — memory is the constraint, so
+**no agent may introduce a third model**. Placement is by task depth, not tool
+capability (both models handle tools and a 256k window):
+
+- `qwen3.6:27b-mtp-q4_K_M` (dense) — complex coding and deep reasoning:
+  planner, architect, reviewer, security-auditor, coder, tester.
+- `qwen3.6:35b-a3b-mtp-q4_K_M` (MoE, 3B active — fast) — general tasks and
+  orchestration: build (orchestrator), devops, doc-writer.
+
+Roles live in agent prompts, not baked model variants. Reasoning mode is set
+per agent via `reasoningEffort` in `opencode.json` (`"none"` on the
+orchestrator and devops for deterministic tool dispatch; everything else
+thinks). The `/no_think` soft switch and a `think:false` body field do NOT
+work through Ollama's `/v1` endpoint — never rely on them.
 
 ## Client-deliverable guardrails
 

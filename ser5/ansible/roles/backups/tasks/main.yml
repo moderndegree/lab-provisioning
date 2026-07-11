@@ -1,47 +1,101 @@
 ---
-# Backups — restic snapshots to {{ data_mount }}/backups.
-# Disabled by default; set enable_backups: true in group_vars/all.yml to activate.
+# Backups — restic snapshots to {{ restic_repo }} on a daily systemd timer.
+# Gated by enable_backups in site.yml. Requires vault_restic_password.
 #
 # restic provides content-addressable, encrypted, deduplicated snapshots.
-# The local repo at {{ data_mount }}/backups survives OS-disk wipes.
-# Pair with a remote restic repo (B2, S3, rclone) for off-site durability.
-#
-# STUB — set enable_backups: true and flesh out the TODOs below to build this out.
+# The local repo on the data disk survives OS-disk wipes. Restore:
+#   sudo bash -c 'source /etc/restic/restic.env && restic restore latest --target /tmp/restore'
 
-- name: Backups role is a stub
-  ansible.builtin.debug:
-    msg: >
-      enable_backups: true but this role is not yet fully implemented.
-      See ansible/roles/backups/tasks/main.yml for TODOs.
+- name: Refuse to run without a restic password
+  ansible.builtin.assert:
+    that:
+      - restic_password | length > 0
+      - not restic_password.startswith('PLACEHOLDER')
+    fail_msg: >-
+      enable_backups is true but vault_restic_password is unset (or still a
+      placeholder). Add it to ansible/group_vars/vault.yml (make vault-edit)
+      or set enable_backups: false.
 
-# TODO: Install restic
-# - name: Install restic
-#   ansible.builtin.apt:
-#     name: restic
-#     state: present
+- name: Install restic
+  ansible.builtin.apt:
+    name: restic
+    state: present
 
-# TODO: Initialise restic repo (idempotent — check first)
-# - name: Check if restic repo is initialised
-#   ansible.builtin.command: restic -r {{ data_mount }}/backups snapshots
-#   environment:
-#     RESTIC_PASSWORD: "{{ vault_restic_password }}"
-#   register: restic_check
-#   changed_when: false
-#   failed_when: false
-#
-# - name: Initialise restic repo
-#   ansible.builtin.command: restic -r {{ data_mount }}/backups init
-#   environment:
-#     RESTIC_PASSWORD: "{{ vault_restic_password }}"
-#   when: restic_check.rc != 0
+# ─── Credentials (root-only; the env file is the single source for cron/CLI) ──
+- name: Create /etc/restic config directory
+  ansible.builtin.file:
+    path: /etc/restic
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
 
-# TODO: Add vault_restic_password to vault.yml.example
+- name: Template restic environment file
+  ansible.builtin.template:
+    src: restic.env.j2
+    dest: /etc/restic/restic.env
+    owner: root
+    group: root
+    mode: "0600"
 
-# TODO: Define backup source paths (e.g. {{ user_home }}, {{ data_mount }}/services)
+# ─── Repository init (idempotent — checked, then initialised once) ────────────
+- name: Ensure restic repo directory exists
+  ansible.builtin.file:
+    path: "{{ restic_repo }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
 
-# TODO: Deploy systemd timer for daily/weekly automated snapshots
-# See: /etc/systemd/system/restic-backup.{service,timer}
-# Or as a user-level timer if running as {{ username }}
+- name: Check if restic repo is initialised
+  ansible.builtin.command: "restic -r {{ restic_repo }} cat config"
+  environment:
+    RESTIC_PASSWORD: "{{ restic_password }}"
+  register: restic_check
+  changed_when: false
+  failed_when: false
+  no_log: true
 
-# TODO: Document restore procedure in README:
-#   restic -r {{ data_mount }}/backups restore latest --target /
+- name: Initialise restic repo
+  ansible.builtin.command: "restic -r {{ restic_repo }} init"
+  environment:
+    RESTIC_PASSWORD: "{{ restic_password }}"
+  when: restic_check.rc != 0
+  changed_when: true
+  no_log: true
+
+# ─── Backup script + timer ────────────────────────────────────────────────────
+- name: Template backup script
+  ansible.builtin.template:
+    src: restic-backup.sh.j2
+    dest: /usr/local/sbin/restic-backup.sh
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Template restic-backup service unit
+  ansible.builtin.template:
+    src: restic-backup.service.j2
+    dest: /etc/systemd/system/restic-backup.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: backups daemon-reload
+
+- name: Template restic-backup timer unit
+  ansible.builtin.template:
+    src: restic-backup.timer.j2
+    dest: /etc/systemd/system/restic-backup.timer
+    owner: root
+    group: root
+    mode: "0644"
+  notify: backups daemon-reload
+
+- name: Flush handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start the backup timer
+  ansible.builtin.systemd:
+    name: restic-backup.timer
+    enabled: true
+    state: started

@@ -15,6 +15,13 @@ __pycache__/
 *.pyc
 *.pyo
 .env
+.venv/
+*.egg-info/
+.pytest_cache/
+dist/
+
+# loopkit local artifacts (runs live on ser5 under /data/agentlab)
+packages/loopkit/.loopkit/
 
 # Editor
 .vscode/

@@ -1,11 +1,11 @@
 [Service]
 # Ollama environment overrides for mini (MS-S1 Max, gfx1151, 128 GB unified RAM)
 
-# Modest GLOBAL floor. Per-model windows are baked into the Modelfile variants the
-# ollama role builds (oracle-32k / toolcaller-32k / oracle-batch-192k / heavy-64k),
-# which override this. Keeps an unguarded model from grabbing a huge default window
-# and eating a multi-minute prefill before first token (prefill is the wall at
-# ~205 t/s — a 256K window costs ~21 min before first token).
+# GLOBAL context window — the /v1 endpoint cannot set num_ctx per request, so
+# this is the window every loaded model gets. Sized in group_vars/all.yml
+# against the KV-cache budget of the two warm base models (see comments there).
+# Prefill is the wall at ~205 t/s — a fully-packed 256K prompt costs ~21 min
+# before first token; the window is capacity, not a target.
 Environment="OLLAMA_CONTEXT_LENGTH={{ ollama_context_length }}"
 
 Environment="OLLAMA_NUM_PARALLEL={{ ollama_num_parallel }}"
@@ -13,9 +13,9 @@ Environment="OLLAMA_FLASH_ATTENTION={{ ollama_flash_attention }}"
 Environment="OLLAMA_KV_CACHE_TYPE={{ ollama_kv_cache_type }}"
 Environment="OLLAMA_MAX_LOADED_MODELS={{ ollama_max_loaded_models }}"
 
-# Warm interactive pair (oracle-32k + toolcaller-32k) stays pinned across handoffs
-# with KEEP_ALIVE=-1. Batch + heavy are async swap-ins; loading one may evict per
-# LRU into the third MAX_LOADED_MODELS slot, which is fine.
+# The warm pair (qwen3.6 27b + 35b-a3b base models) stays pinned across
+# handoffs with KEEP_ALIVE=-1. MAX_LOADED_MODELS=2 means running any third
+# model evicts one of the pair — deliberate: the pair IS the fleet.
 Environment="OLLAMA_KEEP_ALIVE={{ ollama_keep_alive }}"
 
 # Keep the integrated GPU. Strix Halo enumerates as an iGPU and Ollama drops

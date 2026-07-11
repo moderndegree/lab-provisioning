@@ -8,7 +8,7 @@ in the Hermes gateway (`ser5/ansible/roles/hermes`), not by per-session discipli
 
 | Tier | Route | Use for |
 |---|---|---|
-| **L — Sovereign** | Ollama on `mini` (`oracle-64k` / `toolcaller-64k`) | Default for all client-confidential work |
+| **L — Sovereign** | Ollama on `mini` (qwen3.6 27B dense / 35B-A3B MoE) | Default for all client-confidential work |
 | **B — Governed** | Claude via AWS Bedrock (zero-retention, prompt caching, Flex) | Vision-critical, frontier overflow, high-stakes deliverables |
 | **Z — Throwaway** | OpenCode Zen free models | OSS / scaffolding only — **never** client deliverables |
 
@@ -51,5 +51,5 @@ judgment."
 
 - **Gateway / tier enforcement:** `ser5/ansible/roles/hermes` (rootless Podman
   quadlet; `enable_hermes: true`).
-- **Inference (Tier L):** `mini/ansible/roles/ollama` (four model variants).
+- **Inference (Tier L):** `mini/ansible/roles/ollama` (two warm base models).
 - **Agent team:** [../opencode.json](../opencode.json) + [../AGENTS.md](../AGENTS.md).

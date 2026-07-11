@@ -1,0 +1,22 @@
+# {{ ansible_managed }}
+# Long-horizon experiment runner: agentlab-run@<job>.service executes
+# {{ agentlab_root }}/jobs/<job>.sh detached from any SSH session.
+#   systemctl --user start agentlab-run@example-eval
+#   journalctl --user -u agentlab-run@example-eval -f
+[Unit]
+Description=agentlab experiment job %i
+After=network-online.target
+
+[Service]
+Type=exec
+ExecStart=/bin/bash {{ agentlab_root }}/jobs/%i.sh
+WorkingDirectory={{ agentlab_root }}
+Environment=LOOPKIT_DATA={{ agentlab_root }}
+Environment=LOOPKIT_BASE_URL={{ agentlab_base_url }}
+Environment=PATH={{ agentlab_venv }}/bin:/usr/local/bin:/usr/bin:/bin
+# Experiments are one-shot by design; restart policy stays off so a crashed
+# run is investigated, not silently re-run against a half-written store.
+Restart=no
+
+[Install]
+WantedBy=default.target

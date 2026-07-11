@@ -1,8 +1,9 @@
 # lab-provisioning
 
-Bare-metal IaC for two machines — a headless AMD inference box and a companion
-Linux workstation. Each machine has its own subdirectory with a full
-autoinstall + Ansible provisioning stack.
+Monorepo for the AI home lab: bare-metal IaC for two machines plus the
+software that runs on them. Each machine has its own subdirectory with a full
+autoinstall + Ansible provisioning stack; lab software lives under
+[`packages/`](packages/).
 
 ---
 
@@ -10,8 +11,17 @@ autoinstall + Ansible provisioning stack.
 
 | Directory | Machine | Role |
 |-----------|---------|------|
-| [`mini/`](mini/README.md) | Minisforum MS-S1 Max (Ryzen AI Max+ 395, 128 GB) | Headless LLM inference node; ROCm + Ollama + Hermes |
-| [`ser5/`](ser5/README.md) | Beelink SER5 (Ryzen 7 5800H, 64 GB) | Linux workstation + always-on companion + IaC test lab |
+| [`mini/`](mini/README.md) | Minisforum MS-S1 Max (Ryzen AI Max+ 395, 128 GB) | Headless LLM inference node; ROCm/Vulkan + Ollama (two warm base models, 256k windows) |
+| [`ser5/`](ser5/README.md) | Beelink SER5 (Ryzen 7 5800H, 64 GB) | Always-on driver: agentlab (loopkit), Hermes, observability, backups |
+
+## Software
+
+| Directory | What |
+|-----------|------|
+| [`packages/loopkit/`](packages/loopkit/README.md) | AI loop strategies (refine, best-of-N, ACE playbooks, STaR bootstrapping, evals) against mini's models — deployed to ser5 by the `agentlab` role |
+| [`workstation/`](workstation/README.md) | opencode config for the 9-agent coding team (copied/symlinked onto the dev box) |
+| [`docs/ai-loops.md`](docs/ai-loops.md) | Architecture + runbook for running AI loop experiments on the lab |
+| [`docs/roadmap.md`](docs/roadmap.md) | Phased plan: quality measurement, throughput, the cortex second brain, consulting productization |
 
 ---
 
@@ -38,6 +48,15 @@ lab-provisioning/
 ├── .gitattributes
 ├── .gitignore
 ├── .yamllint.yml            shared yamllint config (found by both machine Makefiles)
+├── docs/
+│   └── ai-loops.md          AI loop architecture + experiment runbook
+├── packages/
+│   └── loopkit/             loop strategies library + CLI (pure-stdlib Python)
+│       ├── pyproject.toml
+│       ├── src/loopkit/     client, loops, playbook, evals, star, storage, cli
+│       ├── suites/          starter eval suites (JSONL)
+│       └── tests/
+├── workstation/             opencode runtime config for the dev box
 ├── mini/                    MS-S1 Max — headless inference node
 │   ├── README.md
 │   ├── AGENTS.md

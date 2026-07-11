@@ -186,12 +186,34 @@ Vulkan/RADV is the ceiling (~98–103 tok/s on Qwen3-30B; ~170 tok/s on small Mo
 
 ---
 
+## Model policy — two warm base models
+
+mini keeps exactly **two base models resident**, both at their full native
+**262144-token window**, with no baked system prompts (agent roles live in the
+workstation opencode config and loopkit prompts — see `ollama_base_models` in
+`ansible/group_vars/all.yml`):
+
+| Model | Shape | Used for |
+|-------|-------|----------|
+| `qwen3.6:27b-mtp-q4_K_M` | 27B dense | complex coding + deep reasoning |
+| `qwen3.6:35b-a3b-mtp-q4_K_M` | 35B MoE (3B active) | general tasks, orchestration |
+
+`OLLAMA_MAX_LOADED_MODELS=2` + `OLLAMA_KEEP_ALIVE=-1` pin the pair; running any
+third model evicts one of them (deliberate — the pair is the fleet). Reasoning
+is a per-request concern: `reasoning_effort: "none"` on `/v1` disables thinking
+(verified on Ollama 0.31.2; `/no_think` and a `think:false` body field are both
+ignored on `/v1` — native `/api/chat` honours `think:false`).
+
+---
+
 ## Watch-outs
 
 - **No ROCm nightlies (7.9–7.12).** They cap memory allocation at 64 GB — useless on
   this 128 GB box. Stay on the pinned 7.2.x production stream.
-- **Leave RAM headroom.** Very large context (e.g. 200k on a 30B) can OOM and crash the
-  whole box on unified memory.
+- **Leave RAM headroom.** The maxed 256k windows budget ≈ 86 GB (weights + q8_0 KV)
+  of the ~110 GB pool for the warm pair — see the KV math in `group_vars/all.yml`.
+  Loading anything beyond the two base models risks an OOM that crashes the whole box
+  on unified memory; drop `ollama_context_length` to 131072 first if you must.
 - **Re-verify after any bump.** Re-run the verify block above after any kernel or ROCm
   upgrade before trusting the node.
 - **gfx1151 is community-supported only.** Pin versions; nothing here is on AMD's

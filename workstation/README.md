@@ -16,21 +16,29 @@ symlink into, your development machine.
 
 ## The split that drives everything
 
-`oracle-64k` (Qwen, text-only, reasoning-on) hosts the tool-free reasoning agents
-(planner, architect, reviewer, security-auditor, doc-writer). `toolcaller-64k`
-(Nemotron, sole tool-caller, reasoning-off) hosts the orchestrator and the
-coder/tester/devops agents. Two async escalations — `oracle-batch-192k` (whole-repo
-reads) and `heavy-128k` (120B hard calls) — are routed by the orchestrator and
-accepted at minutes-per-response.
+Two warm base models on mini serve all nine agents — nothing else ever loads
+(`OLLAMA_MAX_LOADED_MODELS=2`, `KEEP_ALIVE=-1`), and roles live in the agent
+prompts rather than baked Modelfile variants:
 
-All four model variants are built on `mini` by the `ollama` role
-(`mini/ansible/roles/ollama`, `ollama_models` in group_vars). This config just
-points opencode at `http://mini:11434/v1` and matches each model's `limit.context`
-to the baked window so compaction budgets against the right number.
+- **`qwen3.6:27b-mtp-q4_K_M`** (dense, deep reasoning) — planner, architect,
+  reviewer, security-auditor, coder, tester. Complex coding and hard analysis.
+- **`qwen3.6:35b-a3b-mtp-q4_K_M`** (MoE, 3B active, fast) — build
+  (orchestrator), devops, doc-writer. General work and tool dispatch.
 
-## Verify before wiring all five oracle agents
+Both run at their full native 256k window (set globally on mini —
+`ollama_context_length` in `mini/ansible/group_vars/all.yml`); this config
+matches `limit.context` so compaction budgets against the real number. Prefill
+is the wall (~205 t/s), so the orchestrator prompt tells it to hand subagents
+the *relevant* context, not the whole repo.
 
-`permission: "deny"` blocks tool *execution*, but Qwen breaks on the tools array's
-*presence*. Test one oracle agent end to end first. If you see a "tools not
-supported" / JSON-parse error, fall back to the array-stripping `tools: {...false}`
-map on that agent (see the runbook §4.3).
+## Reasoning control (verified against Ollama 0.31.2)
+
+Reasoning mode is per **agent**, set via `reasoningEffort` passthrough in
+`opencode.json`: `"none"` on the orchestrator and devops (terse, deterministic
+tool dispatch), unset (thinking on — the qwen3.6 default) everywhere else.
+
+Two things that look like they work but **don't** through the `/v1` endpoint:
+the `/think`/`/no_think` soft switches in prompts, and a `think: false` body
+field. Both were tested and are ignored. `reasoning_effort: "none"` is the
+only /v1 mechanism that disables thinking; native `/api/chat` honours
+`think: false` for scripts.

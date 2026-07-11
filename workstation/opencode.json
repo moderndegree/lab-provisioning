@@ -6,48 +6,31 @@
         "baseURL": "http://mini:11434/v1"
       },
       "models": {
-        "oracle-batch-192k": {
+        "qwen3.6:27b-mtp-q4_K_M": {
+          "name": "Qwen3.6 27B (dense — coding + deep reasoning)",
           "options": {
             "stream": false
           },
           "limit": {
-            "context": 196608,
+            "context": 262144,
             "output": 8192
           }
         },
-        "oracle-64k": {
+        "qwen3.6:35b-a3b-mtp-q4_K_M": {
+          "name": "Qwen3.6 35B-A3B (MoE — general + orchestration)",
           "options": {
             "stream": false
           },
           "limit": {
-            "context": 65536,
-            "output": 8192
-          }
-        },
-        "toolcaller-64k": {
-          "options": {
-            "stream": false,
-            "think": false
-          },
-          "limit": {
-            "context": 65536,
-            "output": 8192
-          }
-        },
-        "heavy-128k": {
-          "options": {
-            "stream": false
-          },
-          "limit": {
-            "context": 131072,
+            "context": 262144,
             "output": 8192
           }
         }
       }
     }
   },
-  "model": "ollama/toolcaller-64k",
-  "small_model": "ollama/oracle-64k",
+  "model": "ollama/qwen3.6:35b-a3b-mtp-q4_K_M",
+  "small_model": "ollama/qwen3.6:35b-a3b-mtp-q4_K_M",
   "compaction": {
     "auto": true,
     "prune": true,
@@ -61,13 +44,14 @@
   "agent": {
     "build": {
       "mode": "primary",
-      "model": "ollama/toolcaller-64k",
+      "model": "ollama/qwen3.6:35b-a3b-mtp-q4_K_M",
+      "reasoningEffort": "none",
       "description": "Orchestrator. Gathers context, dispatches subagents, gates on @@RESULT.",
       "prompt": "{file:./.moderndegree/prompts/orchestrator.md}"
     },
     "planner": {
       "mode": "subagent",
-      "model": "ollama/oracle-64k",
+      "model": "ollama/qwen3.6:27b-mtp-q4_K_M",
       "description": "Produces an implementation plan from context provided in-prompt. Reasoning only.",
       "permission": {
         "*": "deny"
@@ -76,8 +60,8 @@
     },
     "architect": {
       "mode": "subagent",
-      "model": "ollama/oracle-64k",
-      "description": "Designs structure from provided context. Reasoning only.",
+      "model": "ollama/qwen3.6:27b-mtp-q4_K_M",
+      "description": "Designs structure and interfaces from provided context. Reasoning only.",
       "permission": {
         "*": "deny"
       },
@@ -85,7 +69,7 @@
     },
     "reviewer": {
       "mode": "subagent",
-      "model": "ollama/oracle-64k",
+      "model": "ollama/qwen3.6:27b-mtp-q4_K_M",
       "description": "Critiques diffs handed to it. Reasoning only.",
       "permission": {
         "*": "deny"
@@ -94,7 +78,7 @@
     },
     "security-auditor": {
       "mode": "subagent",
-      "model": "ollama/oracle-64k",
+      "model": "ollama/qwen3.6:27b-mtp-q4_K_M",
       "description": "Audits provided diffs for security issues. Reasoning only.",
       "permission": {
         "*": "deny"
@@ -103,7 +87,7 @@
     },
     "doc-writer": {
       "mode": "subagent",
-      "model": "ollama/oracle-64k",
+      "model": "ollama/qwen3.6:35b-a3b-mtp-q4_K_M",
       "description": "Writes docs from provided material. Reasoning only.",
       "permission": {
         "*": "deny"
@@ -112,20 +96,21 @@
     },
     "coder": {
       "mode": "subagent",
-      "model": "ollama/toolcaller-64k",
-      "description": "Implements changes. Edits files.",
+      "model": "ollama/qwen3.6:27b-mtp-q4_K_M",
+      "description": "Implements changes. Edits files, verifies they parse/build.",
       "prompt": "{file:./.moderndegree/prompts/coder.md}"
     },
     "tester": {
       "mode": "subagent",
-      "model": "ollama/toolcaller-64k",
+      "model": "ollama/qwen3.6:27b-mtp-q4_K_M",
       "description": "Writes and runs tests, reads results.",
       "prompt": "{file:./.moderndegree/prompts/tester.md}"
     },
     "devops": {
       "mode": "subagent",
-      "model": "ollama/toolcaller-64k",
-      "description": "Infra and shell operations.",
+      "model": "ollama/qwen3.6:35b-a3b-mtp-q4_K_M",
+      "reasoningEffort": "none",
+      "description": "Infra and shell operations. Deterministic, no reasoning.",
       "prompt": "{file:./.moderndegree/prompts/devops.md}"
     }
   }

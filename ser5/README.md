@@ -195,12 +195,42 @@ Enable by setting the feature flag in `ansible/group_vars/all.yml`:
 
 | Flag | Role | Status |
 |------|------|--------|
-| `enable_observability: true` | `observability` | **Stub** — Prometheus + Grafana quadlets targeting mini's metrics |
-| `enable_backups: true` | `backups` | **Stub** — restic repo at `{{ data_mount }}/backups` |
+| `enable_observability: true` | `observability` | Prometheus + Grafana quadlets targeting mini's metrics |
+| `enable_hermes: true` | `hermes` | Hermes gateway (NousResearch) as a systemd user service |
+| `enable_agentlab: true` | `agentlab` | loopkit AI-loop experiment layer under `{{ data_mount }}/agentlab` — see [`../docs/ai-loops.md`](../docs/ai-loops.md) |
+| `enable_backups: true` | `backups` | restic snapshots + daily timer (needs `vault_restic_password`) — see below |
 | `enable_postgres: true` | _(not built)_ | Deferred |
 | `enable_forgejo: true` | _(not built)_ | Deferred |
 | `enable_jellyfin: true` | _(not built)_ | Deferred |
 | `enable_coolify: true` | _(not built)_ | Deferred |
+
+---
+
+## Backups (restic)
+
+With `enable_backups: true` and a real `vault_restic_password` (add it via
+`make vault-edit`; generate with `openssl rand -base64 24` and keep a copy **off**
+this machine), the `backups` role snapshots `{{ user_home }}`,
+`{{ data_mount }}/agentlab`, `{{ data_mount }}/services`, and `/etc` to an
+encrypted restic repo at `{{ data_mount }}/backups`, daily at 03:30 via a
+systemd timer (`restic-backup.timer`). Retention: 7 daily / 4 weekly / 6 monthly,
+pruned after each run, with a 1% read-data integrity check.
+
+```bash
+# status / logs
+systemctl list-timers restic-backup.timer
+journalctl -u restic-backup.service -n 50
+
+# manual snapshot now
+sudo systemctl start restic-backup.service
+
+# list snapshots / restore
+sudo bash -c 'source /etc/restic/restic.env && restic snapshots'
+sudo bash -c 'source /etc/restic/restic.env && restic restore latest --target /tmp/restore'
+```
+
+The local repo survives OS-disk wipes (it lives on the data disk). For real
+durability, add an off-site restic repo (B2/S3/rclone) as a second target.
 
 ---
 
@@ -265,6 +295,6 @@ autoinstall/user-data
 - [ ] Verify Tailscale GPG key URL for Ubuntu 26.04 codename
 - [ ] Update `tailscale_version` in `all.yml` to latest stable before provisioning
 - [ ] Document NoCloud USB creation procedure with seed ISO
-- [ ] Implement `observability` role (Prometheus + Grafana quadlets)
-- [ ] Implement `backups` role (restic + systemd timer)
+- [x] Implement `observability` role (Prometheus + Grafana quadlets)
+- [x] Implement `backups` role (restic + systemd timer)
 - [ ] Add `mini_tailscale_ip` to `all.yml` once Tailscale IP is stable

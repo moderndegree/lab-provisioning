@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# {{ ansible_managed }}
+# Snapshot the configured paths, then apply the retention policy with prune.
+set -euo pipefail
+source /etc/restic/restic.env
+
+restic backup \
+{% for path in restic_backup_paths %}
+  "{{ path }}" \
+{% endfor %}
+{% for pattern in restic_excludes %}
+  --exclude "{{ pattern }}" \
+{% endfor %}
+  --one-file-system
+
+restic forget --prune \
+  --keep-daily {{ restic_keep_daily }} \
+  --keep-weekly {{ restic_keep_weekly }} \
+  --keep-monthly {{ restic_keep_monthly }}
+
+restic check --read-data-subset=1%
