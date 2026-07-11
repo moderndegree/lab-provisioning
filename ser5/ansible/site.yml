@@ -17,7 +17,7 @@
 #   backups        → restic snapshots + daily timer (enable_backups: true to activate)
 
 - name: Provision ser5
-  hosts: ser5
+  hosts: ser5_host
   become: true
   gather_facts: true
   roles:

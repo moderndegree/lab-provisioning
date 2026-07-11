@@ -83,7 +83,7 @@ provision: preflight
 
 ## ping           Verify SSH connectivity to ser5
 ping:
-	ansible -i $(INVENTORY) ser5 -m ping
+	ansible -i $(INVENTORY) ser5_host -m ping
 
 ## syntax-check   Validate playbook syntax (uses .vault_pass if present)
 syntax-check:

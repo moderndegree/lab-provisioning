@@ -5,20 +5,30 @@
 
 # Tailscale repo pinned to 'noble' — no 'resolute' (26.04) release in their repo yet.
 # Update this once https://pkgs.tailscale.com/stable/ubuntu/ lists resolute.
-- name: Download and dearmor Tailscale GPG signing key
-  ansible.builtin.shell:
-    cmd: >
-      curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/noble.gpg
-      | gpg --dearmor -o /usr/share/keyrings/tailscale-archive-keyring.gpg
-    creates: /usr/share/keyrings/tailscale-archive-keyring.gpg
+- name: Install python3-debian (required by deb822_repository)
+  ansible.builtin.apt:
+    name: python3-debian
+    state: present
+
+- name: Remove legacy Tailscale apt repository file (superseded by deb822 format)
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/tailscale.list
+    state: absent
+
+- name: Remove legacy Tailscale keyring (superseded by deb822_repository-managed key)
+  ansible.builtin.file:
+    path: /usr/share/keyrings/tailscale-archive-keyring.gpg
+    state: absent
 
 - name: Add Tailscale apt repository
-  ansible.builtin.apt_repository:
-    repo: >-
-      deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg]
-      https://pkgs.tailscale.com/stable/ubuntu noble main
+  ansible.builtin.deb822_repository:
+    name: tailscale
+    types: deb
+    uris: https://pkgs.tailscale.com/stable/ubuntu
+    suites: noble
+    components: main
+    signed_by: https://pkgs.tailscale.com/stable/ubuntu/noble.gpg
     state: present
-    filename: tailscale
 
 - name: Install Tailscale
   ansible.builtin.apt:

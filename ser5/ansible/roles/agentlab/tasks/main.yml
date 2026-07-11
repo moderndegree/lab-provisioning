@@ -22,6 +22,7 @@
     mode: "0755"
   loop:
     - "{{ agentlab_root }}"
+    - "{{ agentlab_root }}/src"
     - "{{ agentlab_root }}/playbooks"
     - "{{ agentlab_root }}/suites"
     - "{{ agentlab_root }}/datasets"
