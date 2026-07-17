@@ -8,6 +8,7 @@ Wants=network-online.target
 Type=simple
 Environment=HOME={{ user_home }}
 Environment=HERMES_HOME={{ hermes_home }}
+Environment=PATH={{ hermes_path }}
 # Same inference routing as the gateway: mini serves Tier L over the tailnet.
 Environment=OLLAMA_BASE_URL={{ hermes_ollama_base_url }}
 # Foreground mode; binds beyond localhost so tailnet peers can reach it

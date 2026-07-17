@@ -32,3 +32,34 @@ hermes_proxy_port: 8645
 # UFW is default-deny; this opens the proxy port on the tailnet interface only,
 # so the proxy is never reachable from the LAN or WAN.
 hermes_tailnet_interface: "tailscale0"
+
+# ─── Grok Build / xAI integration ─────────────────────────────────────────────
+# Hermes has first-class xAI support (separate from the Grok Build CLI):
+#
+#   • Model provider: SuperGrok OAuth (`hermes auth add xai-oauth`) or API key
+#     (`XAI_API_KEY` → provider: xai). Default model for OAuth is grok-build-0.1.
+#     This does NOT change Hermes's default routing — Tier L stays Ollama on mini
+#     unless the operator runs `hermes model` / `hermes config set` themselves.
+#
+#   • Coding skill: `hermes skills install official/autonomous-ai-agents/grok`
+#     teaches Hermes to delegate coding to the `grok` CLI (installed by the
+#     workstation role). Auth for the CLI is separate: `grok login`.
+#
+# Docs:
+#   https://hermes-agent.nousresearch.com/docs/guides/xai-grok-oauth
+#   https://hermes-agent.nousresearch.com/docs/user-guide/skills/optional/autonomous-ai-agents/autonomous-ai-agents-grok
+#   https://x.ai/news/grok-hermes
+enable_hermes_grok_skill: true
+hermes_grok_skill: "official/autonomous-ai-agents/grok"
+
+# Write vault_xai_api_key into HERMES_HOME/.env when true and the vault value
+# is real (not a PLACEHOLDER). Prefer OAuth for SuperGrok; use API key for
+# headless / pay-as-you-go.
+enable_hermes_xai_api_key: false
+
+# Optional web search backend override. Empty = leave Hermes config alone.
+# Set to "xai" once xAI credentials exist (OAuth or API key).
+hermes_web_backend: ""
+
+# PATH for gateway/proxy so Hermes can find `grok` when the skill runs.
+hermes_path: "{{ user_home }}/.grok/bin:{{ user_home }}/.local/bin:/usr/local/bin:/usr/bin:/bin"

@@ -1,0 +1,12 @@
+# Grok Build global config (provisioned once; not overwritten on re-provision).
+# Auth: run `grok login` (SuperGrok / X Premium+) or set XAI_API_KEY.
+# Docs: https://x.ai/cli (local guide: ~/.grok/docs/user-guide/)
+
+[cli]
+auto_update = {{ grok_auto_update | bool | lower }}
+
+[ui]
+permission_mode = "{{ grok_permission_mode }}"
+
+[models]
+default = "{{ grok_default_model }}"

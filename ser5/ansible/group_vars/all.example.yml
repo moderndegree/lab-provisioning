@@ -60,6 +60,17 @@ node_version: "lts"
 # opencode-ai pinned npm version. Update and re-run make provision to upgrade.
 opencode_version: "1.17.8"
 
+# ─── Grok Build (xAI coding agent CLI) ───────────────────────────────────────
+# Installed by the workstation role via https://x.ai/cli/install.sh into
+# ~/.grok/bin. Use "latest" for the current stable, or pin e.g. "0.2.101".
+# Auth is NOT provisioned: on the host run `grok login` (SuperGrok / X Premium+)
+# or set XAI_API_KEY. Hermes can delegate coding to this CLI when
+# enable_hermes_grok_skill is true (see Hermes section below).
+grok_version: "latest"
+grok_auto_update: false
+grok_permission_mode: "ask"          # ask | always-approve
+grok_default_model: "grok-build-0.1"
+
 # ─── Tailscale ────────────────────────────────────────────────────────────────
 # "latest" installs/upgrades to the current stable release (recommended — the
 # Tailscale apt repo only keeps recent versions, so exact pins can age out).
@@ -91,6 +102,20 @@ hermes_ollama_base_url: "http://mini:11434"
 # machines (AI Workstation, scripts) can chat through Hermes. UFW-scoped to
 # the tailscale0 interface. See roles/hermes/defaults/main.yml to tune.
 enable_hermes_proxy: true
+#
+# Grok / xAI integration (special Hermes support — does NOT change default model):
+#   1. Official skill: Hermes can spawn the `grok` CLI for coding tasks
+#      (requires Grok Build on PATH from the workstation role + `grok login`).
+#   2. Optional model provider: SuperGrok OAuth (`hermes auth add xai-oauth`)
+#      or vault_xai_api_key → HERMES_HOME/.env as XAI_API_KEY (provider: xai).
+# OAuth cannot be automated; run post-provision steps on the host (see README).
+enable_hermes_grok_skill: true
+# When true and vault_xai_api_key is set (non-PLACEHOLDER), write XAI_API_KEY
+# into HERMES_HOME/.env for API-key path. Prefer OAuth for SuperGrok tiers.
+enable_hermes_xai_api_key: false
+# Optional: set Hermes web search backend to xAI when xAI credentials exist.
+# Leave empty to leave config alone; set "xai" to prefer xAI-hosted search.
+hermes_web_backend: ""
 
 # ─── Future stubs (not yet implemented) ───────────────────────────────────────
 # Set true only after the corresponding role is built.

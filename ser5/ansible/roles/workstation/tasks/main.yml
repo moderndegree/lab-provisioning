@@ -213,3 +213,83 @@
     group: "{{ username }}"
     mode: "0644"
     directory_mode: "0755"
+
+# ─── Grok Build (xAI coding agent CLI) ───────────────────────────────────────
+# Official installer places the binary under ~/.grok/bin and may symlink into
+# ~/.local/bin. Auth is interactive (grok login) or XAI_API_KEY — not provisioned
+# here. Hermes can delegate coding tasks to this CLI via the official skill
+# (see roles/hermes).
+- name: Check if Grok Build binary exists
+  ansible.builtin.stat:
+    path: "{{ user_home }}/.grok/bin/grok"
+  register: grok_binary_stat
+
+- name: Resolve installed Grok Build version
+  ansible.builtin.command:
+    cmd: "{{ user_home }}/.grok/bin/grok --version"
+  become: true
+  become_user: "{{ username }}"
+  register: grok_installed_version
+  changed_when: false
+  failed_when: false
+  when: grok_binary_stat.stat.exists
+
+# Download to a file (not stdin) so bash reads the script from the file path
+# rather than stdin — same pattern as the Hermes installer task.
+- name: Install Grok Build CLI via official xAI installer
+  ansible.builtin.shell:
+    cmd: >-
+      curl -fsSL https://x.ai/cli/install.sh
+      -o /tmp/grok-install-{{ username }}.sh &&
+      chmod 700 /tmp/grok-install-{{ username }}.sh &&
+      {% if grok_version | length > 0 and grok_version != 'latest' -%}
+      bash /tmp/grok-install-{{ username }}.sh {{ grok_version }}
+      {%- else -%}
+      bash /tmp/grok-install-{{ username }}.sh
+      {%- endif %}
+    executable: /bin/bash
+  environment:
+    HOME: "{{ user_home }}"
+    USER: "{{ username }}"
+  become: true
+  become_user: "{{ username }}"
+  when: >-
+    not grok_binary_stat.stat.exists
+    or (
+      grok_version | length > 0
+      and grok_version != 'latest'
+      and grok_binary_stat.stat.exists
+      and grok_version not in (grok_installed_version.stdout | default(''))
+    )
+  register: grok_install_result
+  failed_when: grok_install_result.rc != 0
+
+- name: Ensure Grok Build is on PATH for interactive shells
+  ansible.builtin.blockinfile:
+    path: "{{ user_home }}/.bashrc"
+    create: true
+    owner: "{{ username }}"
+    group: "{{ username }}"
+    mode: "0644"
+    marker: "# {mark} ANSIBLE MANAGED — grok build"
+    block: |
+      export PATH="$HOME/.grok/bin:$PATH"
+      [[ -r "$HOME/.grok/completions/bash/grok.bash" ]] && source "$HOME/.grok/completions/bash/grok.bash"
+
+- name: Ensure ~/.grok directory exists
+  ansible.builtin.file:
+    path: "{{ user_home }}/.grok"
+    state: directory
+    owner: "{{ username }}"
+    group: "{{ username }}"
+    mode: "0755"
+
+- name: Deploy Grok Build global config
+  ansible.builtin.template:
+    src: grok-config.toml.j2
+    dest: "{{ user_home }}/.grok/config.toml"
+    owner: "{{ username }}"
+    group: "{{ username }}"
+    mode: "0644"
+    force: false
+  # force: false — do not clobber operator edits after first provision

@@ -8,10 +8,13 @@ Wants=network-online.target
 Type=simple
 Environment=HOME={{ user_home }}
 Environment=HERMES_HOME={{ hermes_home }}
+# Include ~/.grok/bin so the optional Grok Build skill can spawn `grok`.
+Environment=PATH={{ hermes_path }}
 # Point Hermes at the inference node (mini) over the tailnet for Tier L (Sovereign)
 # inference. The Hermes gateway running here on ser5 is the routing layer; mini
 # is the actual inference node.
 Environment=OLLAMA_BASE_URL={{ hermes_ollama_base_url }}
+# HERMES_HOME/.env (optional XAI_API_KEY etc.) is loaded by Hermes itself.
 ExecStart={{ hermes_bin }} gateway start --all
 Restart=on-failure
 RestartSec=15

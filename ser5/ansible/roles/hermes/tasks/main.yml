@@ -67,6 +67,113 @@
         group: "{{ username }}"
         mode: "0644"
 
+    # ─── Optional xAI API key (HERMES_HOME/.env) ──────────────────────────────
+    # Prefer SuperGrok OAuth (`hermes auth add xai-oauth`) — not automatable.
+    # API key path is opt-in via enable_hermes_xai_api_key + vault_xai_api_key.
+    - name: Ensure Hermes env file exists
+      ansible.builtin.file:
+        path: "{{ hermes_home }}/.env"
+        state: touch
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0600"
+        modification_time: preserve
+        access_time: preserve
+      when: enable_hermes_xai_api_key | bool
+
+    - name: Write XAI_API_KEY into Hermes env when vaulted
+      ansible.builtin.lineinfile:
+        path: "{{ hermes_home }}/.env"
+        regexp: '^XAI_API_KEY='
+        line: "XAI_API_KEY={{ vault_xai_api_key }}"
+        state: present
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0600"
+      when: >-
+        (enable_hermes_xai_api_key | bool)
+        and (vault_xai_api_key | default('') | length > 0)
+        and not (vault_xai_api_key | default('') is search('^PLACEHOLDER'))
+      no_log: true
+      notify:
+        - restart hermes-gateway
+        - restart hermes-proxy
+
+    # ─── Optional web.backend: xai ────────────────────────────────────────────
+    # Only patches config.yaml when hermes_web_backend is non-empty. Does not
+    # change model.provider — default inference stays Ollama / Tier L.
+    - name: Ensure Hermes config.yaml exists before web.backend patch
+      ansible.builtin.stat:
+        path: "{{ hermes_home }}/config.yaml"
+      register: hermes_config_stat
+      when: hermes_web_backend | default('') | length > 0
+
+    - name: Set Hermes web.backend (xAI search) when requested
+      ansible.builtin.command:
+        cmd: >-
+          {{ hermes_bin }} config set web.backend {{ hermes_web_backend }}
+      environment:
+        HOME: "{{ user_home }}"
+        HERMES_HOME: "{{ hermes_home }}"
+        PATH: "{{ hermes_path }}"
+      become: true
+      become_user: "{{ username }}"
+      when: >-
+        (hermes_web_backend | default('') | length > 0)
+        and (hermes_config_stat.stat.exists | default(false))
+      register: hermes_web_backend_set
+      changed_when: hermes_web_backend_set.rc == 0
+      failed_when: false
+
+    # ─── Official Grok Build skill (delegate coding to `grok` CLI) ─────────────
+    - name: Check if Hermes Grok skill is already installed
+      ansible.builtin.command:
+        cmd: "{{ hermes_bin }} skills list"
+      environment:
+        HOME: "{{ user_home }}"
+        HERMES_HOME: "{{ hermes_home }}"
+        PATH: "{{ hermes_path }}"
+      become: true
+      become_user: "{{ username }}"
+      register: hermes_skills_list
+      changed_when: false
+      failed_when: false
+      when: enable_hermes_grok_skill | bool
+
+    # -y skips the interactive confirmation prompt; without it this hangs under
+    # Ansible (stdin is a PTY but no human answers "yes").
+    - name: Install Hermes official Grok Build skill
+      ansible.builtin.command:
+        cmd: "{{ hermes_bin }} skills install -y {{ hermes_grok_skill }}"
+      environment:
+        HOME: "{{ user_home }}"
+        HERMES_HOME: "{{ hermes_home }}"
+        PATH: "{{ hermes_path }}"
+      become: true
+      become_user: "{{ username }}"
+      register: hermes_grok_skill_install
+      changed_when: >-
+        hermes_grok_skill_install.rc == 0
+        and ('already' not in (hermes_grok_skill_install.stdout | default('') | lower))
+      failed_when: false
+      # Safety net: skill install is network-bound; don't block provision forever.
+      async: 120
+      poll: 5
+      when: >-
+        (enable_hermes_grok_skill | bool)
+        and (
+          hermes_skills_list.rc != 0
+          or ('grok' not in (hermes_skills_list.stdout | default('') | lower))
+        )
+
+    - name: Note post-provision Grok auth steps
+      ansible.builtin.debug:
+        msg: >-
+          Hermes Grok skill: {{ 'enabled' if (enable_hermes_grok_skill | bool) else 'disabled' }}.
+          On the host after provision: (1) grok login   (2) hermes auth add xai-oauth
+          (optional model provider / x_search / Imagine / TTS).
+          Default Hermes model stays Ollama at {{ hermes_ollama_base_url }}.
+
     # ─── Systemd user service ─────────────────────────────────────────────────
     - name: Ensure user systemd directory exists
       ansible.builtin.file:

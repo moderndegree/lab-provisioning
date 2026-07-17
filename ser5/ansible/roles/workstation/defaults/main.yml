@@ -1,0 +1,7 @@
+---
+# Grok Build CLI (xAI) — installed under ~/.grok/bin via the official installer.
+# Override in group_vars/all.yml. Auth is interactive: `grok login` on the host.
+grok_version: "latest"
+grok_auto_update: false
+grok_permission_mode: "ask"
+grok_default_model: "grok-build-0.1"

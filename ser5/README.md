@@ -184,7 +184,7 @@ make provision
 | `base` | Apt upgrade, base packages, UFW (default-deny + SSH), timezone, locale, user account, authorized keys |
 | `desktop` | Installs `ubuntu-desktop-minimal` (GNOME + GDM3) |
 | `storage` | Partitions + formats the 1 TB SATA SSD (first run only); mounts at `{{ data_mount }}`; creates `vms/`, `backups/`, `services/`, `media/` subdirs |
-| `workstation` | git, ansible, ansible-lint, podman, libvirt-clients, neovim, ripgrep, jq, tmux, yamllint — usable dev workstation and Ansible control node |
+| `workstation` | git, ansible, ansible-lint, podman, libvirt-clients, neovim, ripgrep, jq, tmux, yamllint, Node/`n`/opencode-ai, **Grok Build CLI** — usable dev workstation and Ansible control node |
 | `virtualization` | libvirt + qemu-kvm + virt-manager; adds user to `libvirt` and `kvm` groups; defines `ser5-vms` storage pool on `{{ data_mount }}/vms` |
 | `containers` | Rootless Podman; enables user lingering; creates `~/.config/systemd/user/` for quadlet drop-ins |
 | `tailscale` | Adds Tailscale apt repo, installs pinned version, joins tailnet with `vault_tailscale_authkey` |
@@ -196,13 +196,94 @@ Enable by setting the feature flag in `ansible/group_vars/all.yml`:
 | Flag | Role | Status |
 |------|------|--------|
 | `enable_observability: true` | `observability` | Prometheus + Grafana quadlets targeting mini's metrics |
-| `enable_hermes: true` | `hermes` | Hermes gateway (NousResearch) as a systemd user service |
+| `enable_hermes: true` | `hermes` | Hermes gateway (NousResearch) as a systemd user service; optional Grok Build skill + xAI env (see below) |
 | `enable_agentlab: true` | `agentlab` | loopkit AI-loop experiment layer under `{{ data_mount }}/agentlab` — see [`../docs/ai-loops.md`](../docs/ai-loops.md) |
 | `enable_backups: true` | `backups` | restic snapshots + daily timer (needs `vault_restic_password`) — see below |
 | `enable_postgres: true` | _(not built)_ | Deferred |
 | `enable_forgejo: true` | _(not built)_ | Deferred |
 | `enable_jellyfin: true` | _(not built)_ | Deferred |
 | `enable_coolify: true` | _(not built)_ | Deferred |
+
+---
+
+## Grok Build + Hermes xAI integration
+
+### Workstation: Grok Build CLI
+
+The `workstation` role installs [Grok Build](https://x.ai/cli) (xAI’s coding agent
+CLI) via the official installer into `~/.grok/bin`, puts it on `PATH` in
+`.bashrc`, and seeds `~/.grok/config.toml` once (never overwrites operator edits).
+
+| Var | Default | Meaning |
+|-----|---------|---------|
+| `grok_version` | `latest` | Pin e.g. `0.2.101`, or `latest` |
+| `grok_auto_update` | `false` | `cli.auto_update` in config.toml |
+| `grok_permission_mode` | `ask` | `ask` or `always-approve` |
+| `grok_default_model` | `grok-build-0.1` | Default model id |
+
+**Auth is not provisioned** (browser OAuth). On the host after first provision:
+
+```bash
+grok login          # SuperGrok / X Premium+ → ~/.grok/auth.json
+grok --version
+grok -p "Say ok."   # headless smoke test
+```
+
+API-key fallback: `export XAI_API_KEY=xai-...` (console.x.ai).
+
+### Hermes: special Grok support
+
+Hermes has first-class xAI / Grok integration (does **not** change the default
+Tier L route to mini Ollama):
+
+1. **Coding skill** — `hermes skills install official/autonomous-ai-agents/grok`  
+   Hermes can spawn the `grok` CLI for features/PRs/refactors (headless `-p`
+   preferred). Requires Grok Build on PATH (workstation role) + `grok login`.  
+   Gated by `enable_hermes_grok_skill: true` (default when Hermes is enabled in
+   role defaults).
+
+2. **Model provider (optional)** — SuperGrok OAuth or API key  
+   - OAuth (preferred): `hermes auth add xai-oauth` then pick models in
+     `hermes model` (default catalog pin: `grok-build-0.1`).  
+   - API key: set `enable_hermes_xai_api_key: true` and vault `vault_xai_api_key`
+     (non-PLACEHOLDER); the role writes `XAI_API_KEY` into `HERMES_HOME/.env`.
+
+3. **Direct-to-xAI tools** (after OAuth or API key) — `x_search`, Imagine,
+   TTS, etc. via `hermes tools`. Optional `hermes_web_backend: "xai"` sets
+   Hermes web search to the xAI backend.
+
+Gateway/proxy units include `~/.grok/bin` on `PATH` so the skill can find
+`grok` under systemd.
+
+**Post-provision checklist (on ser5 as the provisioned user):**
+
+```bash
+# 1) Grok Build CLI (subscription)
+grok login
+
+# 2) Hermes xAI OAuth (model provider + x_search / Imagine / TTS — separate token)
+export HERMES_HOME=/data/services/hermes   # already in .bashrc after provision
+hermes auth add xai-oauth
+# optional: use Grok as the *active* Hermes model (leaves Tier L as default until you do this)
+# hermes config set model.provider xai-oauth
+# hermes config set model.default grok-build-0.1
+
+hermes doctor
+```
+
+Notes:
+
+- Hermes xAI auth (`~` / `HERMES_HOME` auth store) and Grok Build auth
+  (`~/.grok/auth.json`) are **separate**. A working Hermes `x_search` does not
+  mean `grok` is logged in.
+- Keep client-confidential work on **Tier L** (Ollama on mini). Grok / SuperGrok
+  is a cloud tier — use deliberately, not as the default for sovereign work.
+
+References:
+
+- [Connect Grok to Hermes Agent](https://x.ai/news/grok-hermes)
+- [xAI Grok OAuth guide](https://hermes-agent.nousresearch.com/docs/guides/xai-grok-oauth)
+- [Hermes Grok Build skill](https://hermes-agent.nousresearch.com/docs/user-guide/skills/optional/autonomous-ai-agents/autonomous-ai-agents-grok)
 
 ---
 

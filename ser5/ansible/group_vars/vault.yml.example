@@ -38,3 +38,11 @@ vault_cloudflared_token: "PLACEHOLDER_CLOUDFLARE_TUNNEL_TOKEN"
 # Generate:  openssl rand -base64 24   — and store a copy OFF this machine;
 # losing it makes every snapshot unrecoverable.
 vault_restic_password: "PLACEHOLDER_RESTIC_PASSWORD"
+
+# Optional xAI API key (console.x.ai) for Hermes provider:xai and/or Grok Build
+# pay-as-you-go fallback. Prefer SuperGrok / X Premium+ OAuth instead:
+#   grok login
+#   hermes auth add xai-oauth
+# Only written into HERMES_HOME/.env when enable_hermes_xai_api_key: true and
+# this value is non-empty and does not begin with PLACEHOLDER.
+vault_xai_api_key: "PLACEHOLDER_XAI_API_KEY"
