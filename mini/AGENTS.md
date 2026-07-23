@@ -35,12 +35,15 @@ ansible/
     ollama/              Ollama server + systemd override
     harness/             (empty — opencode and Hermes both on ser5/workstation)
     tailscale/           tailnet join
+    containers/          rootless Podman; user lingering; quadlet support
     cloudflared/         Cloudflare Tunnel (Podman quadlet; remote-managed token)
+    openwebui/           Open WebUI chat UI (Podman quadlet; talks to local Ollama)
 ```
 
 Role execution order is fixed in `ansible/site.yml`:
-`base → amdgpu_rocm → ollama → harness → tailscale → cloudflared`. Dependencies flow
-top-to-bottom (e.g. `ollama` assumes ROCm is already installed).
+`base → amdgpu_rocm → ollama → tailscale → containers → cloudflared → openwebui`.
+Dependencies flow top-to-bottom (e.g. `ollama` assumes ROCm is already installed;
+`cloudflared`/`openwebui` assume `containers` has already set up quadlet support).
 
 ## Commands
 

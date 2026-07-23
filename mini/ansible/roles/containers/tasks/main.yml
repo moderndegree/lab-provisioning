@@ -1,0 +1,46 @@
+---
+# Rootless Podman with systemd quadlet support.
+# Enables persistent user-level container services that survive reboots and
+# run without an active login session (via systemd user lingering).
+# Required by both the cloudflared (system-level) and openwebui (user-level)
+# roles that run after this one.
+
+- name: Install Podman
+  ansible.builtin.apt:
+    name:
+      - podman
+    state: present
+
+- name: Enable user lingering for {{ node_user }}
+  ansible.builtin.command: loginctl enable-linger {{ node_user }}
+  register: linger_cmd
+  changed_when: linger_cmd.rc == 0
+  failed_when: false
+
+- name: Verify lingering is active (linger file must exist)
+  ansible.builtin.stat:
+    path: "/var/lib/systemd/linger/{{ node_user }}"
+  register: linger_stat
+  failed_when: not linger_stat.stat.exists
+
+- name: Ensure user systemd/quadlet directory exists
+  ansible.builtin.file:
+    path: "{{ node_home }}/.config/systemd/user"
+    state: directory
+    owner: "{{ node_user }}"
+    group: "{{ node_user }}"
+    mode: "0755"
+
+- name: Ensure user containers/systemd quadlet directory exists
+  ansible.builtin.file:
+    path: "{{ node_home }}/.config/containers/systemd"
+    state: directory
+    owner: "{{ node_user }}"
+    group: "{{ node_user }}"
+    mode: "0755"
+
+# To deploy a Podman quadlet service, drop a .container unit file in
+# {{ node_home }}/.config/containers/systemd/ then run:
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now <name>.service
+# See: https://docs.podman.io/en/latest/markdown/podman-systemd.unit.5.html

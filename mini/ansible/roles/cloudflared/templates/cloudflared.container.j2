@@ -1,0 +1,41 @@
+# Podman quadlet unit — Cloudflare Zero Trust tunnel (managed by Ansible)
+# Documentation: https://docs.podman.io/en/latest/markdown/podman-systemd.unit.5.html
+# Cloudflare tunnel docs: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/
+
+[Unit]
+Description=Cloudflare Zero Trust Tunnel
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image={{ cloudflared_image }}
+ContainerName=cloudflared
+# Host networking (NOT the default Podman bridge): this is a ROOT/system quadlet,
+# while Ollama and Open WebUI are ROOTLESS user services whose ports are only
+# published on the host's real network stack (127.0.0.1 / 0.0.0.0), not into any
+# container network namespace. Without Network=host, "http://localhost:<port>"
+# ingress rules configured in the Zero Trust dashboard would resolve to
+# cloudflared's OWN loopback (empty) instead of the host's — every route would
+# 502. Network=host makes cloudflared share the host netns directly, so
+# "localhost" means exactly what it says, regardless of the rootful/rootless
+# boundary between this container and the services it fronts.
+Network=host
+# Connector token (TUNNEL_TOKEN) sourced from a root-only env file, not inlined
+# here — this quadlet is world-readable (0644).
+EnvironmentFile=/etc/cloudflared/token.env
+# `--no-autoupdate` disables cloudflared's *binary* self-update; image updates are
+# handled by Podman (see AutoUpdate below) so versions stay reproducible.
+Exec=tunnel --no-autoupdate run
+{% if cloudflared_autoupdate | bool %}
+# Pull a newer image on `podman auto-update` (podman-auto-update.timer).
+AutoUpdate=registry
+{% endif %}
+
+[Service]
+Restart=always
+RestartSec=5
+TimeoutStartSec=900
+
+[Install]
+# Quadlet enables the generated service at boot via this section.
+WantedBy=multi-user.target default.target

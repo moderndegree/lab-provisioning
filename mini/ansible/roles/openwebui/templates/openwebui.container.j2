@@ -1,0 +1,43 @@
+# Podman quadlet unit — Open WebUI (rootless, managed by Ansible)
+# https://docs.podman.io/en/latest/markdown/podman-systemd.unit.5.html
+# Open WebUI docs: https://docs.openwebui.com/
+
+[Unit]
+Description=Open WebUI
+After=network-online.target ollama.service
+Wants=network-online.target
+
+[Container]
+Image={{ openwebui_image }}
+ContainerName=openwebui
+# host.containers.internal is Podman's built-in host-gateway alias (added
+# automatically to rootless containers since Podman 4.7+ — no DNSSearch or
+# tailnet-specific config needed). It resolves to mini itself from inside the
+# container's network namespace, so Open WebUI reaches the LOCAL Ollama
+# instance without ever going through Tailscale's MagicDNS resolver. Do NOT
+# change this to "localhost" (resolves to the container's own loopback instead
+# of the host) or to the tailnet hostname "mini" (that would need the same
+# DNSSearch trick as roles/observability on ser5 just to resolve at all from
+# inside a container network namespace, for zero benefit — Ollama is local).
+Environment=OLLAMA_BASE_URL={{ openwebui_ollama_base_url }}
+# Persisted WEBUI_SECRET_KEY (see tasks/main.yml) — keeps sessions valid across
+# container restarts/updates.
+EnvironmentFile={{ openwebui_env_file }}
+Environment=ENABLE_SIGNUP={{ openwebui_enable_signup | lower }}
+# {{ openwebui_host }} + the base role's blanket tailscale0 UFW allow makes this
+# reachable to tailnet peers (http://mini:{{ openwebui_port }}) and to the
+# cloudflared tunnel via loopback — but never the LAN/WAN. Same model as Ollama
+# itself (see ollama_host in group_vars/all.yml).
+PublishPort={{ openwebui_host }}:{{ openwebui_port }}:8080
+Volume={{ openwebui_data_dir }}:/app/backend/data:Z
+{% if openwebui_autoupdate | bool %}
+AutoUpdate=registry
+{% endif %}
+
+[Service]
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=120
+
+[Install]
+WantedBy=default.target

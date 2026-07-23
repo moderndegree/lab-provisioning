@@ -15,3 +15,9 @@
 
 # Tailscale ephemeral auth key (from Tailscale admin console → Settings → Keys)
 vault_tailscale_authkey: "tskey-auth-PLACEHOLDER"
+
+# Cloudflare Tunnel connector token (Zero Trust dashboard → Networks → Tunnels →
+# Create a tunnel → Cloudflared). The cloudflared role only starts the tunnel
+# when this is non-empty and does not begin with "PLACEHOLDER" — safe to leave
+# as-is until you need it.
+vault_cloudflared_token: "PLACEHOLDER_CLOUDFLARED_TOKEN"

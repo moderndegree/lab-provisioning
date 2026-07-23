@@ -1,0 +1,82 @@
+---
+# Open WebUI — rootless Podman quadlet, chat UI for mini's local Ollama.
+# The containers role (which runs earlier in site.yml) already enables lingering
+# and creates ~/.config/containers/systemd/, so this role just deploys the unit.
+
+- name: openwebui stub — role is disabled
+  ansible.builtin.debug:
+    msg: >
+      openwebui role is disabled (enable_openwebui: false).
+      Set enable_openwebui: true in group_vars/all.yml to activate.
+  when: not (enable_openwebui | bool)
+
+- name: Deploy Open WebUI
+  when: enable_openwebui | bool
+  block:
+    - name: Resolve {{ node_user }} UID (needed for systemctl --user calls)
+      ansible.builtin.command: "id -u {{ node_user }}"
+      register: openwebui_user_uid
+      changed_when: false
+
+    - name: Ensure Open WebUI data directory exists
+      ansible.builtin.file:
+        path: "{{ openwebui_data_dir }}"
+        state: directory
+        owner: "{{ node_user }}"
+        group: "{{ node_user }}"
+        mode: "0750"
+
+    # WEBUI_SECRET_KEY signs Open WebUI's session JWTs. Without a persisted value,
+    # Open WebUI generates a random one on every container start, silently logging
+    # everyone out on each restart/update. `creates:` makes this a one-time
+    # generation; the value is then left alone across re-provisions.
+    - name: Generate persistent Open WebUI secret key (first run only)
+      ansible.builtin.shell:
+        cmd: echo "WEBUI_SECRET_KEY=$(openssl rand -hex 32)" > {{ openwebui_env_file }}
+      args:
+        creates: "{{ openwebui_env_file }}"
+      changed_when: true
+
+    - name: Set ownership/permissions on Open WebUI env file
+      ansible.builtin.file:
+        path: "{{ openwebui_env_file }}"
+        owner: "{{ node_user }}"
+        group: "{{ node_user }}"
+        mode: "0600"
+
+    - name: Template Open WebUI quadlet unit
+      ansible.builtin.template:
+        src: openwebui.container.j2
+        dest: "{{ node_home }}/.config/containers/systemd/openwebui.container"
+        owner: "{{ node_user }}"
+        group: "{{ node_user }}"
+        mode: "0644"
+      notify:
+        - openwebui daemon-reload
+        - restart openwebui
+
+    - name: Flush handlers (daemon-reload before enable/start)
+      ansible.builtin.meta: flush_handlers
+
+    - name: Ensure openwebui user service is enabled and started
+      ansible.builtin.systemd:
+        name: openwebui.service
+        enabled: true
+        state: started
+        scope: user
+      become: true
+      become_user: "{{ node_user }}"
+      environment:
+        XDG_RUNTIME_DIR: "/run/user/{{ openwebui_user_uid.stdout }}"
+
+    - name: Enable podman auto-update timer (image updates)
+      ansible.builtin.systemd:
+        name: podman-auto-update.timer
+        enabled: true
+        state: started
+        scope: user
+      become: true
+      become_user: "{{ node_user }}"
+      environment:
+        XDG_RUNTIME_DIR: "/run/user/{{ openwebui_user_uid.stdout }}"
+      when: openwebui_autoupdate | bool

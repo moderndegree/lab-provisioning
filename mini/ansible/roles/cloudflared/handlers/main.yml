@@ -1,0 +1,14 @@
+---
+- name: daemon-reload
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+# Quadlet units are enabled via the [Install] section, not `systemctl enable`
+# (they are generated into /run). Only restart once a real token is present,
+# otherwise the container would crashloop on every provision.
+- name: restart cloudflared
+  ansible.builtin.systemd:
+    name: cloudflared.service
+    state: restarted
+    daemon_reload: true
+  when: cloudflared_token_ready | default(false) | bool

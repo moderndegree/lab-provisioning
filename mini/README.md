@@ -60,7 +60,9 @@ lab-provisioning/
       ollama/                       Ollama LLM server + systemd override
       harness/                      (empty — opencode and Hermes both on ser5/workstation)
       tailscale/                    tailnet join
+      containers/                   rootless Podman; user lingering; quadlet support
       cloudflared/                  Cloudflare Tunnel (Podman quadlet; token-gated start)
+      openwebui/                    Open WebUI chat UI (Podman quadlet; enable_openwebui: true)
 ```
 
 ---
@@ -280,8 +282,12 @@ One-time setup (you already have Cloudflare DNS, which is the prerequisite):
 3. **Add public hostnames** to the tunnel (in the dashboard), each routing to a local
    service on mini — for example:
    - `ollama.<your-domain>` → `http://localhost:11434`
+   - `chat.<your-domain>` → `http://localhost:8080` (Open WebUI, see below)
 
-   Cloudflare creates the DNS records for you (since your DNS is on Cloudflare).
+   Cloudflare creates the DNS records for you (since your DNS is on Cloudflare). The
+   `cloudflared` quadlet runs with `Network=host` specifically so these `localhost`
+   routes reach mini's real ports (Ollama and Open WebUI are rootless Podman/native
+   services on the host network, not siblings in cloudflared's own container network).
 4. **Gate each hostname with Access** — Zero Trust → *Access → Applications → Add a
    self-hosted app* for each hostname, with a policy that allows only you (e.g. your
    email / Google login). Do this **before** relying on the tunnel.
@@ -289,6 +295,33 @@ One-time setup (you already have Cloudflare DNS, which is the prerequisite):
 
 Tuning (optional, in `group_vars/all.yml`): pin `cloudflared_image` to a release
 tag/digest for reproducibility and set `cloudflared_autoupdate: false`.
+
+### Open WebUI (`enable_openwebui: true`)
+
+Browser chat UI for mini's own Ollama, deployed as a rootless Podman quadlet
+(`roles/openwebui`, requires `roles/containers` for lingering/quadlet support).
+
+- **Reaches Ollama via `host.containers.internal`**, Podman's built-in host-gateway
+  alias — not over Tailscale. This is the answer to "won't Tailscale's DNS get in the
+  way here?": since Ollama is local to mini, Open WebUI never needs to resolve a
+  tailnet hostname at all, so Tailscale's MagicDNS resolver (which takes over
+  `/etc/resolv.conf` on the host once `tailscale up` runs) is simply never in the
+  path. This matters only if you later add a service that needs to reach a *different*
+  tailnet host (e.g. ser5) from inside a container — see the `DNSSearch=` trick in
+  ser5's `roles/observability/templates/obs.network.j2` if that comes up.
+- **Reachable at `http://mini:8080`** over the tailnet (same UFW model as Ollama:
+  bound `0.0.0.0`, but UFW denies everything inbound except SSH and the entire
+  `tailscale0` interface) and via the Cloudflare Tunnel once you add a hostname
+  routing to `http://localhost:8080`.
+- **First-run setup:** the first account you create in the UI becomes the admin.
+  `openwebui_enable_signup: true` (default) leaves signup open for that first run;
+  flip it to `false` in `group_vars/all.yml` and re-run `make provision` afterward
+  to stop accepting new self-service signups — important if you expose it via the
+  tunnel, since a public hostname with open signup is an unauthenticated door onto
+  your GPU regardless of what Cloudflare Access does for the route itself.
+- Session cookies are signed with a `WEBUI_SECRET_KEY` generated once on first
+  provision and persisted at `{{ data_mount }}/services/openwebui/webui.env`
+  (`0600`, owned by `node_user`) — re-provisioning does not invalidate sessions.
 
 ---
 

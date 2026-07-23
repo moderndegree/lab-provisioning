@@ -134,3 +134,17 @@ enable_cloudflared: true
 # Pin to a release tag/digest for reproducible deploys (default is :latest).
 cloudflared_image: "docker.io/cloudflare/cloudflared:latest"
 cloudflared_autoupdate: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Open WebUI (browser chat UI for mini's local Ollama)
+# ─────────────────────────────────────────────────────────────────────────────
+# Rootless Podman quadlet (roles/containers sets up lingering + quadlet support).
+# Reaches Ollama via Podman's host.containers.internal alias — no Tailscale DNS
+# involved for that hop (see roles/openwebui/defaults/main.yml). Reachable over
+# the tailnet at http://mini:8080 (UFW's blanket tailscale0 allow) and, once
+# enable_cloudflared is wired up with a public hostname, via the tunnel too.
+enable_openwebui: false
+openwebui_port: 8080
+# First provision: leave true, create the admin account in the UI, then flip to
+# false and re-run `make provision` to stop accepting new self-service signups.
+openwebui_enable_signup: true
