@@ -138,9 +138,9 @@ loopkit summary --out quality.md       # write it to a file instead of stdout
 
 ## Operational guardrails
 
-- **One interactive stream at a time on mini** (`ollama_num_parallel: 1`).
-  Loops are sequential by design; don't parallelize suites against mini —
-  queueing is fine, OOM is not.
+- **Up to four concurrent streams on mini** (`ollama_num_parallel: 4`).
+  Keep suites conservative and let overflow queue rather than pushing the node
+  toward OOM.
 - **Watch prefill.** Long contexts pay a multi-minute prefill at ~205 t/s.
   Prefer many small calls (refine rounds) over one giant-context call unless
   the task truly needs `batch`.

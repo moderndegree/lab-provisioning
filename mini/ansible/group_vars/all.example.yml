@@ -53,8 +53,8 @@ ollama_host: "0.0.0.0"
 # first. Prefill is the wall at ~205 t/s: a fully-packed 256k prompt costs
 # ~21 min before first token. The window is capacity, not a target.
 ollama_context_length: 262144
-# Single interactive stream — the warm pair is sized for one agent loop at a time.
-ollama_num_parallel: 1
+# Allow up to four concurrent requests before queueing.
+ollama_num_parallel: 4
 ollama_flash_attention: 1
 ollama_kv_cache_type: "q8_0"
 # -1 pins the warm pair resident across handoffs (no idle eviction).
