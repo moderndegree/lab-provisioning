@@ -29,9 +29,17 @@ enable_hermes_proxy: true
 hermes_proxy_host: "0.0.0.0"
 hermes_proxy_port: 8645
 
+# ─── Web dashboard (browser UI) ───────────────────────────────────────────────
+# `hermes dashboard` is the browser-based UI for config, API keys, and sessions.
+# Bind to 0.0.0.0 so the service can listen beyond localhost at boot.
+enable_hermes_dashboard: false
+hermes_dashboard_host: "0.0.0.0"
+hermes_dashboard_port: 9119
+
 # UFW is default-deny; this opens the proxy port on the tailnet interface only,
 # so the proxy is never reachable from the LAN or WAN.
 hermes_tailnet_interface: "tailscale0"
+hermes_dashboard_tailnet_interface: "tailscale0"
 
 # ─── Grok Build / xAI integration ─────────────────────────────────────────────
 # Hermes has first-class xAI support (separate from the Grok Build CLI):

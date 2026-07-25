@@ -206,6 +206,18 @@
         - restart hermes-proxy
       when: enable_hermes_proxy | bool
 
+    - name: Template hermes-dashboard user service unit
+      ansible.builtin.template:
+        src: hermes-dashboard.service.j2
+        dest: "{{ user_home }}/.config/systemd/user/hermes-dashboard.service"
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0644"
+      notify:
+        - hermes daemon-reload
+        - restart hermes-dashboard
+      when: enable_hermes_dashboard | bool
+
     # Flush so daemon-reload runs before the enable/start tasks below.
     - name: Flush handlers
       ansible.builtin.meta: flush_handlers
@@ -233,6 +245,18 @@
         XDG_RUNTIME_DIR: "/run/user/{{ hermes_user_uid.stdout }}"
       when: enable_hermes_proxy | bool
 
+    - name: Ensure hermes-dashboard user service is enabled and started
+      ansible.builtin.systemd:
+        name: hermes-dashboard.service
+        enabled: true
+        state: started
+        scope: user
+      become: true
+      become_user: "{{ username }}"
+      environment:
+        XDG_RUNTIME_DIR: "/run/user/{{ hermes_user_uid.stdout }}"
+      when: enable_hermes_dashboard | bool
+
     # UFW is default-deny (base role); scope the proxy to the tailnet only.
     - name: Allow Hermes proxy in from the tailnet interface
       community.general.ufw:
@@ -242,3 +266,13 @@
         to_port: "{{ hermes_proxy_port }}"
         proto: tcp
       when: enable_hermes_proxy | bool
+
+    # Keep the dashboard reachable only from the tailnet by default.
+    - name: Allow Hermes dashboard in from the tailnet interface
+      community.general.ufw:
+        rule: allow
+        direction: in
+        interface: "{{ hermes_dashboard_tailnet_interface }}"
+        to_port: "{{ hermes_dashboard_port }}"
+        proto: tcp
+      when: enable_hermes_dashboard | bool

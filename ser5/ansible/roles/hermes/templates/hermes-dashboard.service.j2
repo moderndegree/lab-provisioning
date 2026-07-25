@@ -1,0 +1,23 @@
+[Unit]
+Description=Hermes Web Dashboard
+Documentation=https://hermes-agent.nousresearch.com/docs/user-guide/features/web-dashboard
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=HOME={{ user_home }}
+Environment=HERMES_HOME={{ hermes_home }}
+Environment=PATH={{ hermes_path }}
+# Use the same inference routing as the gateway and proxy.
+Environment=OLLAMA_BASE_URL={{ hermes_ollama_base_url }}
+# Bind beyond localhost so tailnet peers can reach the UI when the firewall allows it.
+ExecStart={{ hermes_bin }} dashboard --host {{ hermes_dashboard_host }} --port {{ hermes_dashboard_port }} --no-open
+Restart=on-failure
+RestartSec=15
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=60
+
+[Install]
+WantedBy=default.target
