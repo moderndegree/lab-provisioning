@@ -15,7 +15,7 @@ OLLAMA_ROOT="${BASE_URL%/v1}"
 
 MODELS=(
   "qwen3.6:35b-a3b-mtp-q4_K_M"
-  "qwen3.6:27b-mtp-q4_K_M"
+  "qwen3-coder-next:latest"
 )
 
 if [ "$#" -gt 0 ]; then
@@ -24,7 +24,6 @@ else
   # Challengers. Provisioning does not pull these (they are not in
   # ollama_base_models or ollama_heavy_models) - a missing one is skipped below.
   MODELS+=(
-    "qwen3-coder-next:latest"
     "glm-4.7-flash:latest"
   )
 fi
