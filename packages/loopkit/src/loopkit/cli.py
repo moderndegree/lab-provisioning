@@ -103,7 +103,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "models":
         for alias, spec in MODELS.items():
             mode = "reasoning" if spec.reasoning else "direct"
-            print(f"{alias:<11} → {spec.name:<20} ctx={spec.context:<7} {mode}")
+            # Residency matters operationally: mini pins only two models, so
+            # anything else costs an eviction + reload on the next call.
+            where = "warm" if spec.resident else "EVICTS warm pair"
+            print(f"{alias:<9} → {spec.name:<28} ctx={spec.context:<7} {mode:<9} {where}")
         return 0
 
     if args.command == "stats":

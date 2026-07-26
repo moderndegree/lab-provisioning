@@ -86,7 +86,16 @@ class RunStore:
             fh.write(json.dumps({"task_id": task_id, "score": score, **dataclasses.asdict(trace)}) + "\n")
 
     def summary(self, run_id: str | None = None) -> list[dict]:
-        """Per-run aggregates, newest first (or just the one run)."""
+        """Per-run aggregates, newest first (or just the one run).
+
+        started_at is second-resolution, so two runs of the same combo recorded
+        within the same second tie. That tie is not cosmetic: matrix() takes the
+        first row per combo, so an arbitrary tiebreak can report a stale run as
+        the latest and push a bake-off toward the wrong model. rowid is the
+        table's implicit insertion counter (the PRIMARY KEY is composite TEXT,
+        so rowid is untouched), which gives a true, monotonic tiebreak with no
+        schema migration.
+        """
         where, args = "", ()
         if run_id:
             where, args = "WHERE run_id = ?", (run_id,)
@@ -95,14 +104,18 @@ class RunStore:
                        COUNT(*) AS tasks,
                        ROUND(AVG(score), 3) AS mean_score,
                        SUM(completion_tokens) AS tokens,
-                       MIN(started_at) AS started_at
+                       MIN(started_at) AS started_at,
+                       MAX(rowid) AS seq
                 FROM results {where}
                 GROUP BY run_id, suite, strategy, worker
-                ORDER BY started_at DESC""",
+                ORDER BY started_at DESC, seq DESC""",
             args,
         ).fetchall()
-        cols = ["run_id", "suite", "strategy", "worker", "tasks", "mean_score", "tokens", "started_at"]
-        return [dict(zip(cols, r)) for r in rows]
+        cols = ["run_id", "suite", "strategy", "worker", "tasks", "mean_score", "tokens", "started_at", "seq"]
+        out = [dict(zip(cols, r)) for r in rows]
+        for row in out:  # ordering-only column; keep the public row shape stable
+            row.pop("seq", None)
+        return out
 
     def matrix(self) -> list[dict]:
         """One row per (suite, strategy, worker) — the most recent run of each

@@ -31,7 +31,7 @@ ansible/
     vault.yml            ansible-vault encrypted secrets
   roles/
     base/                kernel cmdline (GRUB), firmware pin, packages, UFW, data disk
-    amdgpu_rocm/         ROCm 7.2.4 userspace (--no-dkms) + Vulkan fallback
+    amdgpu_rocm/         ROCm 7.2.4 userspace (--no-dkms) + Vulkan primary/fallback wiring
     ollama/              Ollama server + systemd override
     harness/             (empty — opencode and Hermes both on ser5/workstation)
     tailscale/           tailnet join
@@ -42,8 +42,8 @@ ansible/
 
 Role execution order is fixed in `ansible/site.yml`:
 `base → amdgpu_rocm → ollama → tailscale → containers → cloudflared → openwebui`.
-Dependencies flow top-to-bottom (e.g. `ollama` assumes ROCm is already installed;
-`cloudflared`/`openwebui` assume `containers` has already set up quadlet support).
+Dependencies flow top-to-bottom (e.g. `ollama` assumes GPU userspace is already
+installed; `cloudflared`/`openwebui` assume `containers` has already set up quadlet support).
 
 ## Commands
 
@@ -91,6 +91,22 @@ Always run `make lint` and `make syntax-check` after editing roles or vars.
 - Match the existing YAML style: two-space indent, `name:` on every task,
   box-drawing comment dividers, handlers in `handlers/main.yml`.
 
+## Model policy (bandwidth-bound, not task-depth-bound)
+
+mini keeps exactly two warm base models resident at the global 131072 context window:
+`qwen3-coder-next:latest` for DEPTH and `qwen3.6:35b-a3b-mtp-q4_K_M` for DRIVER.
+Both are MoE with ~3B active parameters because Strix Halo decode speed tracks active
+parameters read per token, not headline size. The measured driver anchor is 70-80 t/s
+(~185 GB/s effective); the old dense `qwen3.6:27b-mtp-q4_K_M` is only ~11-15 t/s and
+stays on disk as rollback, not as a warm slot. The 131072 window is global: `/v1` cannot
+set `num_ctx` per request, and Modelfile downscoping is ignored. It is paired with
+`OLLAMA_NUM_PARALLEL=2` because context × parallel is the KV budget - raise one only
+by lowering the other.
+
+Heavy models (`gpt-oss:120b`, `nemotron-cascade-2:latest`) are pulled but never resident;
+loading one evicts a warm model under `OLLAMA_MAX_LOADED_MODELS=2`, so keep them to
+scheduled/off-hours jobs. Roles live in opencode/loopkit prompts, not baked Modelfiles.
+
 ## gfx1151 / Strix Halo gotchas (high blast radius — be careful)
 
 - GPU is **gfx1151**, not on AMD's official ROCm matrix. Recognition depends on
@@ -110,8 +126,8 @@ Always run `make lint` and `make syntax-check` after editing roles or vars.
   the host (when `auto_reboot: true`, the default).
 - BIOS settings (latest BIOS, UMA 512MB, IOMMU off, power mode) are a **manual one-time
   prerequisite** — out of Ansible's scope. See `README.md`.
-- `gpu_backend: vulkan` in `ansible/group_vars/all.yml` is a one-line fallback if ROCm
-  regresses. Keep both code paths working.
+- `gpu_backend: vulkan` in `ansible/group_vars/all.yml` is the committed primary; ROCm
+  is the one-line fallback. Keep both code paths working.
 
 ## Verifying changes
 

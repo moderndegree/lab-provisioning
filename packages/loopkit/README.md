@@ -7,7 +7,8 @@ chain to break on a freshly provisioned box.
 Deployed onto ser5 by the `agentlab` Ansible role
 (`ser5/ansible/roles/agentlab`); runs anywhere that can reach
 `http://mini:11434/v1` on the tailnet. See [`../../docs/ai-loops.md`](../../docs/ai-loops.md)
-for the architecture and runbook.
+for the architecture and runbook, and [`../../docs/operating-manual.md`](../../docs/operating-manual.md)
+for the live model/tier policy.
 
 ## What it does
 
@@ -20,10 +21,19 @@ for the architecture and runbook.
 | `evals.run_suite` | JSONL task suites, scored (exact/contains/regex/numeric), tracked in SQLite + JSONL traces |
 | `star.bootstrap` | STaR-style: keep only correct reasoning traces (rationalizing failures with an answer hint) as SFT-ready JSONL |
 
-Model aliases map to the two warm base models on mini (`loopkit models` to
-list): `general` (qwen3.6 35B-A3B MoE — fast, judging/general reasoning) and
-`coder` (qwen3.6 27B dense — complex coding, deep reasoning). `scout` (nano 4B)
-exists for throwaway smoke tests only — loading it evicts one of the warm pair.
+Model aliases map to mini's resident pair and scheduled evictions (`loopkit
+models` to list):
+
+| Alias | Model | Use |
+|-------|-------|-----|
+| `general` | `qwen3.6:35b-a3b-mtp-q4_K_M` | 70–80 t/s (measured); candidate generation, judging, reflection, general reasoning. Default worker and judge |
+| `coder` | `qwen3-coder-next:latest` | ~35–50 t/s (est.); complex coding, deep reasoning, quality escalation |
+| `heavy` | `gpt-oss:120b` | ~30 t/s (community-measured); off-hours best general reasoning. Evicts a warm model |
+| `judge` | `nemotron-cascade-2:latest` | ~60–80 t/s (est.); math/algorithm escalation and independent best-of-N judge. Evicts a warm model |
+| `scout` | `nemotron-3-nano:4b` | 150+ t/s; throwaway smoke tests only. Evicts a warm model |
+
+Speed figures are estimates until the bake-off measures them, except where
+marked measured.
 
 ## Quickstart
 
@@ -31,6 +41,7 @@ exists for throwaway smoke tests only — loading it evicts one of the warm pair
 loopkit ask "question" --model scout                 # smoke test
 loopkit refine "hard task" --worker coder            # self-refinement loop
 loopkit bestof "hard task" -n 4                      # test-time compute scaling
+loopkit bestof "hard task" -n 8 --judge judge        # independent judge, evicts warm model
 loopkit eval suites/smoke.jsonl --strategy refine \
         --playbook pb.md --reflect                   # eval + evolving playbook
 loopkit star suites/smoke.jsonl --out sft.jsonl      # bootstrap training data

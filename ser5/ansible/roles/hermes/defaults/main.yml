@@ -3,8 +3,8 @@
 # installer and run as a systemd user service on ser5. It routes requests to mini
 # for Tier L (Sovereign) inference over the tailnet.
 #
-# Disabled by default — flip enable_hermes: true in group_vars/all.yml to activate.
-enable_hermes: false
+# Enabled on ser5: Hermes is the always-on driver box agent surface.
+enable_hermes: true
 
 # Hermes CLI binary (placed here by the NousResearch installer).
 hermes_bin: "{{ user_home }}/.local/bin/hermes"
@@ -30,9 +30,10 @@ hermes_proxy_host: "0.0.0.0"
 hermes_proxy_port: 8645
 
 # ─── Web dashboard (browser UI) ───────────────────────────────────────────────
-# `hermes dashboard` is the browser-based UI for config, API keys, and sessions.
-# Bind to 0.0.0.0 so the service can listen beyond localhost at boot.
-enable_hermes_dashboard: false
+# `hermes dashboard` is the tailnet-only sovereign browser UI for config, API
+# keys, and sessions. Bind to 0.0.0.0 so the service can listen beyond localhost
+# at boot; UFW scopes the port to tailscale0 below.
+enable_hermes_dashboard: true
 hermes_dashboard_host: "0.0.0.0"
 hermes_dashboard_port: 9119
 
@@ -40,6 +41,22 @@ hermes_dashboard_port: 9119
 # so the proxy is never reachable from the LAN or WAN.
 hermes_tailnet_interface: "tailscale0"
 hermes_dashboard_tailnet_interface: "tailscale0"
+
+# ─── Messaging gateways (Telegram / Discord) ─────────────────────────────────
+# The gateway unit runs `hermes gateway start --all`, so platform selection is
+# handled by Hermes config. This list documents the paired platforms and drives
+# token writing into HERMES_HOME/.env when the matching vaulted value is real
+# (non-empty and not PLACEHOLDER*), matching the XAI_API_KEY handling below.
+enable_hermes_messaging: true
+hermes_messaging_platforms:
+  - "telegram"
+  - "discord"
+#
+# Governance / privacy boundary:
+# Telegram and Discord gateways route through Telegram's and Discord's servers.
+# They are approved for personal/lab traffic and notifications only. Client-
+# confidential work must use the tailnet-only dashboard on port 9119 or SSH.
+# This is a governance rule, not an operator preference.
 
 # ─── Grok Build / xAI integration ─────────────────────────────────────────────
 # Hermes has first-class xAI support (separate from the Grok Build CLI):

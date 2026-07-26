@@ -189,16 +189,16 @@ make provision
 | `containers` | Rootless Podman; enables user lingering; creates `~/.config/systemd/user/` for quadlet drop-ins |
 | `tailscale` | Adds Tailscale apt repo, installs pinned version, joins tailnet with `vault_tailscale_authkey` |
 
-### Optional (disabled by default)
+### Optional (enabled in the running ser5 profile)
 
-Enable by setting the feature flag in `ansible/group_vars/all.yml`:
+These flags in `ansible/group_vars/all.yml` now match the live box:
 
 | Flag | Role | Status |
 |------|------|--------|
-| `enable_observability: true` | `observability` | Prometheus + Grafana quadlets targeting mini's metrics |
-| `enable_hermes: true` | `hermes` | Hermes gateway (NousResearch) as a systemd user service; optional Grok Build skill + xAI env (see below) |
-| `enable_agentlab: true` | `agentlab` | loopkit AI-loop experiment layer under `{{ data_mount }}/agentlab` — see [`../docs/ai-loops.md`](../docs/ai-loops.md) |
-| `enable_backups: true` | `backups` | restic snapshots + daily timer (needs `vault_restic_password`) — see below |
+| `enable_observability: true` | `observability` | Prometheus + Grafana quadlets targeting mini's metrics (mini must be reachable) |
+| `enable_hermes: true` | `hermes` | Hermes gateway, proxy, dashboard, messaging adapters, optional Grok Build skill + xAI env (see below) |
+| `enable_agentlab: true` | `agentlab` | loopkit AI-loop experiment layer under `{{ data_mount }}/agentlab` (mini must be reachable) — see [`../docs/ai-loops.md`](../docs/ai-loops.md) |
+| `enable_backups: true` | `backups` | restic snapshots + daily timer (needs a real `vault_restic_password`) — see below |
 | `enable_postgres: true` | _(not built)_ | Deferred |
 | `enable_forgejo: true` | _(not built)_ | Deferred |
 | `enable_jellyfin: true` | _(not built)_ | Deferred |
@@ -206,7 +206,7 @@ Enable by setting the feature flag in `ansible/group_vars/all.yml`:
 
 ---
 
-## Grok Build + Hermes xAI integration
+## Hermes surfaces, messaging, and xAI integration
 
 ### Workstation: Grok Build CLI
 
@@ -230,6 +230,82 @@ grok -p "Say ok."   # headless smoke test
 ```
 
 API-key fallback: `export XAI_API_KEY=xai-...` (console.x.ai).
+
+### Hermes: three tailnet/lab surfaces
+
+Hermes is NousResearch's Hermes Agent installed by the official installer under
+`HERMES_HOME=/data/services/hermes` and run as systemd user services. Its default
+inference route stays **Tier L Sovereign**: `OLLAMA_BASE_URL=http://mini:11434`.
+mini's warm pair is `qwen3-coder-next:latest` for depth plus
+`qwen3.6:35b-a3b-mtp-q4_K_M` as the driver, with 131072 global context.
+
+| Surface | Unit / command | Reachability | Use |
+|---------|----------------|--------------|-----|
+| Messaging gateway | `hermes-gateway.service` → `hermes gateway start --all` | Outbound to Telegram/Discord; no inbound UFW rule | Chat-driven personal/lab tasks and free push notifications |
+| OpenAI-compatible proxy | `hermes-proxy.service` on `:8645` | UFW-scoped to `tailscale0` | Other tailnet machines use Hermes routing via `/v1` |
+| Dashboard | `hermes-dashboard.service` on `:9119` | UFW-scoped to `tailscale0` | Browser UI; sovereign phone surface for client-confidential work |
+
+Enabled defaults:
+
+```yaml
+enable_hermes: true
+enable_hermes_proxy: true
+enable_hermes_dashboard: true
+enable_hermes_messaging: true
+hermes_messaging_platforms: ["telegram", "discord"]
+```
+
+Vault bot tokens are written to `HERMES_HOME/.env` only when non-empty and not
+`PLACEHOLDER*`:
+
+- `vault_hermes_telegram_bot_token` — Telegram @BotFather
+- `vault_hermes_discord_bot_token` — Discord Developer Portal → Bot tab
+
+### Messaging gateway setup and pairing runbook
+
+After provisioning and vaulting real bot tokens:
+
+```bash
+export HERMES_HOME=/data/services/hermes
+
+# Configure gateway adapters / verify tokens
+hermes gateway setup
+
+# When a new chat presents a pairing code, approve it:
+hermes pairing approve telegram <code>
+hermes pairing approve discord <code>
+
+# Later, inspect and revoke pairings if a chat should lose access:
+hermes pairing list
+hermes pairing revoke <pairing-id>
+
+systemctl --user status hermes-gateway.service
+```
+
+### Governance: privacy boundary
+
+Telegram and Discord gateways route through Telegram's and Discord's servers.
+They are approved for personal/lab traffic and notifications only. Client-
+confidential work must use the tailnet-only dashboard (`http://ser5:9119`) or
+SSH. This is a governance rule, not a preference.
+
+Routing tiers:
+
+- **L Sovereign** — mini / Ollama over the tailnet; default for Hermes.
+- **G Governed** — GitHub Copilot Pro+ with data retention off.
+- **X Personal** — xAI SuperGrok / Grok Build; never client-confidential.
+- **Z Throwaway** — OpenCode Zen; OSS scaffolding only.
+
+### From the iPhone
+
+- Install Tailscale and connect to the tailnet for private reach.
+- Open `http://ser5:9119` in Safari, then Share → Add to Home Screen. This
+  tailnet-only dashboard is the sovereign surface and is safe for client-
+  confidential work.
+- Use Telegram/Discord for chat-driven tasks and free push notifications only
+  for personal and lab work.
+- Use the GitHub mobile app to assign issues to the Copilot cloud agent.
+- See the broader runbook in [`../docs/operating-manual.md`](../docs/operating-manual.md).
 
 ### Hermes: special Grok support
 

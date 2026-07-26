@@ -11,9 +11,9 @@ piece sits where it does, and the runbook for a typical experiment.
 │  mini (MS-S1 Max, Strix Halo, 128 GB unified)     ser5 (SER5, 64 GB)     │
 │  ── inference appliance, nothing else ──          ── always-on driver ── │
 │  Ollama :11434 (OpenAI-compatible /v1)            agentlab: loopkit      │
-│  two warm base models, 256k windows, no             loops · playbooks    │
+│  two warm MoE base models, 128k global ctx, no      loops · playbooks    │
 │  baked prompts (max_loaded=2, keep_alive=-1):       evals · SQLite runs  │
-│    qwen3.6:27b-mtp-q4_K_M      dense — complex      systemd user jobs    │
+│    qwen3-coder-next:latest     MoE (3B active) —   systemd user jobs    │
 │                                coding + reasoning hermes gateway         │
 │    qwen3.6:35b-a3b-mtp-q4_K_M  MoE (3B active) —  Prometheus + Grafana   │
 │                                general, fast      restic backups (timer) │
@@ -35,8 +35,14 @@ Division of labor:
 - **Two warm base models, roles in prompts.** Exactly two models stay resident
   on mini, with no baked system prompts — agent roles live in the prompts that
   loopkit and opencode send, so one loaded model serves many agents. Reasoning
-  is a per-request toggle (`reasoning_effort: "none"` on /v1). loopkit's
-  aliases (`general`, `coder`, `scout`) encode the routing.
+  is a per-request toggle (`reasoning_effort: "none"` on /v1). The warm slots
+  are `qwen3-coder-next:latest` and `qwen3.6:35b-a3b-mtp-q4_K_M`; both are MoE
+  because mini is bandwidth-bound and decode speed tracks active parameters
+  read per token, not total parameters. loopkit's aliases (`general`, `coder`,
+  `heavy`, `judge`, `scout`) encode the routing.
+
+For the day-to-day operating policy, escalation tiers, and model inventory, see
+[`operating-manual.md`](operating-manual.md).
 
 ## The loop stack (packages/loopkit)
 
@@ -88,12 +94,17 @@ Model routing guidance (matches the workstation agent stack):
 
 | Call | Use | Why |
 |------|-----|-----|
-| candidate generation / judging / reflection | `general` (qwen3.6 35B-A3B MoE) | 3B active params — fast to sample, thinks by default |
-| complex coding, deep reasoning, stuck tasks | `coder` (qwen3.6 27B dense) | the quality escalation; slower per token |
-| throwaway smoke tests only | `scout` (nano 4B) | loading it evicts one of the warm pair — never in loops |
+| candidate generation / judging / reflection | `general` (`qwen3.6:35b-a3b-mtp-q4_K_M`) | 70–80 t/s (measured); 3B active params — fast to sample, thinks by default |
+| complex coding, deep reasoning, stuck tasks | `coder` (`qwen3-coder-next:latest`) | ~35–50 t/s (est.); the quality escalation and depth slot |
+| off-hours hardest general reasoning | `heavy` (`gpt-oss:120b`) | ~30 t/s (community-measured); evicts a warm model, so scheduled jobs only |
+| math/algorithm escalation, independent best-of-N judging | `judge` (`nemotron-cascade-2:latest`) | ~60–80 t/s (est.); different model family beats self-grading, but evicts a warm model |
+| throwaway smoke tests only | `scout` (`nemotron-3-nano:4b`) | 150+ t/s; loading it evicts one of the warm pair — never in loops |
 
-Both warm models have the full 256k window; there is no separate long-context
-variant. Prefill cost is the guardrail: pass what the task needs, not the corpus.
+Global context is 131072. The previous 256k target does not fit the new warm pair
+and was never operationally sane: at ~205 t/s prefill, a packed 256k prompt
+costs ~21 minutes before the first token; 128k is a ~10 minute worst case.
+The /v1 endpoint cannot set `num_ctx` per request, so the global env var is the
+control point. Pass what the task needs, not the corpus.
 
 ## Phase 1 baseline matrix and the quarterly bake-off
 
@@ -136,14 +147,22 @@ loopkit summary --out quality.md       # write it to a file instead of stdout
 5. Re-run `make loopkit-matrix` fully once an occupant changes, so the baseline
    matrix always reflects who's actually resident.
 
+Current cycle: `glm-4.7-flash:latest` is the live challenger against incumbent
+`qwen3.6:35b-a3b-mtp-q4_K_M` for the driver slot; settle it on measured local
+data, not published benchmarks. The depth-slot swap from dense 27B to
+`qwen3-coder-next:latest` landed on published SWE-bench wins and still needs
+local confirmation in the same matrix.
+
 ## Operational guardrails
 
-- **Up to four concurrent streams on mini** (`ollama_num_parallel: 4`).
-  Keep suites conservative and let overflow queue rather than pushing the node
-  toward OOM.
+- **Up to two concurrent streams on mini** (`ollama_num_parallel: 2`).
+  At 128k global context, the warm pair plus q8_0 KV is ~95 GB of the ~110 GB
+  usable GPU pool. KV cost is context × parallel, so the 128k window was bought
+  by halving concurrency. Keep suites conservative and let overflow queue rather
+  than pushing the node toward OOM.
 - **Watch prefill.** Long contexts pay a multi-minute prefill at ~205 t/s.
-  Prefer many small calls (refine rounds) over one giant-context call unless
-  the task truly needs `batch`.
+  Prefer many small calls (refine rounds) over one giant 128k-context call
+  unless the task truly needs `batch`.
 - **Reliability chain:** experiment state on `/data` → restic snapshots daily
   (`enable_backups`) → node metrics in Grafana (`enable_observability`).
   `runs.db` is the lab notebook; treat it as append-only.
@@ -161,5 +180,8 @@ loopkit summary --out quality.md       # write it to a file instead of stdout
   doubles decode throughput vs Ollama on this box (~98–103 t/s on Qwen3-30B).
   Worth a gated `llamacpp` role on mini if loop throughput becomes the
   bottleneck; loopkit only needs `LOOPKIT_BASE_URL` pointed at the new port.
+- **Heavy-tier scheduling** — the heavy models are now documented (`heavy` and
+  `judge` aliases), but the queue that evicts a warm model only off-hours still
+  needs to be wired.
 - **LLM-level dashboards** — export `runs.db` aggregates to Prometheus
   (textfile collector) once there are enough runs to trend.

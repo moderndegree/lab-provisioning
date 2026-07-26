@@ -4,7 +4,7 @@ Bare-metal IaC for the Minisforum MS-S1 Max (AMD Ryzen AI Max+ 395 "Strix Halo",
 128 GB unified RAM, two NVMe slots). Provisions `mini` — a headless Ubuntu Server
 26.04 LTS node (kernel 7.0) — from a freshly wiped disk to a fully configured state.
 
-**Primary GPU backend: AMD ROCm** (with RADV/Vulkan fallback via a single var flip).  
+**Primary GPU backend: RADV/Vulkan** (committed primary; AMD ROCm fallback via a single var flip).
 **Remote access: Tailscale** (private tailnet; primary) **+ optional Cloudflare Tunnel**
 (public, browser-reachable, gated by Cloudflare Access). See [Remote access](#remote-access).
 
@@ -56,7 +56,7 @@ lab-provisioning/
       vault.yml                     (gitignored) ansible-vault encrypted secrets (NEVER commit plaintext)
     roles/
       base/                         kernel cmdline (GRUB), packages, UFW, data disk
-      amdgpu_rocm/                  ROCm stack + Vulkan fallback drivers
+      amdgpu_rocm/                  ROCm stack + Vulkan primary/fallback wiring
       ollama/                       Ollama LLM server + systemd override
       harness/                      (empty — opencode and Hermes both on ser5/workstation)
       tailscale/                    tailnet join
@@ -145,14 +145,14 @@ make vault-edit
 
 ## GPU Backend
 
-Default: **ROCm** (`gpu_backend: rocm` in `ansible/group_vars/all.yml`).
+Default: **RADV/Vulkan** (`gpu_backend: "vulkan"` in `ansible/group_vars/all.yml`).
 
-If ROCm regresses on a kernel update, switch to the RADV/Vulkan backend
-by changing one line and re-running `make provision` — no other changes needed:
+ROCm remains installed as the fallback path. If Vulkan regresses or a workload needs
+ROCm, change one line and re-run `make provision` - no other changes needed:
 
 ```yaml
 # ansible/group_vars/all.yml
-gpu_backend: "vulkan"   # was: rocm
+gpu_backend: "rocm"   # was: vulkan
 ```
 
 Mesa Vulkan drivers are always installed regardless of backend.
@@ -162,7 +162,7 @@ ROCm support matrix. The `HSA_OVERRIDE_GFX_VERSION=11.5.1` environment variable 
 both `/etc/profile.d/rocm.sh` and the Ollama systemd override) makes the HSA runtime
 recognise the GPU as the nearest supported RDNA3 target. ROCm is installed **userspace
 only** (`amdgpu-install --no-dkms`); the in-tree `amdgpu` driver that ships with kernel
-7.0 drives the GPU. This is a community-proven workaround — re-run the verify block
+7.0 drives the GPU. This is a community-proven workaround - re-run the verify block
 (below) after any kernel or ROCm bump.
 
 ---
@@ -182,29 +182,59 @@ journalctl -u ollama | grep -i rocm
 #   expect: library=ROCm compute=gfx1151 ... total ~111 GiB available ~110 GiB
 ```
 
-Expected performance (Q4-class, gfx1151): **~40 tok/s on a 30B model** via Ollama + ROCm.
-If you ever move off Ollama to a current `llama-server` build, standalone llama.cpp on
-Vulkan/RADV is the ceiling (~98–103 tok/s on Qwen3-30B; ~170 tok/s on small MoE).
+Measured anchor on this node: `qwen3.6:35b-a3b-mtp-q4_K_M` (22 GB, MoE,
+3B active) decodes at **70-80 tok/s** and prefills at **~205 tok/s**, implying
+~185 GB/s effective bandwidth (~86% of the ~215 GB/s ceiling). Dense models do
+not get the same win: the old `qwen3.6:27b-mtp-q4_K_M` reads 17 GB/token and
+lands around **11-15 tok/s**. On mini, decode tracks active parameters read per
+token, not headline parameter count.
 
 ---
 
-## Model policy — two warm base models
+## Model policy - two warm base models
 
-mini keeps exactly **two base models resident**, both at their full native
-**262144-token window**, with no baked system prompts (agent roles live in the
-workstation opencode config and loopkit prompts — see `ollama_base_models` in
+mini keeps exactly **two base models resident**, at the global
+**131072-token window**, with no baked system prompts (agent roles live in the
+workstation opencode config and loopkit prompts - see `ollama_base_models` in
 `ansible/group_vars/all.yml`):
 
-| Model | Shape | Used for |
-|-------|-------|----------|
-| `qwen3.6:27b-mtp-q4_K_M` | 27B dense | complex coding + deep reasoning |
-| `qwen3.6:35b-a3b-mtp-q4_K_M` | 35B MoE (3B active) | general tasks, orchestration |
+| Slot | Model | Shape | Used for |
+|------|-------|-------|----------|
+| DEPTH | `qwen3-coder-next:latest` | 80B-A3B MoE hybrid Gated-DeltaNet (3B active) | complex coding + deep reasoning |
+| DRIVER | `qwen3.6:35b-a3b-mtp-q4_K_M` | 35B-A3B MoE (3B active) | general tasks, orchestration |
+
+This is a bandwidth box, not a compute box: Strix Halo has ~215 GB/s theoretical
+memory bandwidth, and decode speed tracks the **active parameters read per token**.
+The measured driver anchor hits 70-80 tok/s at ~185 GB/s effective bandwidth; the
+old dense `qwen3.6:27b-mtp-q4_K_M` reads 17 GB/token and only manages ~11-15
+tok/s while scoring ~11-15 SWE-bench Verified points below `qwen3-coder-next`.
+MoE wins enormously here; a dense model in a warm slot is a mistake. The dense 27B
+stays on disk as the one-line rollback in `ollama_base_models`.
 
 `OLLAMA_MAX_LOADED_MODELS=2` + `OLLAMA_KEEP_ALIVE=-1` pin the pair; running any
-third model evicts one of them (deliberate — the pair is the fleet). Reasoning
-is a per-request concern: `reasoning_effort: "none"` on `/v1` disables thinking
-(verified on Ollama 0.31.2; `/no_think` and a `think:false` body field are both
-ignored on `/v1` — native `/api/chat` honours `think:false`).
+third model evicts one of them (deliberate - the pair is the fleet). The 131072
+window is global because `/v1` cannot set `num_ctx` per request and a Modelfile
+`num_ctx` below native is ignored. KV cost is context × parallel, so 128k at
+`OLLAMA_NUM_PARALLEL=2` is the same ~256k-token KV budget as 64k at 4-way:
+weights (51 + 22 GB) plus ~22 GB of q8_0 KV budget ~95 GB of the ~110 GB GPU
+pool. The trade is concurrency - a third simultaneous request queues. 256k does
+not fit this pair and would cost ~21 minutes of prefill before first token
+anyway; 128k costs ~10 minutes worst case, which is a ceiling, not the norm.
+
+### Heavy tier
+
+Pulled and kept on disk, **never resident** - loading either one evicts a warm
+model, so schedule them off-hours (for example an `agentlab-run@heavy-*` job on
+ser5):
+
+| Model | Shape | Use |
+|-------|-------|-----|
+| `gpt-oss:120b` | 117B-A5.1B MoE (5.1B active), 65 GB | best general reasoning that fits; hard-problem tier |
+| `nemotron-cascade-2:latest` | 30B-A3B Mamba2-Transformer MoE (~3.6B active), 24 GB | math/algorithm escalation and independent judge |
+
+Reasoning is a per-request concern: `reasoning_effort: "none"` on `/v1` disables
+thinking (verified on Ollama 0.31.2; `/no_think` and a `think:false` body field
+are both ignored on `/v1` - native `/api/chat` honours `think:false`).
 
 ---
 
@@ -212,10 +242,11 @@ ignored on `/v1` — native `/api/chat` honours `think:false`).
 
 - **No ROCm nightlies (7.9–7.12).** They cap memory allocation at 64 GB — useless on
   this 128 GB box. Stay on the pinned 7.2.x production stream.
-- **Leave RAM headroom.** The maxed 256k windows budget ≈ 86 GB (weights + q8_0 KV)
-  of the ~110 GB pool for the warm pair — see the KV math in `group_vars/all.yml`.
-  Loading anything beyond the two base models risks an OOM that crashes the whole box
-  on unified memory; drop `ollama_context_length` to 131072 first if you must.
+- **Leave RAM headroom.** The warm pair is 51 + 22 = 73 GB of weights plus ~22 GB
+  of q8_0 KV at `OLLAMA_CONTEXT_LENGTH=131072` × `OLLAMA_NUM_PARALLEL=2`, or ~95 GB
+  of the ~110 GB GPU pool. Context and parallel multiply into the KV budget - raise
+  one only by lowering the other. Loading a third/non-resident model evicts a warm
+  model and can still pressure unified memory.
 - **Re-verify after any bump.** Re-run the verify block above after any kernel or ROCm
   upgrade before trusting the node.
 - **gfx1151 is community-supported only.** Pin versions; nothing here is on AMD's

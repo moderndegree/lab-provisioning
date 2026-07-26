@@ -46,3 +46,15 @@ vault_restic_password: "PLACEHOLDER_RESTIC_PASSWORD"
 # Only written into HERMES_HOME/.env when enable_hermes_xai_api_key: true and
 # this value is non-empty and does not begin with PLACEHOLDER.
 vault_xai_api_key: "PLACEHOLDER_XAI_API_KEY"
+
+# Hermes Telegram bot token, created with Telegram @BotFather.
+# Safe to leave as PLACEHOLDER_*: the role only writes this into HERMES_HOME/.env
+# when enable_hermes_messaging: true and the value is non-empty and does not
+# begin with PLACEHOLDER.
+vault_hermes_telegram_bot_token: "PLACEHOLDER_TELEGRAM_BOT_TOKEN"
+
+# Hermes Discord bot token, from the Discord Developer Portal → Bot tab.
+# Safe to leave as PLACEHOLDER_*: the role only writes this into HERMES_HOME/.env
+# when enable_hermes_messaging: true and the value is non-empty and does not
+# begin with PLACEHOLDER.
+vault_hermes_discord_bot_token: "PLACEHOLDER_DISCORD_BOT_TOKEN"

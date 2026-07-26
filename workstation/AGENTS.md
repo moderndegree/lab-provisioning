@@ -15,14 +15,15 @@ coder/tester/devops agents touch the filesystem or shell.
 
 ## Placement rule (the architectural backbone)
 
-Two warm base models on mini serve every agent — memory is the constraint, so
-**no agent may introduce a third model**. Placement is by task depth, not tool
-capability (both models handle tools and a 256k window):
+Two warm base models on mini serve every agent. mini is memory-bandwidth-bound:
+decode speed tracks **active parameters read per token**, not total parameters.
+That is why both warm slots are MoE, and why **no agent may introduce a dense
+model or a third resident model**:
 
-- `qwen3.6:27b-mtp-q4_K_M` (dense) — complex coding and deep reasoning:
+- `qwen3-coder-next:latest` (MoE 80B-A3B, 3B active) — depth slot:
   planner, architect, reviewer, security-auditor, coder, tester.
-- `qwen3.6:35b-a3b-mtp-q4_K_M` (MoE, 3B active — fast) — general tasks and
-  orchestration: build (orchestrator), devops, doc-writer.
+- `qwen3.6:35b-a3b-mtp-q4_K_M` (MoE 35B-A3B, 3B active) — driver slot:
+  build (orchestrator), devops, doc-writer.
 
 Roles live in agent prompts, not baked model variants. Reasoning mode is set
 per agent via `reasoningEffort` in `opencode.json` (`"none"` on the
@@ -33,8 +34,13 @@ work through Ollama's `/v1` endpoint — never rely on them.
 ## Client-deliverable guardrails
 
 - Default every client workspace to **Tier L (Sovereign)** — Ollama on `mini`.
-- **Tier B (Bedrock)** requires an explicit per-deliverable approval flag; even then
-  it runs zero-retention with prompt caching.
-- **Tier Z (OpenCode Zen free)** is firewalled from anything tagged client-confidential.
+- **Tier G (Governed)** — GitHub Copilot Pro+ with data retention disabled —
+  is for the owner's own work, or client work with written consent.
+- **Tier X (Personal)** — xAI SuperGrok / Grok Build — is for own repos,
+  research, and long autonomous runs; never client-confidential.
+- **Tier Z (Throwaway)** — OpenCode Zen free models — is OSS scaffolding only;
+  never a client deliverable.
+- Client-confidential work never goes through the Hermes Telegram or Discord
+  gateways; the sovereign remote path is the tailnet-only Hermes dashboard or SSH.
 - The orchestrator refuses to start implementation on a client repo without an
   approved OpenSpec change ID.

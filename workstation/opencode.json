@@ -6,13 +6,13 @@
         "baseURL": "http://mini:11434/v1"
       },
       "models": {
-        "qwen3.6:27b-mtp-q4_K_M": {
-          "name": "Qwen3.6 27B (dense — coding + deep reasoning)",
+        "qwen3-coder-next:latest": {
+          "name": "Qwen3-Coder-Next 80B-A3B (MoE — coding + deep reasoning)",
           "options": {
             "stream": false
           },
           "limit": {
-            "context": 262144,
+            "context": 131072,
             "output": 8192
           }
         },
@@ -22,12 +22,24 @@
             "stream": false
           },
           "limit": {
-            "context": 262144,
+            "context": 131072,
+            "output": 8192
+          }
+        },
+        "gpt-oss:120b": {
+          "name": "gpt-oss 120B-A5.1B (MoE — heavy tier, EVICTS a warm model)",
+          "options": {
+            "stream": false
+          },
+          "limit": {
+            "context": 131072,
             "output": 8192
           }
         }
       }
-    }
+    },
+    "github-copilot": {},
+    "xai": {}
   },
   "model": "ollama/qwen3.6:35b-a3b-mtp-q4_K_M",
   "small_model": "ollama/qwen3.6:35b-a3b-mtp-q4_K_M",
@@ -51,7 +63,7 @@
     },
     "planner": {
       "mode": "subagent",
-      "model": "ollama/qwen3.6:27b-mtp-q4_K_M",
+      "model": "ollama/qwen3-coder-next:latest",
       "description": "Produces an implementation plan from context provided in-prompt. Reasoning only.",
       "permission": {
         "*": "deny"
@@ -60,7 +72,7 @@
     },
     "architect": {
       "mode": "subagent",
-      "model": "ollama/qwen3.6:27b-mtp-q4_K_M",
+      "model": "ollama/qwen3-coder-next:latest",
       "description": "Designs structure and interfaces from provided context. Reasoning only.",
       "permission": {
         "*": "deny"
@@ -69,7 +81,7 @@
     },
     "reviewer": {
       "mode": "subagent",
-      "model": "ollama/qwen3.6:27b-mtp-q4_K_M",
+      "model": "ollama/qwen3-coder-next:latest",
       "description": "Critiques diffs handed to it. Reasoning only.",
       "permission": {
         "*": "deny"
@@ -78,7 +90,7 @@
     },
     "security-auditor": {
       "mode": "subagent",
-      "model": "ollama/qwen3.6:27b-mtp-q4_K_M",
+      "model": "ollama/qwen3-coder-next:latest",
       "description": "Audits provided diffs for security issues. Reasoning only.",
       "permission": {
         "*": "deny"
@@ -96,13 +108,13 @@
     },
     "coder": {
       "mode": "subagent",
-      "model": "ollama/qwen3.6:27b-mtp-q4_K_M",
+      "model": "ollama/qwen3-coder-next:latest",
       "description": "Implements changes. Edits files, verifies they parse/build.",
       "prompt": "{file:./.moderndegree/prompts/coder.md}"
     },
     "tester": {
       "mode": "subagent",
-      "model": "ollama/qwen3.6:27b-mtp-q4_K_M",
+      "model": "ollama/qwen3-coder-next:latest",
       "description": "Writes and runs tests, reads results.",
       "prompt": "{file:./.moderndegree/prompts/tester.md}"
     },
@@ -112,6 +124,24 @@
       "reasoningEffort": "none",
       "description": "Infra and shell operations. Deterministic, no reasoning.",
       "prompt": "{file:./.moderndegree/prompts/devops.md}"
+    },
+    "heavy": {
+      "mode": "subagent",
+      "model": "ollama/gpt-oss:120b",
+      "description": "Tier L escalation for genuinely hard reasoning. EVICTS a warm model on mini — invoke deliberately, never in a tight loop. Reasoning only.",
+      "permission": {
+        "*": "deny"
+      },
+      "prompt": "{file:./.moderndegree/prompts/planner.md}"
+    },
+    "research": {
+      "mode": "subagent",
+      "model": "xai/grok-build-0.1",
+      "description": "Tier X. Live web research via xAI. NEVER give this agent client-confidential material.",
+      "permission": {
+        "*": "deny"
+      },
+      "prompt": "{file:./.moderndegree/prompts/planner.md}"
     }
   }
 }

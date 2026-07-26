@@ -1,36 +1,42 @@
 # Business layer — routing, sovereignty, and judgment gates
 
 This is the layer that turns the agent pipeline into a consulting practice rather
-than a code toy. The routing tiers from the runbook are enforced **once, centrally**
-in the Hermes gateway (`ser5/ansible/roles/hermes`), not by per-session discipline.
+than a code toy. The routing tiers are the contract; some controls are structural
+today, and the remaining policy gates belong in roadmap Phase 4.
 
 ## Routing tiers (the data-sovereignty value prop)
 
 | Tier | Route | Use for |
 |---|---|---|
-| **L — Sovereign** | Ollama on `mini` (qwen3.6 27B dense / 35B-A3B MoE) | Default for all client-confidential work |
-| **B — Governed** | Claude via AWS Bedrock (zero-retention, prompt caching, Flex) | Vision-critical, frontier overflow, high-stakes deliverables |
-| **Z — Throwaway** | OpenCode Zen free models | OSS / scaffolding only — **never** client deliverables |
+| **L — Sovereign** | Ollama on `mini` over the tailnet | Default; all client-confidential work |
+| **G — Governed** | GitHub Copilot Pro+ with data retention disabled | Owner's own repos, or client work with written consent |
+| **X — Personal** | xAI SuperGrok / Grok Build | Own repos, research, long autonomous runs — **never** client-confidential |
+| **Z — Throwaway** | OpenCode Zen free models | OSS scaffolding only — **never** a client deliverable |
 
-> The Hermes config schema is your own; map this intent onto your real keys rather
-> than inventing placeholders. The pieces known to be real are
-> `HERMES_DOCKER_BINARY=podman` and `OLLAMA_BASE_URL=http://mini:11434` (both set by
-> the ser5 `hermes` quadlet). Bedrock credentials resolve from the host AWS profile
-> / IAM role via `AWS_REGION` — they never live in this repo.
+> `OLLAMA_BASE_URL=http://mini:11434` is set by the ser5 Hermes systemd units.
+> Hermes's default model stays Tier L unless the operator runs `hermes model` or
+> `hermes config set` themselves. xAI credentials come from SuperGrok OAuth
+> (`hermes auth add xai-oauth`) or a vaulted `XAI_API_KEY`.
 
 ## 1. Sovereignty routing as a client guarantee
 
 "Your code and data never leave hardware I control unless you approve a specific
-governed exception." Enforce it structurally:
+governed exception." Be precise about what is enforced today:
 
-- Default every client workspace to **Tier L**.
-- **Tier B (Bedrock)** requires an explicit per-deliverable approval flag — and even
-  then runs zero-retention with prompt caching for cost.
-- **Tier Z** is firewalled from anything tagged client-confidential.
-- **Per-client pin:** a client flag that forces Tier L and refuses B/Z escalation.
+- **Structural today:** Tier L routes to Ollama on `mini` over the tailnet.
+- **Structural today:** Tier G is a separate GitHub Copilot surface with data
+  retention disabled; use it for client work only with written consent.
+- **Operator discipline today, Phase 4 enforcement planned:** default every client
+  workspace to Tier L and require written approval before Tier G escalation.
+- **Operator discipline today, Phase 4 enforcement planned:** Tier X and Tier Z
+  never receive client-confidential context.
+- **Operator discipline today, Phase 4 enforcement planned:** per-client pins force
+  Tier L and refuse G/X/Z escalation.
 
-The remote surface (Cloudflare tunnel → `oc.moderndegree.com`) lets you drive the
-whole thing from the Claude mobile app or Discord without exposing `mini` directly.
+The iPhone surface is Tailscale plus the tailnet-only Hermes dashboard at
+`http://ser5:9119` for sovereign work; Telegram and Discord Hermes gateways are
+personal/lab only because they route through third-party servers. Use the GitHub
+mobile app to assign issues to the Copilot cloud agent.
 
 ## 2. Judgment gates via OpenSpec
 
@@ -43,13 +49,14 @@ judgment."
 ## 3. Client isolation
 
 - One opencode project (and Ollama context scope) **per client**.
-- Keep deliverable material in **per-client MinIO buckets**.
+- Planned: per-client subvaults under `clients/<name>/`, with a separate index,
+  separate `LOOPKIT_DATA`, and documented teardown.
 - Don't let one client's repo context bleed into another's session — separate
   workspaces, separate `AGENTS.md` where the engagement differs.
 
 ## Where this is wired
 
-- **Gateway / tier enforcement:** `ser5/ansible/roles/hermes` (rootless Podman
-  quadlet; `enable_hermes: true`).
+- **Gateway / remote surfaces:** `ser5/ansible/roles/hermes`.
 - **Inference (Tier L):** `mini/ansible/roles/ollama` (two warm base models).
 - **Agent team:** [../opencode.json](../opencode.json) + [../AGENTS.md](../AGENTS.md).
+- **Operator decision tree:** [../../docs/operating-manual.md](../../docs/operating-manual.md).

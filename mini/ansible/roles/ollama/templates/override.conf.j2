@@ -1,21 +1,26 @@
 [Service]
 # Ollama environment overrides for mini (MS-S1 Max, gfx1151, 128 GB unified RAM)
 
-# GLOBAL context window — the /v1 endpoint cannot set num_ctx per request, so
-# this is the window every loaded model gets. Sized in group_vars/all.yml
-# against the KV-cache budget of the two warm base models (see comments there).
-# Prefill is the wall at ~205 t/s — a fully-packed 256K prompt costs ~21 min
-# before first token; the window is capacity, not a target.
+# GLOBAL context window — the /v1 endpoint cannot set num_ctx per request, and a
+# Modelfile num_ctx below a model's native window is ignored, so this is the only
+# real control point and every loaded model gets this window. Sized in
+# group_vars/all.yml against the KV-cache budget of the two warm base models
+# (see comments there). KV cost is context × parallel: 128K at 2-way parallel is
+# the same KV budget as 64K at 4-way. Prefill is the wall at ~205 t/s — 128K
+# costs ~10 min worst case, 256K ~21 min; the window is capacity, not a target.
 Environment="OLLAMA_CONTEXT_LENGTH={{ ollama_context_length }}"
 
+# Concurrency is the other half of the context trade above — these two multiply
+# into the KV budget. Raise one only by lowering the other.
 Environment="OLLAMA_NUM_PARALLEL={{ ollama_num_parallel }}"
 Environment="OLLAMA_FLASH_ATTENTION={{ ollama_flash_attention }}"
 Environment="OLLAMA_KV_CACHE_TYPE={{ ollama_kv_cache_type }}"
 Environment="OLLAMA_MAX_LOADED_MODELS={{ ollama_max_loaded_models }}"
 
-# The warm pair (qwen3.6 27b + 35b-a3b base models) stays pinned across
-# handoffs with KEEP_ALIVE=-1. MAX_LOADED_MODELS=2 means running any third
-# model evicts one of the pair — deliberate: the pair IS the fleet.
+# The warm pair (qwen3-coder-next + qwen3.6 35b-a3b, both MoE) stays pinned
+# across handoffs with KEEP_ALIVE=-1. MAX_LOADED_MODELS=2 means running any
+# third model — including the heavy tier — evicts one of the pair. That is
+# deliberate: the pair IS the fleet, and heavy models are scheduled evictions.
 Environment="OLLAMA_KEEP_ALIVE={{ ollama_keep_alive }}"
 
 # Keep the integrated GPU. Strix Halo enumerates as an iGPU and Ollama drops

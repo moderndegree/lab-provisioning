@@ -12,9 +12,11 @@ knowledge system and the productized reference implementation of what you sell
 — "private AI over your business's documents and knowledge, on hardware you
 control." Build it once for yourself; demo and re-deploy it for clients.
 
-Division of labor stays fixed: **mini** is a frozen inference appliance (two
-warm qwen3.6 base models, 256k windows); **ser5** runs everything else —
-ingest, embeddings, indexes, loops, demos, backups.
+Division of labor stays fixed: **mini** is a frozen inference appliance
+(`qwen3-coder-next:latest` + `qwen3.6:35b-a3b-mtp-q4_K_M`, 128k global context);
+**ser5** runs everything else — ingest, embeddings, indexes, loops, demos,
+backups. See [`operating-manual.md`](operating-manual.md) for the live model
+inventory and routing tiers.
 
 ---
 
@@ -28,7 +30,7 @@ Quality claims and consulting proposals both need numbers. The harness exists
 | Three SMB-shaped eval suites | `extraction.jsonl` (structured data from messy docs), `citation-qa.jsonl` (answer + cite the right source snippet), `structured-output.jsonl` (JSON to schema, validated by scorer) |
 | One coding suite | Small, real tasks from your own repos — scored by tests, not string match |
 | Baseline matrix | Every suite × {single, refine, best_of_n} × {general, coder} recorded in runs.db |
-| Bake-off ritual | Documented quarterly procedure: candidate model → same suites → compare `loopkit stats` → adopt/reject. The two-model policy stays; only the *occupants* change |
+| Bake-off ritual | Documented quarterly procedure: candidate model → same suites → compare `loopkit stats` → adopt/reject. First job: confirm the depth swap locally and settle the driver-slot challenge. The two-model policy stays; only the *occupants* change |
 
 **Acceptance:** `loopkit stats` shows a full baseline matrix; a one-page
 "current quality" summary can be generated from runs.db.
@@ -39,11 +41,13 @@ Quality claims and consulting proposals both need numbers. The harness exists
 Test-time compute is throughput-bound: refine ×3 rounds or best-of-8 at
 ~2.5× the tokens/s is a direct quality multiplier at constant wall-clock.
 The repo's own measurements put llama.cpp/Vulkan at ~98–103 t/s vs ~40 on the
-same 30B-class hardware path.
+same 30B-class hardware path. The dense-to-MoE depth swap already captured a
+large bandwidth win, so the remaining llama.cpp delta is smaller than the
+original estimate implied — still worth measuring, not assuming.
 
 | Deliverable | Detail |
 |---|---|
-| `llamacpp` role on mini, gated by `enable_llamacpp` | llama-swap + llama-server, Vulkan, same two base models (GGUF), same 256k/q8 KV budget, tailnet-only port. Ollama stays installed as the fallback — flip a var to revert |
+| `llamacpp` role on mini, gated by `enable_llamacpp` | llama-swap + llama-server, Vulkan, same two base models (GGUF), same 128k/q8 KV budget at 2-way parallel, tailnet-only port. Ollama stays installed as the fallback — flip a var to revert |
 | Benchmark before/after | Phase 1 suites + tokens/s on both backends; adopt only on a measured win |
 | Client repoint | `LOOPKIT_BASE_URL` + opencode `baseURL` are the only integration points |
 
@@ -129,7 +133,7 @@ Make the sovereignty pitch enforceable and the lab demoable.
 | Deliverable | Detail |
 |---|---|
 | Demo surface | Open WebUI on ser5 (Podman quadlet, `enable_webui`), behind Cloudflare Access, wired to mini + a cortex demo vault of sample SMB docs. This is what a non-technical buyer sees |
-| Tier enforcement made real | Hermes/gateway config that hard-pins Tier L, requires an explicit flag for Tier B (Bedrock), and *logs every escalation attempt*. Until wired, soften the claims in `business-layer.md` to match reality |
+| Tier enforcement made real | Hermes/gateway config that hard-pins Tier L (mini), requires explicit flags for Tier G (Copilot Pro+), Tier X (SuperGrok/Grok Build), and Tier Z (OpenCode Zen), and *logs every escalation attempt*. Until wired, soften the claims in `business-layer.md` to match reality |
 | Per-client isolation pattern | `clients/<name>/` subvault + separate cortex index + separate `LOOPKIT_DATA` + documented teardown (what gets deleted at engagement end, including journald and snapshots policy) |
 | Data hygiene | Off-site encrypted restic target (B2/S3) on a second timer; log-retention policy; verify LUKS on mini's disk — physical theft must not equal client data |
 | Engagement kit | Proposal template backed by Phase 1 eval numbers; demo script; the "dev here, production on *your* infra" boundary in writing |
@@ -145,8 +149,8 @@ enforced or removed.
 
 | Deliverable | Detail |
 |---|---|
-| Off-hours heavy queue | `agentlab-run@heavy-*` jobs allowed to evict the warm pair overnight (a big MoE like a 120B-class model at reduced ctx), restoring the "hard problem, take an hour" tier without breaking daytime memory budget. Queue in, results + eval scores out by morning |
-| STaR → LoRA bridge | Datasets already accumulate. When a suite shows a persistent gap: rent a GPU-hour, LoRA-tune the 27B on bootstrapped traces, eval on the same suite, adopt only on a win. Revisit native gfx1151 training each quarter |
+| Off-hours heavy queue | `agentlab-run@heavy-*` jobs allowed to evict a warm model overnight for `gpt-oss:120b` or `nemotron-cascade-2`, restoring the "hard problem, take an hour" tier without breaking daytime memory budget. This phase is queueing/scheduling, not model hunting: both are already pulled and documented on mini. Queue in, results + eval scores out by morning |
+| STaR → LoRA bridge | Datasets already accumulate. When a suite shows a persistent gap: rent a GPU-hour, LoRA-tune the current depth model on bootstrapped traces, eval on the same suite, adopt only on a win. Revisit native gfx1151 training each quarter |
 | LLM-level observability | Export runs.db aggregates + tokens/s to Prometheus (textfile collector); Grafana panel per suite over time — the "is it getting better?" chart, which is also consulting collateral |
 
 **Effort:** 2–3 sessions, after Phases 1–3 provide the measures.
@@ -175,7 +179,8 @@ snapshot monthly.
   client infra; the lab is for building, evaling, and demoing.
 - **Native fine-tuning on gfx1151** until the stack is trustworthy (rented
   GPU bridges the gap).
-- **A third resident model on mini** — the two-model policy holds; embeddings
-  live on ser5, heavy models are scheduled evictions, not residents.
+- **A third resident model on mini** — the two-model policy holds because mini
+  is memory-bandwidth-bound; embeddings live on ser5, and heavy/judge/scout
+  models are scheduled evictions, not residents.
 - **Kubernetes, vector databases, workflow platforms** — SQLite, systemd, and
   Ansible until something measurably outgrows them.
