@@ -10,7 +10,7 @@ from __future__ import annotations
 import datetime
 
 STRATEGIES = ("single", "refine", "best_of_n")
-WORKERS = ("general", "coder")
+PREFERRED_WORKER_ORDER = ("general", "coder")
 
 
 def render_markdown_summary(rows: list[dict]) -> str:
@@ -18,6 +18,9 @@ def render_markdown_summary(rows: list[dict]) -> str:
     generated = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     by_key = {(r["suite"], r["strategy"], r["worker"]): r for r in rows}
     suites = sorted({r["suite"] for r in rows})
+    workers_seen = {r["worker"] for r in rows}
+    workers = [w for w in PREFERRED_WORKER_ORDER if w in workers_seen]
+    workers.extend(sorted(workers_seen - set(workers)))
 
     lines = ["# Loopkit quality summary", "", f"Generated: {generated}", ""]
 
@@ -25,24 +28,24 @@ def render_markdown_summary(rows: list[dict]) -> str:
         lines.append("No runs recorded yet — run `loopkit eval` against a suite first.")
         return "\n".join(lines) + "\n"
 
-    total_expected = len(suites) * len(STRATEGIES) * len(WORKERS)
+    total_expected = len(suites) * len(STRATEGIES) * len(workers)
     lines.append(f"Recorded combos: {len(rows)} / {total_expected} expected (suite x strategy x worker).")
     lines.append("")
 
     for suite in suites:
         lines.append(f"## {suite}")
         lines.append("")
-        lines.append("| Strategy | " + " | ".join(WORKERS) + " |")
-        lines.append("|---" * (len(WORKERS) + 1) + "|")
+        lines.append("| Strategy | " + " | ".join(workers) + " |")
+        lines.append("|---" * (len(workers) + 1) + "|")
         for strategy in STRATEGIES:
             cells = []
-            for worker in WORKERS:
+            for worker in workers:
                 row = by_key.get((suite, strategy, worker))
                 cells.append(f"{row['mean_score']:.3f} ({row['tokens']}tok)" if row else "—")
             lines.append(f"| {strategy} | " + " | ".join(cells) + " |")
         lines.append("")
 
-        for worker in WORKERS:
+        for worker in workers:
             baseline = by_key.get((suite, "single", worker))
             if not baseline:
                 continue
