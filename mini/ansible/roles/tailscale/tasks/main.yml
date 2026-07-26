@@ -20,11 +20,15 @@
   register: tailscale_status_raw
   changed_when: false
   failed_when: false
+  # Read-only status query — safe (and necessary) to run for real even under
+  # --check, since the command module doesn't support check mode and would
+  # otherwise be skipped with a stub rc=0/stdout='' result that breaks from_json below.
+  check_mode: false
 
 - name: Parse Tailscale backend state
   ansible.builtin.set_fact:
     tailscale_backend_state: >-
-      {{ (tailscale_status_raw.stdout | default('{}') | from_json).BackendState | default('Stopped') }}
+      {{ (tailscale_status_raw.stdout | default('{}', true) | from_json).BackendState | default('Stopped') }}
   when: tailscale_status_raw.rc == 0
 
 - name: Set Tailscale backend state to Stopped (if daemon not running)

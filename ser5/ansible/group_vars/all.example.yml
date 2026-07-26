@@ -58,31 +58,26 @@ skip_data_disk_format: false
 # or a pinned version like "22.14.0". Re-run make provision to change.
 node_version: "lts"
 # opencode-ai pinned npm version. Update and re-run make provision to upgrade.
-opencode_version: "1.17.8"
+opencode_version: "latest"
 
 # ─── Grok Build (xAI coding agent CLI) ───────────────────────────────────────
 # Installed by the workstation role via https://x.ai/cli/install.sh into
-# ~/.grok/bin. Use "latest" for the current stable, or pin e.g. "0.2.101".
-# Auth is NOT provisioned: on the host run `grok login` (SuperGrok / X Premium+)
-# or set XAI_API_KEY. Hermes can delegate coding to this CLI when
-# enable_hermes_grok_skill is true (see Hermes section below).
+# ~/.grok/bin. Auth: on the host run `grok login` or set XAI_API_KEY.
 grok_version: "latest"
 grok_auto_update: false
-grok_permission_mode: "ask"          # ask | always-approve
+grok_permission_mode: "ask"
 grok_default_model: "grok-build-0.1"
 
 # ─── Tailscale ────────────────────────────────────────────────────────────────
-# "latest" installs/upgrades to the current stable release (recommended — the
-# Tailscale apt repo only keeps recent versions, so exact pins can age out).
-# To pin, set an exact version that exists at https://pkgs.tailscale.com/stable/
-# (e.g. "1.98.4"); re-run make provision to apply.
+# "latest" installs/upgrades to the current stable release. To pin, set an exact
+# version that exists at https://pkgs.tailscale.com/stable/ (e.g. "1.98.4").
 tailscale_version: "latest"
 
 # ─── Feature flags ───────────────────────────────────────────────────────────
-# Optional roles now reflect the running ser5 profile; leave true when rebuilding.
-enable_observability: true    # Prometheus + Grafana quadlets (mini metrics reachable)
-enable_backups: true          # restic snapshots + daily timer (needs real vault_restic_password)
-enable_agentlab: true         # loopkit AI-loop layer (needs mini reachable over tailnet)
+# Optional roles — disabled by default. Flip to true to activate.
+enable_observability: false   # Prometheus + Grafana quadlets (monitors mini)
+enable_backups: false         # restic snapshots + daily timer (needs vault_restic_password)
+enable_agentlab: false        # loopkit AI-loop experiment layer (packages/loopkit)
 
 # ─── Cloudflare Zero Trust tunnel ────────────────────────────────────────────
 # System-level Podman quadlet. Token lives in vault (vault_cloudflared_token).
@@ -96,42 +91,23 @@ cloudflared_autoupdate: true
 # Installed via the official NousResearch installer and run as a systemd user
 # service. Points at mini for Tier L (Sovereign) inference over the tailnet.
 # See roles/hermes/defaults/main.yml for hermes_home, hermes_bin, hermes_version.
-enable_hermes: true
-hermes_ollama_base_url: "http://mini:11434"
-# Expose Hermes's OpenAI-compatible proxy (port 8645) to the tailnet so other
-# machines (AI Workstation, scripts) can chat through Hermes. UFW-scoped to
-# the tailscale0 interface. See roles/hermes/defaults/main.yml to tune.
-enable_hermes_proxy: true
-# Expose the Hermes dashboard browser UI on port 9119 to the tailnet only.
-# This is the sovereign phone/browser surface for client-confidential work.
-enable_hermes_dashboard: true
-#
-# Messaging gateways configured on the running ser5. `hermes gateway start --all`
-# starts every configured platform adapter; this list documents paired platforms
-# and drives token writing from vault when values are real (non-PLACEHOLDER).
-enable_hermes_messaging: true
+enable_hermes: false
+hermes_ollama_base_url: "http://YOUR_MINI_HOST:11434"
+# Expose Hermes's OpenAI-compatible proxy to the tailnet so other machines can
+# chat through Hermes with its credentials/routing.
+enable_hermes_proxy: false
+# Web dashboard on 0.0.0.0 so it starts with the rest of the Hermes services.
+enable_hermes_dashboard: false
+hermes_dashboard_host: "0.0.0.0"
+# Hermes gateway starts every configured platform adapter; these are the paired
+# messaging platforms enabled on ser5.
+enable_hermes_messaging: false
 hermes_messaging_platforms:
   - "telegram"
   - "discord"
-#
-# Governance / privacy boundary:
-# Telegram and Discord route through their providers' servers, so use messaging
-# for personal/lab traffic and notifications only. Client-confidential work uses
-# the tailnet-only dashboard (:9119) or SSH. This is a rule, not a preference.
-#
-# Grok / xAI integration (special Hermes support — does NOT change default model):
-#   1. Official skill: Hermes can spawn the `grok` CLI for coding tasks
-#      (requires Grok Build on PATH from the workstation role + `grok login`).
-#   2. Optional model provider: SuperGrok OAuth (`hermes auth add xai-oauth`)
-#      or vault_xai_api_key → HERMES_HOME/.env as XAI_API_KEY (provider: xai).
-# OAuth cannot be automated; run post-provision steps on the host (see README).
-# xAI is Tier X Personal and never for client-confidential work.
-enable_hermes_grok_skill: true
-# When true and vault_xai_api_key is set (non-PLACEHOLDER), write XAI_API_KEY
-# into HERMES_HOME/.env for API-key path. Prefer OAuth for SuperGrok tiers.
+# Grok Build skill + optional xAI API key (default model stays Ollama / Tier L).
+enable_hermes_grok_skill: false
 enable_hermes_xai_api_key: false
-# Optional: set Hermes web search backend to xAI when xAI credentials exist.
-# Leave empty to leave config alone; set "xai" to prefer xAI-hosted search.
 hermes_web_backend: ""
 
 # ─── Future stubs (not yet implemented) ───────────────────────────────────────

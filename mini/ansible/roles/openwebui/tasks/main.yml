@@ -68,6 +68,7 @@
       become_user: "{{ node_user }}"
       environment:
         XDG_RUNTIME_DIR: "/run/user/{{ openwebui_user_uid.stdout }}"
+      when: not ansible_check_mode
 
     - name: Enable podman auto-update timer (image updates)
       ansible.builtin.systemd:
@@ -79,4 +80,6 @@
       become_user: "{{ node_user }}"
       environment:
         XDG_RUNTIME_DIR: "/run/user/{{ openwebui_user_uid.stdout }}"
-      when: openwebui_autoupdate | bool
+      when:
+        - openwebui_autoupdate | bool
+        - not ansible_check_mode
