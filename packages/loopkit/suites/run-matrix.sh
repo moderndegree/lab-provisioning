@@ -9,9 +9,9 @@ set -euo pipefail
 
 SUITES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOOPKIT="${LOOPKIT_BIN:-loopkit}"
-SUITES=(extraction citation-qa structured-output coding)
-STRATEGIES=(single refine best_of_n)
-WORKERS=(general coder)
+read -ra SUITES <<< "${SUITES:-extraction citation-qa structured-output coding}"
+read -ra STRATEGIES <<< "${STRATEGIES:-single refine best_of_n}"
+read -ra WORKERS <<< "${WORKERS:-general coder}"
 
 for suite in "${SUITES[@]}"; do
   for worker in "${WORKERS[@]}"; do

@@ -3,7 +3,7 @@ SHELL := /bin/bash
 .PHONY: help \
         mini-provision mini-ping mini-syntax-check mini-lint mini-install-deps \
         ser5-init ser5-render ser5-provision ser5-ping ser5-syntax-check ser5-lint ser5-install-deps \
-        loopkit-venv loopkit-test loopkit-matrix loopkit-summary
+        loopkit-venv loopkit-test loopkit-matrix loopkit-bakeoff loopkit-summary
 
 ## help               Show available targets
 help:
@@ -29,6 +29,7 @@ help:
 	@echo "    loopkit-venv         Create .venv and install loopkit (editable, with dev deps)"
 	@echo "    loopkit-test         Run the loopkit unit tests"
 	@echo "    loopkit-matrix       Run the Phase 1 baseline matrix (needs mini reachable)"
+	@echo "    loopkit-bakeoff      Run off-hours single-strategy model bake-off (defaults; direct script accepts tags)"
 	@echo "    loopkit-summary      Generate the one-page quality summary from runs.db"
 	@echo ""
 	@echo "  Most operations are best run from the machine directory directly:"
@@ -87,6 +88,9 @@ loopkit-test: loopkit-venv
 
 loopkit-matrix: loopkit-venv
 	LOOPKIT_BIN=$(CURDIR)/.venv/bin/loopkit packages/loopkit/suites/run-matrix.sh
+
+loopkit-bakeoff: loopkit-venv
+	LOOPKIT_BIN=$(CURDIR)/.venv/bin/loopkit packages/loopkit/suites/run-bakeoff.sh
 
 loopkit-summary: loopkit-venv
 	.venv/bin/loopkit summary

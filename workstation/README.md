@@ -9,33 +9,70 @@ symlink into, your development machine.
 
 | Path | Goes where on the workstation | Purpose |
 |---|---|---|
-| [opencode.json](opencode.json) | project root **or** `~/.config/opencode/` | Provider + model limits + the 9-agent team |
+| [opencode.json](opencode.json) | project root **or** `~/.config/opencode/` | Providers + model limits + the 9-agent team (plus `heavy` and `research` escalations) |
 | [AGENTS.md](AGENTS.md) | project root | Injected at session start; the `@@RESULT` contract |
 | [.moderndegree/prompts/](.moderndegree/prompts/) | project root | Per-agent system prompts referenced by `opencode.json` |
-| [docs/business-layer.md](docs/business-layer.md) | reference | Tier L/B/Z routing, sovereignty, OpenSpec gates |
+| [docs/business-layer.md](docs/business-layer.md) | reference | Tier L/G/X/Z routing, sovereignty, OpenSpec gates |
 
 ## The split that drives everything
 
-Two warm base models on mini serve all nine agents — nothing else ever loads
-(`OLLAMA_MAX_LOADED_MODELS=2`, `KEEP_ALIVE=-1`), and roles live in the agent
-prompts rather than baked Modelfile variants:
+Two warm MoE base models on mini serve all nine agents — nothing else ever
+loads (`OLLAMA_MAX_LOADED_MODELS=2`, `KEEP_ALIVE=-1`), and roles live in the
+agent prompts rather than baked Modelfile variants:
 
-- **`qwen3.6:27b-mtp-q4_K_M`** (dense, deep reasoning) — planner, architect,
-  reviewer, security-auditor, coder, tester. Complex coding and hard analysis.
-- **`qwen3.6:35b-a3b-mtp-q4_K_M`** (MoE, 3B active, fast) — build
+- **`qwen3-coder-next:latest`** (MoE 80B-A3B, 3B active, depth) — planner,
+  architect, reviewer, security-auditor, coder, tester. Complex coding and hard
+  analysis.
+- **`qwen3.6:35b-a3b-mtp-q4_K_M`** (MoE 35B-A3B, 3B active, driver) — build
   (orchestrator), devops, doc-writer. General work and tool dispatch.
 
-Both run at their full native 256k window (set globally on mini —
-`ollama_context_length` in `mini/ansible/group_vars/all.yml`); this config
-matches `limit.context` so compaction budgets against the real number. Prefill
-is the wall (~205 t/s), so the orchestrator prompt tells it to hand subagents
-the *relevant* context, not the whole repo.
+mini is memory-bandwidth-bound, not compute-bound. Decode speed tracks active
+parameters per token, so MoE wins; a dense model in a warm slot is a mistake.
+The global context window is now **131,072**. KV cost is context × parallel, so
+128k at `OLLAMA_NUM_PARALLEL=2` is the same KV budget as 64k at 4-way: the
+51 GB + 22 GB warm pair plus ~22 GB of q8_0 KV lands near 95 GB of the ~110 GB
+GPU pool. The trade is concurrency — a third simultaneous request queues. 256k
+does not fit this pair and was never operationally useful at ~205 t/s prefill.
+
+## Windows workstation (cockpit)
+
+The primary dev box is a Windows gaming PC, not an inference node. Global
+opencode config lives at `%USERPROFILE%\.config\opencode\opencode.json`;
+per-project config may live at the project root. `AGENTS.md` and
+`.moderndegree\prompts\` also go in the project root.
+
+The gaming PC runs **no local models**. Its 32 GB DDR5 and 16 GB RTX 4080 Super
+lose to mini's 128 GB unified pool on every axis; it is a cockpit that drives
+mini. Use GitHub Copilot CLI for your own repos and Tier G work. Use opencode
+for client-confidential Tier L work. The full decision tree lives in
+[../docs/operating-manual.md](../docs/operating-manual.md).
+
+## Non-Ollama providers (opt-in, not wired by default)
+
+`opencode.json` declares `github-copilot` and `xai` as empty provider blocks.
+That enables opencode's built-in catalog entries but does **not** authenticate
+them — no agent uses them until you log in:
+
+```powershell
+opencode auth login    # pick github-copilot, then xai
+```
+
+Only two agents route off Ollama, and both are opt-in subagents you have to
+invoke by name:
+
+| Agent | Model | Tier | Guardrail |
+|---|---|---|---|
+| `heavy` | `ollama/gpt-oss:120b` | L | Still local, but loading it **evicts a warm model** on mini. Deliberate use only, never in a loop. |
+| `research` | `xai/grok-build-0.1` | X | Third-party. **Never** give it client-confidential material. |
+
+If you never log in, both `build` and every default subagent keep running
+entirely on mini, so the sovereign path is the failure-safe default.
 
 ## Reasoning control (verified against Ollama 0.31.2)
 
 Reasoning mode is per **agent**, set via `reasoningEffort` passthrough in
 `opencode.json`: `"none"` on the orchestrator and devops (terse, deterministic
-tool dispatch), unset (thinking on — the qwen3.6 default) everywhere else.
+tool dispatch), unset (thinking on for the Qwen stack) everywhere else.
 
 Two things that look like they work but **don't** through the `/v1` endpoint:
 the `/think`/`/no_think` soft switches in prompts, and a `think: false` body

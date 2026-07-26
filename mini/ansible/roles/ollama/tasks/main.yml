@@ -95,6 +95,23 @@
     - ollama_manage_models | bool
     - item not in ollama_list.stdout
 
+# ─── Heavy tier (pulled, never pinned) ────────────────────────────────────────
+# Models kept on disk for scheduled/off-hours work. Loading one evicts a member
+# of the warm pair (OLLAMA_MAX_LOADED_MODELS=2), so nothing here is resident —
+# they idle out and give the memory back. Pulled here only so an overnight
+# agentlab job never stalls on a 65 GB download. See group_vars/all.yml.
+- name: Pull heavy-tier models (only when missing)
+  ansible.builtin.command:
+    cmd: "ollama pull {{ item }}"
+  loop: "{{ ollama_heavy_models | default([]) }}"
+  environment:
+    OLLAMA_HOST: "127.0.0.1:11434"
+  register: ollama_pull_heavy
+  changed_when: ollama_pull_heavy.rc == 0
+  when:
+    - ollama_manage_models | bool
+    - item not in ollama_list.stdout
+
 # ─── Legacy Modelfile variants ────────────────────────────────────────────────
 # Kept for one-off experiments; ollama_models is empty under the two-base-model
 # policy. Variants are built only when missing; `ollama rm <name>` then

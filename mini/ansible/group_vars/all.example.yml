@@ -43,18 +43,28 @@ gpu_backend: "vulkan"
 # reaches this API over the tailnet (http://mini:11434).
 ollama_host: "0.0.0.0"
 # GLOBAL context window — applies to every model Ollama loads (per-request
-# num_ctx is not reachable through the /v1 endpoint opencode/loopkit use).
-# Maxed to the native window of both base models (262144). KV-cache budget at
-# 256k with q8_0:
-#   qwen3.6:27b      (65 layers, 4 KV heads × 256)  ≈ 34 GB
-#   qwen3.6:35b-a3b  (41 layers, 2 KV heads × 256)  ≈ 11 GB
-# → weights (18 + 23 GB) + KV ≈ 86 GB of the ~110 GB GPU pool. Headroom is
-# real but thin — if a third model ever needs to load, drop this to 131072
-# first. Prefill is the wall at ~205 t/s: a fully-packed 256k prompt costs
-# ~21 min before first token. The window is capacity, not a target.
-ollama_context_length: 262144
-# Allow up to four concurrent requests before queueing.
-ollama_num_parallel: 4
+# num_ctx is not reachable through the /v1 endpoint opencode/loopkit use, and a
+# Modelfile num_ctx *below* a model's native window is ignored, so this env var
+# is the only real control point).
+#
+# 131072, down from the models' native 262144. The sizing:
+#   1. Capacity. Weights are 51 GB (qwen3-coder-next) + 22 GB (qwen3.6 35B-A3B)
+#      = 73 GB of the ~110 GB GPU pool. KV cost is context × parallel, so 128k
+#      at 2-way parallel is the SAME ~256k-token KV budget as 64k at 4-way —
+#      about ~22 GB with q8_0 KV, landing at ~95 GB total with real headroom.
+#      Trading concurrency for window is free here; raising both is not.
+#      256k × 2 would need ~44 GB of KV and does not fit this pair.
+#   2. Prefill is the wall, not capacity. At ~205 t/s a packed 128k prompt costs
+#      ~10 minutes before the first token (256k costs ~21 min). That is the
+#      worst case, not the normal case — agentic coding turns are a small
+#      fraction of the window.
+# The window is capacity, not a target — pass what the task needs.
+# If you ever need 262144, this pair cannot hold it; drop to one warm model.
+ollama_context_length: 131072
+# Two concurrent requests per loaded model, then queue. This is the other half
+# of the 128k trade above: opencode dispatching 3+ subagents at once will queue
+# the third rather than run it. Raise this only by lowering the context window.
+ollama_num_parallel: 2
 ollama_flash_attention: 1
 ollama_kv_cache_type: "q8_0"
 # -1 pins the warm pair resident across handoffs (no idle eviction).
@@ -77,8 +87,28 @@ hsa_override_gfx_version: "11.5.1"
 # prompts. Agent roles live in prompts (workstation/opencode.json agents,
 # loopkit strategy prompts), so one loaded model serves many differently-
 # prompted agents instead of one variant per role:
-#   qwen3.6:27b-mtp-q4_K_M      dense — complex coding + deep reasoning
-#   qwen3.6:35b-a3b-mtp-q4_K_M  MoE (3B active) — general tasks, orchestration
+#   qwen3-coder-next:latest      MoE 80B-A3B (3B active) — coding + deep reasoning
+#   qwen3.6:35b-a3b-mtp-q4_K_M   MoE 35B-A3B (3B active) — general, orchestration
+#
+# WHY MoE ON BOTH SLOTS — the rule that governs model choice on this box.
+# Strix Halo is memory-bandwidth-bound, not compute-bound. Decode speed tracks
+# the *active* parameters read per token, not the total parameter count.
+# Calibration anchor (measured on this node): qwen3.6:35b-a3b-mtp-q4_K_M runs
+# 70–80 t/s, which implies ~185 GB/s of effective bandwidth (~86% of the ~215
+# GB/s real ceiling). Everything else follows from that number:
+#   qwen3.6:35b-a3b q4   22 GB,  3B active   →  70–80 t/s  (measured)
+#   qwen3-coder-next     51 GB,  3B active   →  ~35–50 t/s (estimate)
+#   gpt-oss:120b         65 GB,  5.1B active →  ~30 t/s    (community-measured)
+#   qwen3.6:27b q4       17 GB, 27B DENSE    →  ~11–15 t/s (185/17 ≈ 11)
+# The dense 27B was the previous coder slot and is ~6x slower than the driver
+# while scoring ~11–15 points LOWER on SWE-bench Verified than qwen3-coder-next
+# (70.6–74.2 vs ~59). Swapping it is a strict win on both axes. Never put a
+# dense model in a warm slot on this hardware.
+#
+# ROLLBACK: the old pair is still on disk. Restore the previous behaviour by
+# replacing qwen3-coder-next:latest with qwen3.6:27b-mtp-q4_K_M below, raising
+# ollama_context_length back toward 131072, and re-running `make provision`.
+#
 # Reasoning is toggled per agent at the API level: reasoning_effort "none"
 # disables thinking on /v1 (verified on Ollama 0.31.2). The /no_think soft
 # switch and a think:false body field are BOTH ignored by /v1 — do not rely
@@ -86,13 +116,42 @@ hsa_override_gfx_version: "11.5.1"
 # NOTE: the tags must be pullable; adjust to the exact tags your store carries.
 ollama_manage_models: true
 ollama_base_models:
-  - "qwen3.6:27b-mtp-q4_K_M"
+  - "qwen3-coder-next:latest"
   - "qwen3.6:35b-a3b-mtp-q4_K_M"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Heavy tier — pulled and kept on disk, NEVER resident
+# ─────────────────────────────────────────────────────────────────────────────
+# Loading any of these evicts one of the warm pair (max_loaded_models: 2), so
+# they are for scheduled/off-hours work only — an `agentlab-run@heavy-*` job on
+# ser5, or an explicit opt-in opencode agent. Queue in at night, read the eval
+# scores in the morning. See docs/operating-manual.md.
+#   gpt-oss:120b        117B-A5.1B MoE, ~30 t/s — best general reasoning that
+#                       fits 128 GB; the "hard problem, take an hour" tier.
+#   nemotron-cascade-2  Mamba2-MoE 30B-A3B — math/algorithms escalation (IMO
+#                       35/42, IOI 439/600, ICPC 10/12) and a good INDEPENDENT
+#                       judge for best_of_n (a different family judging beats
+#                       a model grading its own samples).
+# Listed for documentation and `ollama pull` convenience only — the ollama role
+# pulls these but nothing pins them, so they idle out and free their memory.
+ollama_heavy_models:
+  - "gpt-oss:120b"
+  - "nemotron-cascade-2:latest"
+
+# NOT pulled by provisioning: glm-4.7-flash:latest (19 GB) is the bake-off
+# challenger for the DRIVER slot, not a default. run-bakeoff.sh skips any model
+# missing from mini, so to actually race it, pull it by hand first:
+#   ollama pull glm-4.7-flash:latest
+# Promote it into ollama_base_models only on a measured win over the incumbent.
 
 # Legacy Modelfile variants (built via `ollama create` when listed). Empty
 # under the two-base-model policy; the machinery stays for one-off experiments.
 # Reclaim disk from previously built variants with:
 #   ollama rm oracle-64k oracle-batch-192k toolcaller-64k heavy-128k coder-256k
+# Retirement candidates once the bake-off confirms the swap (67 GB of disk):
+#   ollama rm qwen3.6:27b-mtp-q8_0 qwen3.6:35b-a3b-mtp-q8_0
+# q8 roughly halves throughput on a bandwidth-bound box for a marginal quality
+# gain — a bad trade here. Keep qwen3.6:27b-mtp-q4_K_M until the swap is proven.
 ollama_models: []
 
 # ─────────────────────────────────────────────────────────────────────────────

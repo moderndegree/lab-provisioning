@@ -67,7 +67,7 @@
         group: "{{ username }}"
         mode: "0644"
 
-    # ─── Optional xAI API key (HERMES_HOME/.env) ──────────────────────────────
+    # ─── Optional secrets (HERMES_HOME/.env) ──────────────────────────────────
     # Prefer SuperGrok OAuth (`hermes auth add xai-oauth`) — not automatable.
     # API key path is opt-in via enable_hermes_xai_api_key + vault_xai_api_key.
     - name: Ensure Hermes env file exists
@@ -79,7 +79,9 @@
         mode: "0600"
         modification_time: preserve
         access_time: preserve
-      when: enable_hermes_xai_api_key | bool
+      when: >-
+        (enable_hermes_xai_api_key | bool)
+        or (enable_hermes_messaging | bool)
 
     - name: Write XAI_API_KEY into Hermes env when vaulted
       ansible.builtin.lineinfile:
@@ -98,6 +100,31 @@
       notify:
         - restart hermes-gateway
         - restart hermes-proxy
+
+    - name: Write Hermes messaging bot tokens into env when vaulted
+      ansible.builtin.lineinfile:
+        path: "{{ hermes_home }}/.env"
+        regexp: "^{{ item.env_var }}="
+        line: "{{ item.env_var }}={{ item.value }}"
+        state: present
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0600"
+      loop:
+        - platform: "telegram"
+          env_var: "TELEGRAM_BOT_TOKEN"
+          value: "{{ vault_hermes_telegram_bot_token | default('') }}"
+        - platform: "discord"
+          env_var: "DISCORD_BOT_TOKEN"
+          value: "{{ vault_hermes_discord_bot_token | default('') }}"
+      when: >-
+        (enable_hermes_messaging | bool)
+        and (item.platform in (hermes_messaging_platforms | default([])))
+        and (item.value | default('') | length > 0)
+        and not (item.value | default('') is search('^PLACEHOLDER'))
+      no_log: true
+      notify:
+        - restart hermes-gateway
 
     # ─── Optional web.backend: xai ────────────────────────────────────────────
     # Only patches config.yaml when hermes_web_backend is non-empty. Does not
@@ -172,6 +199,8 @@
           Hermes Grok skill: {{ 'enabled' if (enable_hermes_grok_skill | bool) else 'disabled' }}.
           On the host after provision: (1) grok login   (2) hermes auth add xai-oauth
           (optional model provider / x_search / Imagine / TTS).
+          Messaging gateway: run `hermes gateway setup`, then approve each new chat with
+          `hermes pairing approve <platform> <code>`; revoke pairings later if needed.
           Default Hermes model stays Ollama at {{ hermes_ollama_base_url }}.
 
     # ─── Systemd user service ─────────────────────────────────────────────────
