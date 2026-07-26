@@ -22,7 +22,7 @@ else
   VAULT_ARG_RO := --vault-password-file $(VAULT_PASS_FILE)
 endif
 
-.PHONY: init render provision preflight ping syntax-check lint \
+.PHONY: init render provision preview preflight ping syntax-check lint \
         vault-edit vault-encrypt install-deps help
 
 ## help           List available make targets
@@ -80,6 +80,15 @@ preflight:
 ## provision      Converge ser5 end-to-end — idempotent, safe to re-run
 provision: preflight
 	ansible-playbook -i $(INVENTORY) $(PLAYBOOK) $(VAULT_ARG) -e @$(VAULT_FILE)
+
+## preview        Dry-run — show exactly what WOULD change, without applying
+# Runs the real playbook in check mode with diffs, so every template renders with
+# the values Ansible would truly use (role defaults + your group_vars/all.yml
+# overrides, correctly layered) and prints a line-by-line diff against the box.
+# Run after every `git pull`: a stale override in all.yml shows up here as a
+# value that refuses to change.
+preview: preflight
+	ansible-playbook -i $(INVENTORY) $(PLAYBOOK) $(VAULT_ARG) -e @$(VAULT_FILE) --check --diff
 
 ## ping           Verify SSH connectivity to ser5
 ping:

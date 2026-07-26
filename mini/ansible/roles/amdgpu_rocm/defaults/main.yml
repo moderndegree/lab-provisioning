@@ -1,7 +1,25 @@
 ---
 # GPU backend: rocm | vulkan
-# Overridden by group_vars/all.yml (gpu_backend: rocm by default).
-gpu_backend: "rocm"
+#
+# TRACKED IN GIT and the source of truth. Role defaults are the lowest-precedence
+# vars in Ansible, so a value in group_vars/all.yml still wins — set it there only
+# to deliberately diverge from the committed path.
+#
+# vulkan is the COMMITTED path on mini: measured +7-26% decode vs ROCm. The role
+# installs BOTH stacks regardless, so flipping this var is the whole revert — no
+# separate package pass. This default used to be "rocm", which meant a fresh box
+# with a pruned all.yml came up on the slower backend.
+gpu_backend: "vulkan"
+
+# Used only on the ROCm fallback path (gpu_backend: rocm), and referenced by
+# roles/ollama's systemd override template on BOTH paths (it renders a commented
+# revert hint, and Jinja still expands {{ }} inside a systemd '#' line), so this
+# must always be defined.
+# Strix Halo is NOT on AMD's official ROCm support matrix; HSA_OVERRIDE_GFX_VERSION
+# tricks ROCm into the closest supported target (RDNA3/gfx1100). Kernel 7.0 clears
+# the >=6.18.4 floor.
+hsa_override_gfx_version: "11.5.1"
+
 
 # ─── AMD GPU installer (ROCm 7.2.4 production — pinned for gfx1151) ───────────
 # ROCm 7.2.x production is the community-proven stack for gfx1151 (Strix Halo).

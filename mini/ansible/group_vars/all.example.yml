@@ -1,17 +1,38 @@
 ---
-# mini group_vars — copy to all.yml and fill in real values.
-# all.yml is gitignored; all.example.yml (this file, with placeholders) is tracked.
+# mini group_vars — copy to all.yml (`make init`) and fill in real values.
+# all.yml is gitignored; this file, with placeholders, is tracked.
 #
-# Run: make init   → copies this file to ansible/group_vars/all.yml
-# Then edit ansible/group_vars/all.yml with your real values.
+# ─────────────────────────────────────────────────────────────────────────────
+# READ THIS BEFORE ADDING A KEY
+# ─────────────────────────────────────────────────────────────────────────────
+# This file is for values that are specific to YOUR box: identity, disks, and
+# deliberate feature toggles. It is NOT where serving policy lives.
+#
+# Serving policy (context window, concurrency, which models stay warm, package
+# versions, GPU backend) lives in TRACKED role defaults:
+#     roles/ollama/defaults/main.yml       context, parallelism, model tiers
+#     roles/amdgpu_rocm/defaults/main.yml  gpu_backend, ROCm/Vulkan pinning
+#     roles/base/defaults/main.yml         amdgpu_top version
+#     roles/openwebui/defaults/main.yml    Open WebUI image, port, signup
+#     roles/cloudflared/defaults/main.yml  tunnel image, autoupdate
+#
+# Role defaults are the LOWEST-precedence vars in Ansible, so anything you set
+# here still wins. The reason policy lives there and not here is that all.yml is
+# gitignored and `make init` only copies this file when all.yml is ABSENT —
+# so a key you copy into all.yml freezes at that value forever and silently
+# shadows every future `git pull`. Copy a policy key down here ONLY when you
+# intend to diverge, and delete it again when you no longer do.
+#
+# Check what Ansible will actually apply, after all precedence, with:
+#     make show-config
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Node identity
+# Node identity  (REQUIRED — no role default, provisioning fails without these)
+# ─────────────────────────────────────────────────────────────────────────────
 # Single source of truth for the OS user and home dir used by service accounts,
 # file ownership, home paths, and the Ansible SSH login (ansible_user, below).
 # node_user MUST match `username:` in autoinstall/user-data (cloud-init is static
 # and cannot read this var). node_hostname likewise matches the autoinstall hostname.
-# ─────────────────────────────────────────────────────────────────────────────
 node_user: "YOUR_USERNAME"
 node_home: "/home/{{ node_user }}"
 node_hostname: "{{ inventory_hostname }}"
@@ -20,145 +41,10 @@ node_hostname: "{{ inventory_hostname }}"
 ansible_user: "{{ node_user }}"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Pinned versions
-# Update these values when upgrading; re-run `make provision` to converge.
+# Data disk  (REQUIRED — data_mount is consumed by the ollama and openwebui roles)
 # ─────────────────────────────────────────────────────────────────────────────
-
-# NodeSource LTS stream (resolves to Node.js v22.x as of 2026-06)
-# ─────────────────────────────────────────────────────────────────────────────
-# GPU backend
-#   vulkan → Mesa RADV (COMMITTED primary — measured +7–26% decode vs ROCm)
-#   rocm   → AMD ROCm stack (fallback; flip this var to revert if Vulkan regresses)
-# The amdgpu_rocm role installs BOTH stacks; this var only chooses which backend
-# the Ollama systemd override activates. See the moderndegree agent-stack runbook.
-# ─────────────────────────────────────────────────────────────────────────────
-gpu_backend: "vulkan"
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Ollama service environment (written to systemd override.conf)
-# ─────────────────────────────────────────────────────────────────────────────
-# Bind address. 0.0.0.0 makes the API reachable over the tailnet; UFW restricts
-# inbound to the tailscale0 interface, so nothing is actually exposed on the LAN.
-# Set to 127.0.0.1 to keep Ollama local-only. The Hermes gateway runs on ser5 and
-# reaches this API over the tailnet (http://mini:11434).
-ollama_host: "0.0.0.0"
-# GLOBAL context window — applies to every model Ollama loads (per-request
-# num_ctx is not reachable through the /v1 endpoint opencode/loopkit use, and a
-# Modelfile num_ctx *below* a model's native window is ignored, so this env var
-# is the only real control point).
-#
-# 131072, down from the models' native 262144. The sizing:
-#   1. Capacity. Weights are 51 GB (qwen3-coder-next) + 22 GB (qwen3.6 35B-A3B)
-#      = 73 GB of the ~110 GB GPU pool. KV cost is context × parallel, so 128k
-#      at 2-way parallel is the SAME ~256k-token KV budget as 64k at 4-way —
-#      about ~22 GB with q8_0 KV, landing at ~95 GB total with real headroom.
-#      Trading concurrency for window is free here; raising both is not.
-#      256k × 2 would need ~44 GB of KV and does not fit this pair.
-#   2. Prefill is the wall, not capacity. At ~205 t/s a packed 128k prompt costs
-#      ~10 minutes before the first token (256k costs ~21 min). That is the
-#      worst case, not the normal case — agentic coding turns are a small
-#      fraction of the window.
-# The window is capacity, not a target — pass what the task needs.
-# If you ever need 262144, this pair cannot hold it; drop to one warm model.
-ollama_context_length: 131072
-# Two concurrent requests per loaded model, then queue. This is the other half
-# of the 128k trade above: opencode dispatching 3+ subagents at once will queue
-# the third rather than run it. Raise this only by lowering the context window.
-ollama_num_parallel: 2
-ollama_flash_attention: 1
-ollama_kv_cache_type: "q8_0"
-# -1 pins the warm pair resident across handoffs (no idle eviction).
-ollama_keep_alive: "-1"
-# Exactly the warm pair — a third resident model would blow the KV budget above.
-ollama_max_loaded_models: 2
-
-# Vulkan ICD selector for the committed Vulkan path (RADV = Mesa's AMD driver).
-ollama_vulkan_icd: "RADV"
-
-# Used only on the ROCm fallback path (gpu_backend: rocm). Strix Halo is NOT on
-# AMD's official ROCm support matrix; HSA_OVERRIDE_GFX_VERSION tricks ROCm into the
-# closest supported target (RDNA3/gfx1100). Kernel 7.0 clears the >=6.18.4 floor.
-hsa_override_gfx_version: "11.5.1"
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Ollama models — two warm base models, no baked variants
-# ─────────────────────────────────────────────────────────────────────────────
-# Policy (2026-07): exactly two base models stay resident, with NO baked system
-# prompts. Agent roles live in prompts (workstation/opencode.json agents,
-# loopkit strategy prompts), so one loaded model serves many differently-
-# prompted agents instead of one variant per role:
-#   qwen3-coder-next:latest      MoE 80B-A3B (3B active) — coding + deep reasoning
-#   qwen3.6:35b-a3b-mtp-q4_K_M   MoE 35B-A3B (3B active) — general, orchestration
-#
-# WHY MoE ON BOTH SLOTS — the rule that governs model choice on this box.
-# Strix Halo is memory-bandwidth-bound, not compute-bound. Decode speed tracks
-# the *active* parameters read per token, not the total parameter count.
-# Calibration anchor (measured on this node): qwen3.6:35b-a3b-mtp-q4_K_M runs
-# 70–80 t/s, which implies ~185 GB/s of effective bandwidth (~86% of the ~215
-# GB/s real ceiling). Everything else follows from that number:
-#   qwen3.6:35b-a3b q4   22 GB,  3B active   →  70–80 t/s  (measured)
-#   qwen3-coder-next     51 GB,  3B active   →  ~35–50 t/s (estimate)
-#   gpt-oss:120b         65 GB,  5.1B active →  ~30 t/s    (community-measured)
-#   qwen3.6:27b q4       17 GB, 27B DENSE    →  ~11–15 t/s (185/17 ≈ 11)
-# The dense 27B was the previous coder slot and is ~6x slower than the driver
-# while scoring ~11–15 points LOWER on SWE-bench Verified than qwen3-coder-next
-# (70.6–74.2 vs ~59). Swapping it is a strict win on both axes. Never put a
-# dense model in a warm slot on this hardware.
-#
-# ROLLBACK: the old pair is still on disk. Restore the previous behaviour by
-# replacing qwen3-coder-next:latest with qwen3.6:27b-mtp-q4_K_M below, raising
-# ollama_context_length back toward 131072, and re-running `make provision`.
-#
-# Reasoning is toggled per agent at the API level: reasoning_effort "none"
-# disables thinking on /v1 (verified on Ollama 0.31.2). The /no_think soft
-# switch and a think:false body field are BOTH ignored by /v1 — do not rely
-# on them; native /api/chat honours think:false if you need it from scripts.
-# NOTE: the tags must be pullable; adjust to the exact tags your store carries.
-ollama_manage_models: true
-ollama_base_models:
-  - "qwen3-coder-next:latest"
-  - "qwen3.6:35b-a3b-mtp-q4_K_M"
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Heavy tier — pulled and kept on disk, NEVER resident
-# ─────────────────────────────────────────────────────────────────────────────
-# Loading any of these evicts one of the warm pair (max_loaded_models: 2), so
-# they are for scheduled/off-hours work only — an `agentlab-run@heavy-*` job on
-# ser5, or an explicit opt-in opencode agent. Queue in at night, read the eval
-# scores in the morning. See docs/operating-manual.md.
-#   gpt-oss:120b        117B-A5.1B MoE, ~30 t/s — best general reasoning that
-#                       fits 128 GB; the "hard problem, take an hour" tier.
-#   nemotron-cascade-2  Mamba2-MoE 30B-A3B — math/algorithms escalation (IMO
-#                       35/42, IOI 439/600, ICPC 10/12) and a good INDEPENDENT
-#                       judge for best_of_n (a different family judging beats
-#                       a model grading its own samples).
-# Listed for documentation and `ollama pull` convenience only — the ollama role
-# pulls these but nothing pins them, so they idle out and free their memory.
-ollama_heavy_models:
-  - "gpt-oss:120b"
-  - "nemotron-cascade-2:latest"
-
-# NOT pulled by provisioning: glm-4.7-flash:latest (19 GB) is the bake-off
-# challenger for the DRIVER slot, not a default. run-bakeoff.sh skips any model
-# missing from mini, so to actually race it, pull it by hand first:
-#   ollama pull glm-4.7-flash:latest
-# Promote it into ollama_base_models only on a measured win over the incumbent.
-
-# Legacy Modelfile variants (built via `ollama create` when listed). Empty
-# under the two-base-model policy; the machinery stays for one-off experiments.
-# Reclaim disk from previously built variants with:
-#   ollama rm oracle-64k oracle-batch-192k toolcaller-64k heavy-128k coder-256k
-# Retirement candidates once the bake-off confirms the swap (67 GB of disk):
-#   ollama rm qwen3.6:27b-mtp-q8_0 qwen3.6:35b-a3b-mtp-q8_0
-# q8 roughly halves throughput on a bandwidth-bound box for a marginal quality
-# gain — a bad trade here. Keep qwen3.6:27b-mtp-q4_K_M until the swap is proven.
-ollama_models: []
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Data disk
-# ─────────────────────────────────────────────────────────────────────────────
-# Set false when there is no dedicated data disk (single-disk node).
-# /data will be a plain directory on the root filesystem instead.
+# Set has_data_disk false when there is no dedicated data disk (single-disk node);
+# /data then becomes a plain directory on the root filesystem instead.
 has_data_disk: false
 
 # Only used when has_data_disk: true.
@@ -180,30 +66,34 @@ skip_data_disk_format: false
 auto_reboot: true
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Cloudflare Tunnel (browser-reachable, public "from anywhere" path)
+# Optional overrides — uncomment ONLY to diverge from the tracked default
 # ─────────────────────────────────────────────────────────────────────────────
-# Tailscale (above) is the primary, fully-private path. Enable cloudflared as well
-# for browser access without a VPN client. The tunnel only *starts* once a real
-# vault_cloudflared_token is set, so leaving this true with a placeholder token is
-# safe (it won't break a provision). Hostname→service mapping and — importantly —
-# Cloudflare Access policies are configured in the Zero Trust dashboard, so your
-# domain and routes never live in this repo. See README "Remote access".
-enable_cloudflared: true
+# Every key below already has a working value in a role default. Leaving them
+# commented means you inherit policy updates automatically on `git pull`.
+# Uncommenting pins the value on this box until you remove the line again.
 
-# Pin to a release tag/digest for reproducible deploys (default is :latest).
-cloudflared_image: "docker.io/cloudflare/cloudflared:latest"
-cloudflared_autoupdate: true
+# ─── Remote access (roles/cloudflared, roles/openwebui) ───
+# Tailscale is the primary, fully-private path and is always on. Enable these for
+# browser access without a VPN client. cloudflared only *starts* once a real
+# vault_cloudflared_token is set, so enabling it with a placeholder token is safe.
+# Open WebUI is mini's browser/phone chat UI at http://mini:8080 over the tailnet.
+# enable_cloudflared: true
+# enable_openwebui: true
+# First provision: leave signup true, create the admin account in the UI, then set
+# it false and re-run `make provision` to stop accepting new self-service signups.
+# openwebui_enable_signup: false
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Open WebUI (browser chat UI for mini's local Ollama)
-# ─────────────────────────────────────────────────────────────────────────────
-# Rootless Podman quadlet (roles/containers sets up lingering + quadlet support).
-# Reaches Ollama via Podman's host.containers.internal alias — no Tailscale DNS
-# involved for that hop (see roles/openwebui/defaults/main.yml). Reachable over
-# the tailnet at http://mini:8080 (UFW's blanket tailscale0 allow) and, once
-# enable_cloudflared is wired up with a public hostname, via the tunnel too.
-enable_openwebui: false
-openwebui_port: 8080
-# First provision: leave true, create the admin account in the UI, then flip to
-# false and re-run `make provision` to stop accepting new self-service signups.
-openwebui_enable_signup: true
+# ─── GPU backend (roles/amdgpu_rocm/defaults/main.yml) ───
+# Default is "vulkan" (committed path, +7-26% decode vs ROCm). Both stacks are
+# installed either way, so this one line is the entire revert.
+# gpu_backend: "rocm"
+
+# ─── Ollama serving policy (roles/ollama/defaults/main.yml) ───
+# Read the sizing rationale in that file before changing these — context and
+# parallelism MULTIPLY into the KV-cache budget, so raise one only by lowering
+# the other. Defaults are 131072 x 2 across a 2-model warm pair.
+# ollama_context_length: 131072
+# ollama_num_parallel: 2
+# ollama_base_models:
+#   - "qwen3-coder-next:latest"
+#   - "qwen3.6:35b-a3b-mtp-q4_K_M"

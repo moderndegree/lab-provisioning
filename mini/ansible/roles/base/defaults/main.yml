@@ -1,0 +1,13 @@
+---
+# Base role defaults for mini.
+#
+# TRACKED IN GIT — role defaults are the lowest-precedence vars in Ansible, so
+# anything set in group_vars/all.yml still wins. Version bumps land here and
+# arrive via `git pull`; all.yml should not carry copies of these keys.
+
+# amdgpu_top — GPU/VRAM monitor, and the tool used to measure the real KV-cache
+# footprint behind ollama_context_length (roles/ollama/defaults/main.yml).
+# Not in Ubuntu apt, so it is installed from upstream GitHub releases and this
+# version is templated straight into the .deb download URL.
+# Releases: https://github.com/Umio-Yasuno/amdgpu_top/releases
+amdgpu_top_version: "0.11.5"

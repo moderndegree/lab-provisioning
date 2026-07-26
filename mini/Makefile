@@ -24,7 +24,7 @@ else
   VAULT_ARG_RO := --vault-password-file $(VAULT_PASS_FILE)
 endif
 
-.PHONY: provision ping syntax-check lint vault-edit vault-encrypt install-deps init render help
+.PHONY: provision preview ping syntax-check lint vault-edit vault-encrypt install-deps init render help
 
 ## help: List available targets
 help:
@@ -58,6 +58,16 @@ render:
 ## provision: Converge the host — idempotent, safe to re-run
 provision:
 	ansible-playbook -i $(INVENTORY) $(PLAYBOOK) $(VAULT_ARG) -e @$(VAULT_FILE)
+
+## preview: Dry-run — show exactly what WOULD change, without applying anything
+# The honest answer to "did my policy actually land?". Runs the real playbook in
+# check mode with diffs, so the systemd override renders with the values Ansible
+# would truly use (role defaults + your group_vars/all.yml overrides, correctly
+# layered) and prints a line-by-line diff against what is on the box right now.
+# Run this after every `git pull` — a stale override in all.yml shows up here as
+# a value that refuses to change.
+preview:
+	ansible-playbook -i $(INVENTORY) $(PLAYBOOK) $(VAULT_ARG) -e @$(VAULT_FILE) --check --diff
 
 ## ping: Verify SSH connectivity to mini
 ping:
