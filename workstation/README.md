@@ -13,6 +13,7 @@ symlink into, your development machine.
 | [AGENTS.md](AGENTS.md) | project root | Injected at session start; the `@@RESULT` contract |
 | [.moderndegree/prompts/](.moderndegree/prompts/) | project root | Per-agent system prompts referenced by `opencode.json` |
 | [docs/business-layer.md](docs/business-layer.md) | reference | Tier L/G/X/Z routing, sovereignty, OpenSpec gates |
+| [.moderndegree/skills/task-package.md](.moderndegree/skills/task-package.md) | project root | **Required** problem understanding + context packaging before subagent handoffs |
 | [.moderndegree/skills/quality-gate.md](.moderndegree/skills/quality-gate.md) | project root | **Required** free-text polish via `qloop gate` (never code diffs) |
 
 ## The split that drives everything

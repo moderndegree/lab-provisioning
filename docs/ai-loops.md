@@ -50,8 +50,12 @@ For the day-to-day operating policy, escalation tiers, and model inventory, see
 |---------|----------------------|
 | **agentlab offline** | Primary: eval matrix, `stats`/`summary`, playbook reflect, STaR |
 | **Hermes free-text** | Interactive: `/data/agentlab/jobs/quality-gate.sh` → `qloop gate` |
-| **OpenCode coding** | **None** — tests + reviewer + `@@RESULT` |
-| **OpenCode prose** | Optional thin `qloop gate` (skill); never on code diffs |
+| **OpenCode coding** | **None** for qloop — tests + reviewer + `@@RESULT`. Context packaging is the orchestrator TASK PACKAGE skill (not qloop) |
+| **OpenCode prose** | `qloop gate` after a solid TASK PACKAGE; never on code diffs |
+
+OpenCode handoffs: see `workstation/.moderndegree/skills/task-package.md` — small
+models get dense packages (goal, done-when, constraints, pasted excerpts), not
+raw chat or whole-repo dumps.
 
 ## The loop stack (packages/quality-loop)
 

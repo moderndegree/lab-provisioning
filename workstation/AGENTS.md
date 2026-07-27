@@ -13,6 +13,20 @@ Reasoning agents (planner/architect/reviewer/security-auditor/doc-writer) never
 call tools — they return analysis as text. Only the orchestrator and the
 coder/tester/devops agents touch the filesystem or shell.
 
+## TASK PACKAGE — context is the orchestrator's main job
+
+Bad answers usually come from thin handoffs. Full rules:
+`.moderndegree/skills/task-package.md`.
+
+- Orchestrator **must** clarify the problem and build a **TASK PACKAGE** (goal,
+  done-when, constraints, assumptions, pasted context excerpts) before dispatching
+  any non-trivial subagent.
+- Prefer **tools over user questions**; ask the user only for **blocking** unknowns.
+- No-tools subagents work **only** from the package. Incomplete package → they
+  return `BLOCKED` with exact gaps; orchestrator enriches and re-dispatches.
+- Do not dump the whole repo or chat; paste relevant excerpts (prefill is expensive).
+- `qloop` quality-gate polishes free-text **after** packaging — it does not gather repo context.
+
 ## Placement rule (the architectural backbone)
 
 Two warm base models on mini serve every agent. mini is memory-bandwidth-bound:
