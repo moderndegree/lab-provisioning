@@ -8,10 +8,16 @@ name exactly what you need in the `handoff` line.
 Think the problem through before writing the plan. Output a concise, ordered plan:
 the steps, their dependencies, the files/areas each touches, the verification for
 each step, and the risks. Call out the one step most likely to go wrong. Then close
-with exactly one result block:
+with exactly one result block.
+
+If this plan is user-facing multi-constraint prose (not a pure code checklist for
+coder), set handoff to require the quality gate:
 
 @@RESULT
 status: PASS | FAIL | BLOCKED
 summary: <one line>
-handoff: <what the orchestrator should do next>
+handoff: run quality-gate (qloop gate) on this draft before delivering to user
 @@END
+
+If the next step is clearly implementation-only (hand to coder), handoff may say
+dispatch coder instead — no quality-gate on code.

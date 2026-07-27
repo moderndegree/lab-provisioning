@@ -1,15 +1,15 @@
 # {{ ansible_managed }}
-# quality-gate — free-text polish via quality-loop (qloop) on mini (Tier L)
+# quality-gate — REQUIRED free-text polish via quality-loop (qloop) on mini (Tier L)
 
-## When to use
+## Decision tree (follow in order)
 
-Use this skill for **multi-constraint free-text** answers with **no tool/test
-oracle**: risk lists, rollback plans, proposals, ops runbooks, careful Q&A.
-
-**Do not use** for:
-- Code edits / diffs (OpenCode + tests own that path)
-- Client-confidential work over Telegram/Discord (use dashboard/SSH only)
-- Tasks tagged `GATE: skip` or pure plumbing ("restart service X")
+1. Task tagged `GATE: skip` / `no-gate` → answer without the gate.
+2. Task is pure plumbing (restart X, one shell fact) or a single short fact → no gate.
+3. Task is code editing → do **not** use this skill; use OpenCode / coding tools.
+4. Task is multi-constraint free-text (risks, rollback, proposal, runbook, careful
+   multi-part Q&A, extraction wording) → **you MUST run the gate** before the
+   final user-facing answer.
+5. If unsure whether free-text quality matters → **run the gate**.
 
 ## How to run
 
@@ -18,22 +18,29 @@ Shell out (PATH includes `/usr/local/bin` after agentlab provision):
 ```bash
 {{ hermes_quality_gate_script }} \
   --task "…" \
-  [--baseline "existing draft"] \
+  [--baseline "your first draft"] \
   --strategy refine \
   --worker general \
   [--playbook /data/agentlab/playbooks/writing.md|/data/agentlab/playbooks/infra.md]
 ```
 
-Stdout is one JSON object. Honor it:
+Recommended flow: draft once (or let gate generate), then always pass multi-constraint
+answers through the script. Prefer generating a draft yourself, then:
+
+```bash
+{{ hermes_quality_gate_script }} --task "…" --baseline "…draft…" --strategy refine
+```
+
+Stdout is one JSON object. Honor it with no freelancing:
 
 | decision | exit | action |
 |----------|------|--------|
 | ACCEPT or KEEP_BASELINE | 0 | return `answer` to the user |
-| SKIP | 2 | return original draft / answer without looping |
-| FAIL | 1 | surface `reason`; do not invent content |
+| SKIP | 2 | return original draft / ungated answer |
+| FAIL | 1 | surface `reason`; do not invent polished content |
 
 Defaults: strategy=refine, worker=general, judge=general, rounds=2, timeout=180s.
-Only warm models (`general`, `coder`) are allowed — never `heavy`/`judge`/`scout`.
+Only warm models (`general`, `coder`) — never `heavy`/`judge`/`scout`.
 
 ## Playbooks
 
@@ -46,4 +53,5 @@ outcome via `qloop playbook reflect` or suite `--reflect`.
 ## Tier
 
 Always Tier L: inference on mini (`{{ hermes_ollama_base_url }}`). Never send
-client-confidential material to xAI/Grok through this path.
+client-confidential material to xAI/Grok through this path. Client-confidential
+work: dashboard/SSH only — not Telegram/Discord.

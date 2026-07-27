@@ -13,7 +13,7 @@ symlink into, your development machine.
 | [AGENTS.md](AGENTS.md) | project root | Injected at session start; the `@@RESULT` contract |
 | [.moderndegree/prompts/](.moderndegree/prompts/) | project root | Per-agent system prompts referenced by `opencode.json` |
 | [docs/business-layer.md](docs/business-layer.md) | reference | Tier L/G/X/Z routing, sovereignty, OpenSpec gates |
-| [.moderndegree/skills/quality-gate.md](.moderndegree/skills/quality-gate.md) | project root | Opt-in free-text polish via `qloop gate` (never code diffs) |
+| [.moderndegree/skills/quality-gate.md](.moderndegree/skills/quality-gate.md) | project root | **Required** free-text polish via `qloop gate` (never code diffs) |
 
 ## The split that drives everything
 
@@ -71,13 +71,14 @@ entirely on mini, so the sovereign path is the failure-safe default.
 
 ## quality-loop (`qloop`) on the workstation
 
-Optional free-text quality gate (prose/extraction only — not code). From the
-repo root on a machine that can reach `http://mini:11434/v1`:
+The OpenCode orchestrator **must** run `qloop gate` on multi-constraint free-text
+(see skill + orchestrator prompt). Install once so agents can find the binary:
 
 ```bash
 make qloop-venv
+# put on PATH for agent sessions, e.g.:
+export PATH="$PWD/.venv/bin:$PATH"
 .venv/bin/qloop models
-.venv/bin/qloop gate --task "…" --strategy refine --json
 ```
 
 See [../packages/quality-loop/README.md](../packages/quality-loop/README.md) and

@@ -1,53 +1,75 @@
-# quality-gate — free-text polish via `qloop` (not for code)
+# quality-gate — REQUIRED free-text polish via `qloop`
 
 ## Role
 
-`qloop gate` spends local test-time compute on mini (Tier L) to improve
-**prose / extraction / risk-writeup** drafts when there is **no tool or test
-oracle**. It is **not** an agent replacement and **must not** run on code diffs.
+`qloop gate` is the lab quality authority for free-text when there is **no tool
+or test oracle**. The orchestrator runs it; subagents do not. It is **not** an
+agent replacement and **must never** run on code diffs.
 
-## When to call
+## Decision tree (orchestrator — follow in order, no freelancing)
 
-Call only when **all** of these hold:
+1. User/task tagged `GATE: skip` or `no-gate` → **do not call**; deliver draft.
+2. Deliverable is code (diff, implement, tests, build, fix CI) → **do not call**;
+   use coder/tester/reviewer + `@@RESULT`.
+3. Deliverable is pure plumbing (one shell command, restart service, path copy)
+   or a single short fact (≤2 sentences, one number/name) → **do not call**.
+4. Else if deliverable is multi-constraint free-text for a human reader →
+   **MUST call** `qloop gate` before final user-facing answer:
+   - risk / rollback / migration narrative
+   - proposal / client-facing wording
+   - ops runbook / careful Q&A with multiple constraints
+   - structured extraction or schema-shaped prose
+   - planner/architect/doc-writer prose the user will act on
+5. If unsure whether it is free-text quality work → **MUST call** (prefer
+   over-gate on prose; never gate code).
 
-1. The deliverable is free-text (plan narrative, risk list, proposal section,
-   structured extraction wording) — **not** a code change.
-2. The task has multiple constraints or quality matters for a human reader.
-3. The task is not tagged `GATE: skip` / `no-gate`.
-4. mini is the intended route (Tier L). Never send client-confidential material
-   off Tier L.
+## How to run (orchestrator or devops shell)
 
-## When **not** to call
-
-- Coder/tester work, diffs, builds, test failures → use `@@RESULT` + tools.
-- Reviewer / security-auditor already provided a structured critique.
-- Short factual lookups or pure plumbing.
-
-## Command
-
-Prefer a local `qloop` on PATH (workstation: `make qloop-venv` then
-`.venv/bin/qloop`, or a ser5 SSH wrapper). Example:
+Resolve binary (first hit wins):
 
 ```bash
-qloop gate --strategy refine --worker general --rounds 2 --json \
-  --task "Improve this draft for completeness and rollback clarity: …" \
+QLOOP=$(command -v qloop || true)
+[ -z "$QLOOP" ] && [ -x .venv/bin/qloop ] && QLOOP=.venv/bin/qloop
+[ -z "$QLOOP" ] && [ -x packages/quality-loop ] && QLOOP="$(pwd)/.venv/bin/qloop"
+# if still empty: run `make qloop-venv` once, then retry; do not fake a polished answer
+```
+
+Default invoke:
+
+```bash
+"$QLOOP" gate --strategy refine --worker general --judge general --rounds 2 --json \
+  --timeout 180 \
+  --task "TASK: <user goal and constraints>" \
   --baseline "$DRAFT"
 ```
 
-Optional playbook inject (no reflect in interactive gate):
+| Kind of free-text | Extra flags |
+|-------------------|-------------|
+| Coding-related plan/risk narrative | `--worker coder` (judge stays `general`) |
+| Client prose / proposals | optional `--playbook` writing playbook if path exists |
+| Lab/ops free-text on ser5 | optional `--playbook /data/agentlab/playbooks/infra.md` |
+| Explicit “give N alternatives” | `--strategy best_of_n -n 3` (never n>3) |
 
-```bash
-qloop gate … --playbook /data/agentlab/playbooks/writing.md
-```
+**Forbidden flags:** never `--worker heavy|judge|scout` or `--judge heavy|judge|scout`.
 
-## Decision contract
+## Decision contract (honor exactly)
 
-Stdout is one JSON object. Exit codes:
+Stdout = one JSON object. Use it:
 
 | decision | exit | action |
 |----------|------|--------|
-| ACCEPT / KEEP_BASELINE | 0 | use `answer` |
-| SKIP | 2 | keep original draft; do not retry the gate |
-| FAIL | 1 | surface `reason`; at most one retry if `timeout` |
+| ACCEPT / KEEP_BASELINE | 0 | deliver `answer` as the polished free-text |
+| SKIP | 2 | deliver original `$DRAFT`; do not retry gate |
+| FAIL | 1 | if `reason=timeout`, one retry only; else surface `reason` and keep draft |
 
-Warm models only (`general`, `coder`). Never pass `heavy`, `judge`, or `scout`.
+After a successful gate, final `@@RESULT` to the user should note `quality-gate: <decision>`.
+
+## Subagent handoff convention
+
+Prose subagents (planner, architect, doc-writer) that return user-facing text set:
+
+```
+handoff: run quality-gate (qloop gate) on this draft before delivering to user
+```
+
+Orchestrator treats that handoff as a hard next step when the draft is multi-constraint free-text.

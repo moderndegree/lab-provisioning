@@ -45,9 +45,16 @@ work through Ollama's `/v1` endpoint — never rely on them.
 - The orchestrator refuses to start implementation on a client repo without an
   approved OpenSpec change ID.
 
-## quality-loop (`qloop`) — free-text only
+## quality-loop (`qloop`) — automated free-text gate
 
-The lab quality authority is `qloop` (package `quality-loop` on ser5 agentlab).
-Use it to **measure** strategies offline and to **polish free-text** when there
-is no tool/test oracle. **Do not** run `qloop gate` on coder diffs — tests and
-the reviewer are the code gate. See `.moderndegree/skills/quality-gate.md`.
+The lab quality authority is `qloop` (package `quality-loop`). Full rules live
+in `.moderndegree/skills/quality-gate.md` — the orchestrator **must** follow
+that decision tree:
+
+- **Code** (implement, diff, tests) → never `qloop`; tools + reviewer + `@@RESULT`.
+- **Multi-constraint free-text** (risks, proposals, runbooks, actionable plans,
+  extraction wording) → orchestrator **must** run `qloop gate` before the final
+  user-facing answer (or via `devops`).
+- Skip only when the skill says so (`GATE: skip`, short fact, pure plumbing).
+- Warm models only (`general`/`coder`). Never heavy/judge/scout in the gate.
+- Prose subagents set `handoff: run quality-gate …` when their draft is user-facing.

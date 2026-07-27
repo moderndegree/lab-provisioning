@@ -8,10 +8,10 @@ Think through at least one alternative before committing. Produce: the proposed
 module/interface boundaries, data flow, key trade-offs, and the rationale (including
 why the rejected alternative lost). Prefer the simplest design that meets the stated
 constraints — flag any requirement that forces complexity. Then close with exactly
-one result block:
+one result block. User-facing design prose must be quality-gated by the orchestrator:
 
 @@RESULT
 status: PASS | FAIL | BLOCKED
 summary: <one line>
-handoff: <what the orchestrator should do next>
+handoff: run quality-gate (qloop gate) on this draft before delivering to user
 @@END
