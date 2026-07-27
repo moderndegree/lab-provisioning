@@ -1,0 +1,34 @@
+---
+tags: [postmortem, example]
+date: 2026-01-01
+status: example
+---
+
+# Postmortem: example — thin handoff to planner
+
+## Symptom
+Planner produced a plausible plan that ignored an existing module and invented APIs.
+
+## Bad / wrong / incomplete question
+Orchestrator dispatched planner with only the user one-liner; no TASK PACKAGE.
+
+## Missing context (TASK PACKAGE gaps)
+- Current module paths and public interfaces
+- Done-when checks
+- Non-goals (no new service)
+
+## Root need (5 whys — outcome, not feature)
+1. Why a plan? → implement feature X
+2. Why X? → unblock client demo
+3. → **Outcome:** working demo path without new infrastructure
+
+## Fix for next time
+1. Always build TASK PACKAGE before no-tools subagents
+2. Paste interface excerpts, not "see the repo"
+3. On BLOCKED, enrich package — do not re-ask the same thin prompt
+
+## Playbook delta (optional)
+- [x] Documented in `task-package` skill
+
+## Related
+- Delete this file once you have real postmortems

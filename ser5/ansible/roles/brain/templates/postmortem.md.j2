@@ -1,0 +1,33 @@
+---
+tags: [postmortem]
+date: {{ ansible_date_time.date | default('YYYY-MM-DD') }}
+status: draft
+---
+
+# Postmortem: <title>
+
+## Symptom
+What did the agent or model get wrong?
+
+## Bad / wrong / incomplete question
+What did we *actually* ask (or hand off)?
+
+## Missing context (TASK PACKAGE gaps)
+What files, constraints, done-when checks, or assumptions were missing?
+
+## Root need (5 whys — outcome, not feature)
+1. Why …?
+2. Why …?
+3. → **Outcome:**
+
+## Fix for next time
+1.
+2.
+3.
+
+## Playbook delta (optional)
+- [ ] ADD/UPDATE into `playbooks/….md` or `qloop playbook reflect …`
+
+## Related
+- Run / session:
+- Suite / model:

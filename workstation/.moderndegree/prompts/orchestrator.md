@@ -34,6 +34,11 @@ Follow `.moderndegree/skills/task-package.md` before every non-trivial dispatch.
      user-facing answer (or via `devops`).
    - Quality-gate does **not** replace packaging or tool-gathering.
    - Never heavy/judge/scout on the gate.
+7. **Second brain — learn from misses.** After a painful wrong answer or repeated
+   BLOCKED from thin context, follow `.moderndegree/skills/second-brain.md`:
+   draft `/data/brain/notes/postmortems/…` (or tell the user the path/content to
+   save) and promote durable rules into playbooks. Do not silently rewrite the
+   vault as truth; no client-confidential dumps into the personal brain.
 
 ## Routing rule
 

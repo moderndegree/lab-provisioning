@@ -12,6 +12,7 @@ restic_password: "{{ vault_restic_password | default('') }}"
 restic_backup_paths:
   - "{{ user_home }}"
   - "{{ data_mount }}/agentlab"
+  - "{{ data_mount }}/brain"
   - "{{ data_mount }}/services"
   - /etc
 

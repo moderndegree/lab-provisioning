@@ -1,0 +1,53 @@
+# Second brain ({{ brain_root }})
+
+Obsidian-compatible **markdown vault** for lab memory: postmortems, decisions,
+and (via playbooks) durable agent tactics. Files are the brain; software is
+replaceable. Full cortex (FTS/embeddings) is later — this vault is useful now.
+
+## Open in Obsidian
+
+1. Install [Obsidian](https://obsidian.md) on the workstation (or ser5 desktop).
+2. **Open folder as vault** → point at this directory (sync it with Syncthing if
+   the vault lives only on ser5).
+3. Optional: enable core plugins Graph, Backlinks, Templates (template folder =
+   `templates/`).
+
+No Obsidian? Edit the markdown anywhere; git/restic still apply.
+
+## Layout
+
+| Path | Purpose |
+|------|---------|
+| `inbox/` | Raw drops; process later |
+| `notes/postmortems/` | Lessons from bad answers / failed runs |
+| `notes/decisions/` | Adopt/reject model or process choices |
+| `templates/` | Copy-from templates (never overwrite your notes) |
+| `playbooks/` | ACE tactics for agents (`qloop` / agentlab) |
+| `sources/` | Archived clips (optional) |
+| `journal/` | Daily notes (optional) |
+
+## Learn from mistakes (habit)
+
+After a painful miss (wrong answer, thin handoff, bad gate):
+
+1. Copy `templates/postmortem.md` → `notes/postmortems/YYYY-MM-DD-short-title.md`
+2. Fill symptom → bad question → missing context → fix
+3. If there is a durable rule, add it to `playbooks/*.md` or run:
+   `qloop playbook reflect playbooks/infra.md --task "…" --trace "…" --outcome "FAIL …"`
+4. Next task: orchestrator TASK PACKAGE should pull relevant lessons; playbooks
+   inject into free-text `qloop gate` when used
+
+## Governance
+
+- **Personal/lab vault** by default — do not dump client-confidential material
+  without a separate client subvault (roadmap Phase 4).
+- Automated agents may **draft** notes; humans **accept** before treating them
+  as ground truth (no silent vault rewrites).
+- Backed up when `enable_backups` includes `{{ data_mount }}/brain`.
+
+## Related
+
+- Task packaging: `workstation/.moderndegree/skills/task-package.md`
+- Quality gate: `workstation/.moderndegree/skills/quality-gate.md`
+- Agentlab: `/data/agentlab` (runs.db, suites)
+- Roadmap cortex: `docs/roadmap.md` Phase 3

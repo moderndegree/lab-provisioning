@@ -59,6 +59,14 @@ work through Ollama's `/v1` endpoint — never rely on them.
 - The orchestrator refuses to start implementation on a client repo without an
   approved OpenSpec change ID.
 
+## Second brain (memory)
+
+Lab memory is a markdown vault at `/data/brain` on ser5 (Obsidian-compatible).
+After painful misses, draft a postmortem under `notes/postmortems/` and promote
+durable rules into ACE playbooks — see `.moderndegree/skills/second-brain.md`.
+Do not treat unreviewed agent drafts as ground truth; no client secrets in the
+personal vault.
+
 ## quality-loop (`qloop`) — automated free-text gate
 
 The lab quality authority is `qloop` (package `quality-loop`). Full rules live

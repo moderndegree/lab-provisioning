@@ -1,0 +1,26 @@
+---
+tags: [decision]
+date: {{ ansible_date_time.date | default('YYYY-MM-DD') }}
+status: accepted
+---
+
+# Decision: <title>
+
+## Context
+What forced a choice?
+
+## Options
+| Option | Pros | Cons |
+|--------|------|------|
+| A | | |
+| B | | |
+
+## Decision
+We chose **…** because …
+
+## Evidence
+- `qloop summary` / matrix row:
+- Canary / human review:
+
+## Revisit when
+Concrete trigger (e.g. KEEP_BASELINE >80% over 20 runs).

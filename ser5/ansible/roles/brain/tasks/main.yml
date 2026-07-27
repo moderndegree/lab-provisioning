@@ -1,0 +1,148 @@
+---
+# brain — lightweight second brain (markdown vault). Gated by enable_brain.
+
+- name: brain stub — role is disabled
+  ansible.builtin.debug:
+    msg: >
+      brain role is disabled (enable_brain: false).
+      Set enable_brain: true in group_vars/all.yml to seed {{ data_mount }}/brain.
+  when: not (enable_brain | bool)
+
+- name: Configure second-brain vault
+  when: enable_brain | bool
+  block:
+    - name: Create brain vault directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0755"
+      loop:
+        - "{{ brain_root }}"
+        - "{{ brain_root }}/inbox"
+        - "{{ brain_root }}/notes"
+        - "{{ brain_root }}/notes/postmortems"
+        - "{{ brain_root }}/notes/decisions"
+        - "{{ brain_root }}/templates"
+        - "{{ brain_root }}/sources"
+        - "{{ brain_root }}/journal"
+        - "{{ brain_root }}/playbooks"
+
+    - name: Seed vault README (Obsidian open-as-vault instructions)
+      ansible.builtin.template:
+        src: README.md.j2
+        dest: "{{ brain_root }}/README.md"
+        force: false
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0644"
+
+    - name: Seed postmortem template
+      ansible.builtin.template:
+        src: postmortem.md.j2
+        dest: "{{ brain_root }}/templates/postmortem.md"
+        force: false
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0644"
+
+    - name: Seed decision template
+      ansible.builtin.template:
+        src: decision.md.j2
+        dest: "{{ brain_root }}/templates/decision.md"
+        force: false
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0644"
+
+    - name: Seed example postmortem (force false)
+      ansible.builtin.template:
+        src: example-postmortem.md.j2
+        dest: "{{ brain_root }}/notes/postmortems/0000-example.md"
+        force: false
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0644"
+
+    - name: Seed inbox placeholder
+      ansible.builtin.copy:
+        content: |
+          # Inbox
+
+          Drop raw notes, URLs, and clips here. Process into `notes/` when you have
+          five minutes. Phone/Syncthing can land files here later.
+        dest: "{{ brain_root }}/inbox/README.md"
+        force: false
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0644"
+
+    # One source of truth for ACE playbooks when agentlab is on this host.
+    - name: Stat agentlab playbooks directory
+      ansible.builtin.stat:
+        path: "{{ brain_agentlab_playbooks }}"
+      register: brain_agentlab_pb
+      when: brain_link_agentlab_playbooks | bool
+
+    - name: Stat brain playbooks path
+      ansible.builtin.stat:
+        path: "{{ brain_root }}/playbooks"
+      register: brain_playbooks_stat
+
+    - name: Symlink brain/playbooks → agentlab/playbooks when available
+      when:
+        - brain_link_agentlab_playbooks | bool
+        - brain_agentlab_pb.stat.exists | default(false)
+        - brain_agentlab_pb.stat.isdir | default(false)
+      block:
+        - name: Remove non-symlink playbooks path before linking
+          ansible.builtin.file:
+            path: "{{ brain_root }}/playbooks"
+            state: absent
+          when: >-
+            brain_playbooks_stat.stat.exists | default(false)
+            and not (brain_playbooks_stat.stat.islnk | default(false))
+
+        - name: Symlink brain/playbooks → agentlab/playbooks
+          ansible.builtin.file:
+            src: "{{ brain_agentlab_playbooks }}"
+            dest: "{{ brain_root }}/playbooks"
+            state: link
+            owner: "{{ username }}"
+            group: "{{ username }}"
+            force: true
+
+    - name: Ensure playbooks directory exists when not symlinking
+      ansible.builtin.file:
+        path: "{{ brain_root }}/playbooks"
+        state: directory
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0755"
+      when: >-
+        not (brain_link_agentlab_playbooks | bool)
+        or not (brain_agentlab_pb.stat.exists | default(false))
+
+    - name: Seed standalone playbook stubs when agentlab playbooks missing
+      when: >-
+        not (brain_link_agentlab_playbooks | bool)
+        or not (brain_agentlab_pb.stat.exists | default(false))
+      ansible.builtin.copy:
+        content: "{{ item.content }}"
+        dest: "{{ brain_root }}/playbooks/{{ item.name }}"
+        force: false
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0644"
+      loop:
+        - name: writing.md
+          content: |
+            # Playbook — writing
+            1. Lead with the decision, then supporting detail.
+            2. Call out rollback whenever proposing a change.
+        - name: infra.md
+          content: |
+            # Playbook — infra
+            1. Prefer warm models on mini; never load heavy daytime without intent.
+            2. State validation commands before claiming success.

@@ -13,6 +13,7 @@
 #   cloudflared    → Cloudflare Zero Trust tunnel (enable_cloudflared: true to activate)
 #   hermes         → Hermes gateway quadlet (enable_hermes: true to activate)
 #   agentlab       → quality-loop experiment layer (enable_agentlab: true to activate)
+#   brain          → Obsidian-compatible second-brain vault under /data/brain
 #   observability  → Prometheus + Grafana quadlets (enable_observability: true to activate)
 #   backups        → restic snapshots + daily timer (enable_backups: true to activate)
 
@@ -34,6 +35,8 @@
       when: enable_hermes | bool
     - role: agentlab
       when: enable_agentlab | bool
+    - role: brain
+      when: enable_brain | bool
     - role: observability
       when: enable_observability | bool
     - role: backups

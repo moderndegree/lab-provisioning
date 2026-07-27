@@ -26,7 +26,7 @@ This lab is three things: the dev environment for a solo AI consulting practice,
 | Device | Role | Runs | Does not run | Why this, on this hardware |
 |---|---|---|---|---|
 | mini | Inference appliance | Headless Ubuntu 26.04, Ollama on `:11434`, Vulkan/RADV backend, tailnet-only | Loops, experiments, dashboards, queues, client apps | Strix Halo has 128 GB unified LPDDR5X and ~110 GB usable GPU pool; protect it from anything that can crash or OOM. |
-| ser5 | Always-on driver | Hermes, quality-loop/agentlab, Grok Build CLI, Prometheus+Grafana, restic backups | Local models | Ryzen 7 5800H + 64 GB DDR4 is enough for orchestration; `/data` holds durable state. |
+| ser5 | Always-on driver | Hermes, quality-loop/agentlab, second brain (`/data/brain`), Grok Build CLI, Prometheus+Grafana, restic backups | Local models | Ryzen 7 5800H + 64 GB DDR4 is enough for orchestration; `/data` holds durable state. |
 | workstation | Primary cockpit | Copilot CLI, opencode client, repo work | Local models | RTX 4080 Super 16 GB and 32 GB system RAM lose to mini for this fleet; drive mini instead. |
 | iPhone | Remote control surface | Tailscale, Hermes dashboard, GitHub mobile, Grafana (Open WebUI only if `enable_openwebui` is turned on) | Bulk editing, production hosting | Starts work, reviews PRs, checks health; it is not the lab. |
 
@@ -119,6 +119,14 @@ systemctl --user start hermes-gateway hermes-proxy hermes-dashboard
 ```
 
 Why this: Hermes is the bridge between small inputs and long-running work; it belongs on ser5, not mini.
+
+### Second brain (`/data/brain`)
+
+What it is: Obsidian-compatible markdown vault for postmortems, decisions, and ACE playbooks (often symlinked from agentlab). Seeded by the `brain` role (`enable_brain`).
+
+Reach for it when: capturing lessons after bad answers or thin handoffs; browsing lab memory in Obsidian.
+
+Start it: open `/data/brain` as an Obsidian vault (sync/mount from workstation). See [`brain.md`](brain.md).
 
 ### quality-loop (`qloop`)
 

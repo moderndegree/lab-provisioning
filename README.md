@@ -22,6 +22,7 @@ autoinstall + Ansible provisioning stack; lab software lives under
 | [`packages/quality-loop/`](packages/quality-loop/README.md) | AI loop strategies (refine, best-of-N, ACE playbooks, STaR bootstrapping, evals) against mini's models — deployed to ser5 by the `agentlab` role |
 | [`workstation/`](workstation/README.md) | opencode config for the 9-agent coding team (copied/symlinked onto the dev box) |
 | [`docs/ai-loops.md`](docs/ai-loops.md) | Architecture + runbook for running AI loop experiments on the lab |
+| [`docs/brain.md`](docs/brain.md) | Lightweight second brain (`/data/brain`, Obsidian vault, postmortems) |
 | [`docs/roadmap.md`](docs/roadmap.md) | Phased plan: quality measurement, throughput, the cortex second brain, consulting productization |
 
 ---

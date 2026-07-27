@@ -15,6 +15,7 @@ symlink into, your development machine.
 | [docs/business-layer.md](docs/business-layer.md) | reference | Tier L/G/X/Z routing, sovereignty, OpenSpec gates |
 | [.moderndegree/skills/task-package.md](.moderndegree/skills/task-package.md) | project root | **Required** problem understanding + context packaging before subagent handoffs |
 | [.moderndegree/skills/quality-gate.md](.moderndegree/skills/quality-gate.md) | project root | **Required** free-text polish via `qloop gate` (never code diffs) |
+| [.moderndegree/skills/second-brain.md](.moderndegree/skills/second-brain.md) | project root | Postmortems + playbook promotion after misses (`/data/brain`) |
 
 ## The split that drives everything
 

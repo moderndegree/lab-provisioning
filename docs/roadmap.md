@@ -57,6 +57,10 @@ stays disabled and the deferral is re-documented with data.
 
 ## Phase 3 — Cortex: the second brain
 
+**MVP already in-repo:** `enable_brain` seeds `/data/brain` (markdown vault,
+postmortem templates, playbook link to agentlab). Use that before building
+retrieval. Cortex below adds index + automated maintenance loops.
+
 ### Design principles
 
 - **Plain files are the brain; software is replaceable.** Markdown vault +

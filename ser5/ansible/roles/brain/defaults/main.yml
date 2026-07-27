@@ -1,0 +1,11 @@
+---
+# ─── brain — Obsidian-compatible markdown second brain on ser5 ───────────────
+# Plain files under {{ data_mount }}/brain. No RAG/index yet (roadmap cortex).
+# Humans browse with Obsidian; agents write reviewable postmortems + use
+# ACE playbooks (shared with agentlab when that role is enabled).
+
+brain_root: "{{ data_mount }}/brain"
+
+# When agentlab is present, point vault playbooks at the same ACE files agents use.
+brain_link_agentlab_playbooks: true
+brain_agentlab_playbooks: "{{ data_mount }}/agentlab/playbooks"
