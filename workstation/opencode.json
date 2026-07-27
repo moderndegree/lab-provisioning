@@ -53,6 +53,21 @@
     "AGENTS.md",
     ".moderndegree/skills/*.md"
   ],
+  "mcp": {
+    "cortex": {
+      "type": "local",
+      "command": [
+        "pnpm",
+        "--dir",
+        "/home/brian/projects/ai-workstation",
+        "mcp"
+      ],
+      "environment": {
+        "CORTEX_VAULT_DIR": "/data/brain"
+      },
+      "enabled": true
+    }
+  },
   "agent": {
     "build": {
       "mode": "primary",
