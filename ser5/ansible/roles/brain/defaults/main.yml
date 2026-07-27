@@ -1,10 +1,8 @@
 ---
-# ─── brain — Obsidian / ai-workstation cortex vault on ser5 ─────────────────
-# Plain files under {{ data_mount }}/brain. Layout matches ai-workstation's
-# lib/cortex/vault-core.ts VAULT_FOLDERS (inbox, notes, sources, journal, mocs,
-# playbooks). The Next app + cortex MCP read this path via CORTEX_VAULT_DIR.
-# Obsidian can open the same folder as a vault. Full retrieval UI lives in
-# the sibling repo: ../ai-workstation (not reimplemented here).
+# ─── brain — markdown second brain vault on ser5 ─────────────────────────────
+# Plain files under {{ data_mount }}/brain. Layout is Obsidian-compatible and
+# suitable for optional external viewers. This role only seeds + backs up files;
+# lab-provisioning does not ship a vault UI or MCP server.
 
 brain_root: "{{ data_mount }}/brain"
 

@@ -19,7 +19,6 @@
         group: "{{ username }}"
         mode: "0755"
       loop:
-        # VAULT_FOLDERS from ai-workstation lib/cortex/vault-core.ts
         - "{{ brain_root }}"
         - "{{ brain_root }}/inbox"
         - "{{ brain_root }}/notes"
@@ -29,7 +28,6 @@
         - "{{ brain_root }}/journal"
         - "{{ brain_root }}/mocs"
         - "{{ brain_root }}/playbooks"
-        # templates/ is vault meta (not a cortex kind); used by humans/agents
         - "{{ brain_root }}/templates"
 
     - name: Seed vault README (Obsidian open-as-vault instructions)
