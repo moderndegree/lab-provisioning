@@ -1,14 +1,28 @@
-# second-brain — vault memory (files on ser5)
+# second-brain — vault memory (lab + ai-workstation)
 
 ## Role
 
-The second brain is a **markdown vault** at `/data/brain` on ser5 (seeded by the
-`brain` Ansible role). Use it to **learn from mistakes** after failures.
+The second brain is a **markdown vault** at `/data/brain` on ser5.  
+**UI + agent MCP** live in the sibling **ai-workstation** project (not this repo):
 
-This skill does **not** replace TASK PACKAGE or quality-gate. This repo does
-**not** ship a vault UI or MCP — write and read **files**. Optional external
-tools (Obsidian, other apps) may open the same folder; they are not required
-for lab-provisioning agents.
+- App: `/brain` graph, note pages, quick capture → `inbox/`
+- MCP: `CORTEX_VAULT_DIR=/data/brain pnpm --dir <ai-workstation> mcp`
+
+This skill covers **when/how to learn from mistakes**. It does not replace
+TASK PACKAGE or quality-gate.
+
+## Prefer MCP when available
+
+If cortex MCP is configured in OpenCode/Hermes:
+
+| Need | Tool |
+|------|------|
+| Find related lessons | `vault_search` / `vault_list_notes` |
+| Read a note | `vault_get_note` |
+| Dump a raw thought | `vault_capture` (inbox) |
+| Neighborhood | `vault_local_graph` / `vault_backlinks` |
+
+Pull **1–3** relevant notes into the TASK PACKAGE — never the whole vault.
 
 ## When to write a postmortem
 
@@ -20,9 +34,7 @@ for lab-provisioning agents.
 
 **Skip** pure typos, one-shot plumbing, clean successes.
 
-## How to draft a postmortem
-
-On ser5 (or when `/data/brain` is mounted):
+## How to draft a postmortem (files)
 
 ```bash
 STAMP=$(date -u +%Y-%m-%d)
@@ -31,28 +43,29 @@ cp /data/brain/templates/postmortem.md "$DEST"
 # fill: symptom, bad question, package gaps, fixes
 ```
 
-Keep frontmatter `status: draft` until a human accepts. Prefer short, concrete
-bullets over essays.
+Frontmatter should keep `tags` including `postmortem` and `status: draft` until
+a human accepts. Wiki-link related notes when you know ids (`[[ser5]]`, etc.).
 
 ## Playbook promotion
 
-Reusable rules → ACE playbooks (agent-facing tactics):
+Reusable rules → ACE playbooks (same files agents inject):
 
 ```bash
 qloop playbook reflect /data/agentlab/playbooks/infra.md \
   --task "…" --trace "…" --outcome "FAIL …"
 ```
 
-`/data/brain/playbooks` is often a symlink to agentlab playbooks.
+`/data/brain/playbooks` is usually a symlink to agentlab playbooks.
 
 ## Governance
 
 - Personal/lab vault — no client-confidential dumps
 - Draft ≠ ground truth until reviewed
-- Packaging first; quality-gate for free-text polish; postmortems after misses
+- Packaging first; vault retrieval second; quality-gate for free-text polish
 
 ## Related
 
 - `task-package.md` — prevent thin handoffs
 - `quality-gate.md` — free-text polish
 - lab docs: `docs/brain.md`
+- app: `ai-workstation` README (Cortex MCP section)

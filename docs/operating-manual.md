@@ -120,13 +120,13 @@ systemctl --user start hermes-gateway hermes-proxy hermes-dashboard
 
 Why this: Hermes is the bridge between small inputs and long-running work; it belongs on ser5, not mini.
 
-### Second brain (`/data/brain`)
+### Second brain (`/data/brain` + AI Workstation)
 
-What it is: Obsidian-compatible markdown vault for postmortems, decisions, and ACE playbooks. Seeded by the `brain` role (`enable_brain`).
+What it is: Obsidian-compatible markdown vault for postmortems, decisions, and ACE playbooks. Seeded by the `brain` role (`enable_brain`). The **AI Workstation** app (sibling repo `ai-workstation`) is the primary UI and cortex MCP over the same path (`CORTEX_VAULT_DIR=/data/brain`).
 
-Reach for it when: capturing lessons after bad answers or thin handoffs.
+Reach for it when: capturing lessons, browsing the knowledge graph, or letting agents search the vault via MCP.
 
-Start it: open `/data/brain` in any editor or Obsidian (optional). See [`brain.md`](brain.md).
+Start it: run AI Workstation with `CORTEX_VAULT_DIR=/data/brain`, or open `/data/brain` in Obsidian. See [`brain.md`](brain.md).
 
 ### quality-loop (`qloop`)
 

@@ -57,13 +57,16 @@ stays disabled and the deferral is re-documented with data.
 
 ## Phase 3 — Cortex: the second brain
 
-**MVP in this repo:** `enable_brain` seeds `/data/brain` (layout, templates,
-playbook link, restic). Day-to-day use is file-based postmortems + ACE
-playbooks. Graph UI / MCP / retrieval are optional external consumers of the
-same vault path — not required by lab-provisioning.
+**MVP already split across repos:**
 
-Cortex *maintenance timers* (nightly triage, contradiction sweep) below remain
-future work on ser5.
+- **lab-provisioning** `enable_brain` seeds `/data/brain` (layout, templates,
+  playbook link, restic).
+- **ai-workstation** is the Phase 3 *interface*: vault graph UI, capture, and
+  cortex MCP (`CORTEX_VAULT_DIR=/data/brain`). Point the app at the provisioned
+  vault; do not duplicate the UI here.
+
+Cortex *maintenance timers* (nightly triage, contradiction sweep) below are
+still future work on ser5; day-to-day use the vault + AI Workstation now.
 
 ### Design principles
 
