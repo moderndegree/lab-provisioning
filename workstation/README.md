@@ -86,13 +86,6 @@ export PATH="$PWD/.venv/bin:$PATH"
 See [../packages/quality-loop/README.md](../packages/quality-loop/README.md) and
 [../docs/ai-loops.md](../docs/ai-loops.md).
 
-## Cortex MCP (second brain)
-
-`opencode.json` enables a local **cortex** MCP server from the sibling
-[ai-workstation](../../ai-workstation) repo, pointed at `CORTEX_VAULT_DIR=/data/brain`
-(ser5 vault after `enable_brain`). Adjust `--dir` / vault path if your layout
-differs. Requires `pnpm install` in ai-workstation.
-
 ## Reasoning control (verified against Ollama 0.31.2)
 
 Reasoning mode is per **agent**, set via `reasoningEffort` passthrough in
