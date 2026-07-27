@@ -73,7 +73,7 @@
       "mode": "primary",
       "model": "ollama/qwen3.6:35b-a3b-mtp-q4_K_M",
       "reasoningEffort": "none",
-      "description": "Orchestrator. Builds TASK PACKAGE, gathers context, dispatches subagents, gates on @@RESULT; must qloop-gate multi-constraint free-text (never code).",
+      "description": "Orchestrator. Cortex vault search + TASK PACKAGE, dispatches subagents, @@RESULT gates; must qloop-gate multi-constraint free-text (never code).",
       "prompt": "{file:./.moderndegree/prompts/orchestrator.md}"
     },
     "planner": {

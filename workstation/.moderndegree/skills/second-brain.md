@@ -1,71 +1,80 @@
-# second-brain — vault memory (lab + ai-workstation)
+# second-brain — vault memory via cortex MCP (+ files)
 
 ## Role
 
-The second brain is a **markdown vault** at `/data/brain` on ser5.  
-**UI + agent MCP** live in the sibling **ai-workstation** project (not this repo):
+The second brain is a **markdown vault** at `/data/brain` (ser5). OpenCode is
+wired to the **cortex** MCP server from ai-workstation (`opencode.json`).
 
-- App: `/brain` graph, note pages, quick capture → `inbox/`
-- MCP: `CORTEX_VAULT_DIR=/data/brain pnpm --dir <ai-workstation> mcp`
+This skill is **required** for: (1) learning after misses, (2) MCP-first capture.
+It does **not** replace TASK PACKAGE (which already requires a cortex search
+pass) or quality-gate.
 
-This skill covers **when/how to learn from mistakes**. It does not replace
-TASK PACKAGE or quality-gate.
+## Cortex tools (use these names)
 
-## Prefer MCP when available
+| Tool | Use |
+|------|-----|
+| `vault_search` | Find related notes / postmortems / playbooks |
+| `vault_list_notes` | Browse by kind |
+| `vault_get_note` | Read full note by id |
+| `vault_backlinks` / `vault_local_graph` | Neighborhood of a note |
+| `vault_stats` | Empty vault / health check |
+| `vault_capture` | Drop raw text into `inbox/` (preferred over shell) |
 
-If cortex MCP is configured in OpenCode/Hermes:
-
-| Need | Tool |
-|------|------|
-| Find related lessons | `vault_search` / `vault_list_notes` |
-| Read a note | `vault_get_note` |
-| Dump a raw thought | `vault_capture` (inbox) |
-| Neighborhood | `vault_local_graph` / `vault_backlinks` |
-
-Pull **1–3** relevant notes into the TASK PACKAGE — never the whole vault.
+Pull **1–3** notes into a TASK PACKAGE — never the whole vault. Full search
+rules live in `task-package.md`.
 
 ## When to write a postmortem
 
-**Draft** when:
+**Must** capture a lesson when:
 
-- Wrong answer from thin context / bad question
-- Repeated `BLOCKED` on the same missing package fields
-- Painful gate or user-visible miss worth not repeating
+- User-facing answer was wrong/unsafe from thin context or a bad question
+- Subagent `BLOCKED` loops more than once on the same package gaps
+- Painful miss you do not want to repeat
 
 **Skip** pure typos, one-shot plumbing, clean successes.
 
-## How to draft a postmortem (files)
+## How to record a lesson (MCP-first)
 
-```bash
-STAMP=$(date -u +%Y-%m-%d)
-DEST="/data/brain/notes/postmortems/${STAMP}-short-title.md"
-cp /data/brain/templates/postmortem.md "$DEST"
-# fill: symptom, bad question, package gaps, fixes
-```
+**Preferred:**
 
-Frontmatter should keep `tags` including `postmortem` and `status: draft` until
-a human accepts. Wiki-link related notes when you know ids (`[[ser5]]`, etc.).
-
-## Playbook promotion
-
-Reusable rules → ACE playbooks (same files agents inject):
+1. `vault_capture` with a short structured body (symptom, bad question, package
+   gaps, 1–3 fixes). Title line first — it becomes the inbox slug.
+2. Tell the user the note landed in `inbox/` and should be triaged into
+   `notes/postmortems/` (human or nightly triage).
+3. If there is a **durable rule**, also promote to ACE playbooks:
 
 ```bash
 qloop playbook reflect /data/agentlab/playbooks/infra.md \
   --task "…" --trace "…" --outcome "FAIL …"
 ```
 
-`/data/brain/playbooks` is usually a symlink to agentlab playbooks.
+**Fallback if MCP down:** write a file from the template:
+
+```bash
+STAMP=$(date -u +%Y-%m-%d)
+DEST="/data/brain/notes/postmortems/${STAMP}-short-title.md"
+cp /data/brain/templates/postmortem.md "$DEST"
+# edit DEST
+```
+
+Drafts are not ground truth until a human accepts. No client-confidential dumps.
+
+## Capture vs postmortem
+
+| Intent | Action |
+|--------|--------|
+| Quick thought / link | `vault_capture` only |
+| Structured failure analysis | `vault_capture` with postmortem fields, or template under `notes/postmortems/` |
+| Agent operating rule | playbook reflect / edit `playbooks/*.md` |
 
 ## Governance
 
-- Personal/lab vault — no client-confidential dumps
-- Draft ≠ ground truth until reviewed
-- Packaging first; vault retrieval second; quality-gate for free-text polish
+- Personal/lab vault only
+- Packaging + cortex search **before** work; capture **after** misses
+- quality-gate polishes free-text; cortex remembers lessons
 
 ## Related
 
-- `task-package.md` — prevent thin handoffs
+- `task-package.md` — cortex search in the package loop
 - `quality-gate.md` — free-text polish
-- lab docs: `docs/brain.md`
-- app: `ai-workstation` README (Cortex MCP section)
+- `docs/brain.md` — vault layout

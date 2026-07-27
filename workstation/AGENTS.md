@@ -21,11 +21,15 @@ Bad answers usually come from thin handoffs. Full rules:
 - Orchestrator **must** clarify the problem and build a **TASK PACKAGE** (goal,
   done-when, constraints, assumptions, pasted context excerpts) before dispatching
   any non-trivial subagent.
+- **Cortex MCP** (when available): **must** `vault_search` → read top **1–3** notes
+  into the package before dispatch. Prefer postmortems/playbooks. Cap volume —
+  never dump the vault. If MCP is down, continue with repo tools and note it.
 - Prefer **tools over user questions**; ask the user only for **blocking** unknowns.
 - No-tools subagents work **only** from the package. Incomplete package → they
   return `BLOCKED` with exact gaps; orchestrator enriches and re-dispatches.
 - Do not dump the whole repo or chat; paste relevant excerpts (prefill is expensive).
-- `qloop` quality-gate polishes free-text **after** packaging — it does not gather repo context.
+- `qloop` quality-gate polishes free-text **after** packaging — it does not gather
+  repo or vault context.
 
 ## Placement rule (the architectural backbone)
 

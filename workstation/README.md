@@ -93,6 +93,13 @@ See [../packages/quality-loop/README.md](../packages/quality-loop/README.md) and
 (ser5 vault after `enable_brain`). Adjust `--dir` / vault path if your layout
 differs. Requires `pnpm install` in ai-workstation.
 
+Agents **must** use it when available:
+
+1. **Before dispatch** — `vault_search` → up to 3 notes in the TASK PACKAGE  
+   (see `.moderndegree/skills/task-package.md`).
+2. **After painful misses** — `vault_capture` / postmortem  
+   (see `.moderndegree/skills/second-brain.md`).
+
 ## Reasoning control (verified against Ollama 0.31.2)
 
 Reasoning mode is per **agent**, set via `reasoningEffort` passthrough in
