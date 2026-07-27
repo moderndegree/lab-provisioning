@@ -13,6 +13,22 @@ Reasoning agents (planner/architect/reviewer/security-auditor/doc-writer) never
 call tools — they return analysis as text. Only the orchestrator and the
 coder/tester/devops agents touch the filesystem or shell.
 
+## Loop budgets (anti-spin — all runs)
+
+Full table: `.moderndegree/skills/loop-budget.md`. Hard stops:
+
+| Limit | Cap |
+|-------|-----|
+| Re-dispatch same subagent | 2 |
+| Package enrich → re-dispatch cycles | 3 |
+| Cortex searches per task | 2 |
+| `qloop gate` per free-text deliverable | 1 |
+| Identical failing tool command | 2 |
+
+On budget exhaust: escalate to the user with what you tried — do **not** keep
+re-prompting “to think harder.” Orchestrator/devops keep `reasoningEffort: none`.
+`qloop` forces thinking off and caps refine rounds.
+
 ## TASK PACKAGE — context is the orchestrator's main job
 
 Bad answers usually come from thin handoffs. Full rules:
@@ -63,13 +79,15 @@ work through Ollama's `/v1` endpoint — never rely on them.
 - The orchestrator refuses to start implementation on a client repo without an
   approved OpenSpec change ID.
 
-## Second brain (memory)
+## Second brain / cortex (memory)
 
-Lab memory is a markdown vault at `/data/brain` on ser5 (Obsidian-compatible).
-After painful misses, draft a postmortem under `notes/postmortems/` and promote
-durable rules into ACE playbooks — see `.moderndegree/skills/second-brain.md`.
-Do not treat unreviewed agent drafts as ground truth; no client secrets in the
-personal vault.
+Vault at `/data/brain`; OpenCode loads **cortex** MCP (`opencode.json`). Full
+rules: `.moderndegree/skills/second-brain.md` and the cortex pass in task-package.
+
+- **Before work:** search vault → 1–3 notes into TASK PACKAGE.
+- **After painful misses:** `vault_capture` (preferred) or postmortem file; promote
+  durable rules to ACE playbooks.
+- Do not treat unreviewed drafts as ground truth; no client secrets in the vault.
 
 ## quality-loop (`qloop`) — automated free-text gate
 

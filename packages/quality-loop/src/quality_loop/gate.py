@@ -18,12 +18,15 @@ from quality_loop.loops import STRATEGIES, Trace
 from quality_loop.models import evicts_warm_pair
 from quality_loop.playbook import Playbook
 
+from quality_loop.loops import MAX_REFINE_ROUNDS as LOOPS_MAX_REFINE
+
 ALLOWED_MODELS = frozenset({"general", "coder"})
-MAX_ROUNDS_INTERACTIVE = 2
+MAX_ROUNDS_INTERACTIVE = 2  # hard cap for gate (≤ LOOPS_MAX_REFINE)
 MAX_BEST_OF_N = 3
 DEFAULT_TIMEOUT_S = 180.0
 TASK_SOFT_CAP_CHARS = 12_000
 PREFLIGHT_TIMEOUT_S = 3.0
+assert MAX_ROUNDS_INTERACTIVE <= LOOPS_MAX_REFINE
 
 
 @dataclass
@@ -131,8 +134,7 @@ def run_gate(
             extra={"n": n, "max": MAX_BEST_OF_N},
         )
 
-    if rounds > MAX_ROUNDS_INTERACTIVE:
-        rounds = MAX_ROUNDS_INTERACTIVE
+    rounds = max(1, min(int(rounds), MAX_ROUNDS_INTERACTIVE))
 
     bad = _reject_eviction(worker, judge)
     if bad:
@@ -348,27 +350,47 @@ def _refine_from_baseline(
     """Critique/revise starting from a provided draft instead of generating first."""
     import re
 
-    from quality_loop.loops import CRITIQUE_SYSTEM, REVISE_SYSTEM, Step, Trace, _step_from
+    from quality_loop.loops import (
+        CRITIQUE_MAX_TOKENS,
+        CRITIQUE_SYSTEM,
+        MAX_REFINE_ROUNDS,
+        REVISE_SYSTEM,
+        Step,
+        Trace,
+        _loop_kw,
+        _norm,
+        _step_from,
+    )
 
+    rounds = max(1, min(int(max_rounds), MAX_REFINE_ROUNDS, MAX_ROUNDS_INTERACTIVE))
     trace = Trace(strategy="refine", task=task, answer=baseline)
     # synthetic generate step so tokens/rounds accounting stays readable
     trace.steps.append(
         Step(kind="generate", model=worker, content=baseline, meta={"seeded_baseline": True})
     )
     answer = baseline
+    prev_critique = ""
+    # system is reserved for future inject into critique context
+    _ = system
 
-    for round_no in range(1, max_rounds + 1):
+    for round_no in range(1, rounds + 1):
         trace.rounds = round_no
         critique = client.ask(
             f"TASK:\n{task}\n\nANSWER:\n{answer}",
             model=judge,
             system=CRITIQUE_SYSTEM,
+            **_loop_kw(max_tokens=CRITIQUE_MAX_TOKENS),
         )
-        verdict_accept = bool(re.search(r"VERDICT:\s*ACCEPT", critique.content))
-        trace.steps.append(_step_from("critique", critique, {"accept": verdict_accept}))
-        if verdict_accept:
-            trace.accepted = True
+        verdict_accept = bool(re.search(r"VERDICT:\s*ACCEPT", critique.content, re.I))
+        same_critique = bool(prev_critique) and _norm(critique.content) == _norm(prev_critique)
+        trace.steps.append(
+            _step_from("critique", critique, {"accept": verdict_accept, "stalled": same_critique})
+        )
+        if verdict_accept or same_critique:
+            if verdict_accept:
+                trace.accepted = True
             break
+        prev_critique = critique.content
         revision = client.chat(
             [
                 {"role": "system", "content": REVISE_SYSTEM},
@@ -380,9 +402,13 @@ def _refine_from_baseline(
                 },
             ],
             model=worker,
+            **_loop_kw(),
         )
         trace.steps.append(_step_from("revise", revision))
-        answer = revision.content
+        new_answer = revision.content
+        if _norm(new_answer) == _norm(answer):
+            break
+        answer = new_answer
 
     trace.answer = answer
     return trace

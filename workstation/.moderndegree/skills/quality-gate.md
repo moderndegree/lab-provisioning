@@ -34,6 +34,9 @@ QLOOP=$(command -v qloop || true)
 # if still empty: run `make qloop-venv` once, then retry; do not fake a polished answer
 ```
 
+**Once per free-text deliverable** — do not re-run gate on the polished output
+(see `loop-budget.md`).
+
 Default invoke:
 
 ```bash

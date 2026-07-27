@@ -37,6 +37,48 @@ def test_refine_gives_up_after_max_rounds(fake_client_factory):
     assert trace.rounds == 2
 
 
+def test_refine_stops_when_critique_repeats(fake_client_factory):
+    same = "VERDICT: REVISE\n1. still wrong"
+    client = fake_client_factory(["draft", same, "v2", same, "v3"])
+    trace = refine(client, "task", max_rounds=3)
+    assert not trace.accepted
+    # generate + critique + revise + identical critique → stop (no third revise)
+    kinds = [s.kind for s in trace.steps]
+    assert kinds == ["generate", "critique", "revise", "critique"]
+    assert trace.steps[-1].meta.get("stalled") is True
+
+
+def test_refine_stops_when_answer_unchanged(fake_client_factory):
+    client = fake_client_factory(
+        [
+            "same answer",
+            "VERDICT: REVISE\n1. tweak",
+            "same answer",  # revise produces no change
+            "VERDICT: ACCEPT",  # would not be reached
+        ]
+    )
+    trace = refine(client, "task", max_rounds=3)
+    assert trace.answer == "same answer"
+    assert not trace.accepted
+    kinds = [s.kind for s in trace.steps]
+    assert kinds == ["generate", "critique", "revise"]
+
+
+def test_refine_clamps_max_rounds(fake_client_factory):
+    # Distinct critiques so anti-spin "same critique" does not fire early;
+    # max_rounds=99 must still clamp to MAX_REFINE_ROUNDS (3).
+    client = fake_client_factory(
+        ["d0"]
+        + sum(
+            ([f"VERDICT: REVISE\n1. issue-{i}", f"d{i}"] for i in range(1, 6)),
+            [],
+        )
+    )
+    trace = refine(client, "task", max_rounds=99)
+    assert trace.rounds == 3
+    assert not trace.accepted
+
+
 def test_best_of_n_picks_judged_winner(fake_client_factory):
     client = fake_client_factory(["cand-1", "cand-2", "cand-3", "WINNER: 2 — most correct"])
     trace = best_of_n(client, "task", n=3)
