@@ -203,6 +203,25 @@
           `hermes pairing approve <platform> <code>`; revoke pairings later if needed.
           Default Hermes model stays Ollama at {{ hermes_ollama_base_url }}.
 
+    # ─── quality-loop free-text gate (local skill + agentlab wrapper) ─────────
+    - name: Ensure Hermes quality-gate skill directory exists
+      ansible.builtin.file:
+        path: "{{ hermes_quality_gate_skill_dir }}"
+        state: directory
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0755"
+      when: enable_hermes_quality_gate | bool
+
+    - name: Install Hermes quality-gate skill markdown
+      ansible.builtin.template:
+        src: quality-gate-skill.md.j2
+        dest: "{{ hermes_quality_gate_skill_dir }}/SKILL.md"
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0644"
+      when: enable_hermes_quality_gate | bool
+
     # ─── Systemd user service ─────────────────────────────────────────────────
     - name: Ensure user systemd directory exists
       ansible.builtin.file:

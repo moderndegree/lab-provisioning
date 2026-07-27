@@ -10,7 +10,7 @@ This lab is three things: the dev environment for a solo AI consulting practice,
 | Am I at the desk on my own repos? | Windows workstation | GitHub Copilot CLI | G | Pro+ buys frontier models at a flat rate; the gaming PC is the primary cockpit. |
 | Should it run for hours without me? | ser5, or GitHub cloud | Grok Build CLI on ser5, or assign a GitHub issue to Copilot cloud agent | X or G | ser5 survives disconnects via systemd; cloud sessions need no lab uptime. |
 | Am I away from a computer? | ser5 | Hermes from the phone | L for dashboard, personal-only for chat gateways | Tailscale gives private reach; Hermes is already running and phone-shaped. |
-| Am I choosing between models or measuring quality? | ser5 driving mini | loopkit | L | Measurements belong off mini; mini should only answer tokens. |
+| Am I choosing between models or measuring quality? | ser5 driving mini | qloop (quality-loop) | L | Measurements belong off mini; mini should only answer tokens. |
 
 ## Routing tiers
 
@@ -26,7 +26,7 @@ This lab is three things: the dev environment for a solo AI consulting practice,
 | Device | Role | Runs | Does not run | Why this, on this hardware |
 |---|---|---|---|---|
 | mini | Inference appliance | Headless Ubuntu 26.04, Ollama on `:11434`, Vulkan/RADV backend, tailnet-only | Loops, experiments, dashboards, queues, client apps | Strix Halo has 128 GB unified LPDDR5X and ~110 GB usable GPU pool; protect it from anything that can crash or OOM. |
-| ser5 | Always-on driver | Hermes, loopkit/agentlab, Grok Build CLI, Prometheus+Grafana, restic backups | Local models | Ryzen 7 5800H + 64 GB DDR4 is enough for orchestration; `/data` holds durable state. |
+| ser5 | Always-on driver | Hermes, quality-loop/agentlab, Grok Build CLI, Prometheus+Grafana, restic backups | Local models | Ryzen 7 5800H + 64 GB DDR4 is enough for orchestration; `/data` holds durable state. |
 | workstation | Primary cockpit | Copilot CLI, opencode client, repo work | Local models | RTX 4080 Super 16 GB and 32 GB system RAM lose to mini for this fleet; drive mini instead. |
 | iPhone | Remote control surface | Tailscale, Hermes dashboard, GitHub mobile, Grafana (Open WebUI only if `enable_openwebui` is turned on) | Bulk editing, production hosting | Starts work, reviews PRs, checks health; it is not the lab. |
 
@@ -36,7 +36,7 @@ Strix Halo is memory-bandwidth-bound, not compute-bound. Decode speed tracks act
 
 | Model | Size / shape | Speed | Residency | Use | Bandwidth rationale |
 |---|---:|---:|---|---|---|
-| `qwen3.6:35b-a3b-mtp-q4_K_M` | 22 GB, MoE 35B-A3B, 3B active | 70–80 t/s (measured) | Warm driver slot | Orchestrator, devops, doc-writer, loopkit judge/reflector | The anchor: fast because only ~3B active params are read per token. |
+| `qwen3.6:35b-a3b-mtp-q4_K_M` | 22 GB, MoE 35B-A3B, 3B active | 70–80 t/s (measured) | Warm driver slot | Orchestrator, devops, doc-writer, qloop judge/reflector | The anchor: fast because only ~3B active params are read per token. |
 | `qwen3-coder-next:latest` | 51 GB, MoE 80B-A3B hybrid Gated-DeltaNet, 512 experts / 10 active, 3B active | ~35-50 t/s (est.) | Warm depth slot | Coder, tester, planner, architect, reviewer, security-auditor | Replaces dense 27B: much stronger coding while keeping 3B active. |
 | `glm-4.7-flash:latest` | 19 GB, MoE 30B-A3B, 3B active | ~75-90 t/s (est.) | Challenger, not resident today | Driver-slot bake-off | Similar active size to the driver; measure before swapping. |
 | `gpt-oss:120b` | 65 GB, MoE 117B-A5.1B, 5.1B active | ~30 t/s (community-measured) | Heavy tier | Strongest general reasoning that fits 128 GB | Loads by evicting a warm model; useful, not resident. |
@@ -120,20 +120,22 @@ systemctl --user start hermes-gateway hermes-proxy hermes-dashboard
 
 Why this: Hermes is the bridge between small inputs and long-running work; it belongs on ser5, not mini.
 
-### loopkit
+### quality-loop (`qloop`)
 
-What it is: the measurement and loop harness in `packages/loopkit`, deployed to `/data/agentlab` by the `agentlab` role. Strategies are `single`, `refine`, and `best_of_n`, plus ACE playbooks and STaR dataset bootstrapping.
+What it is: the lab quality authority in `packages/quality-loop` (`qloop`), deployed to `/data/agentlab` by the `agentlab` role. Strategies are `single`, `refine`, and `best_of_n`, plus ACE playbooks, STaR dataset bootstrapping, and an interactive `gate` for free-text polish.
 
-Reach for it when: choosing models, comparing prompts, measuring quality, or running eval loops. Every run lands in `/data/agentlab/runs.db`; see [`ai-loops.md`](ai-loops.md) and [`../packages/loopkit/README.md`](../packages/loopkit/README.md).
+Reach for it when: choosing models, comparing prompts, measuring quality, running eval loops, or polishing Hermes free-text (no tool oracle). Do **not** use it to re-review OpenCode code diffs. Every run lands in `/data/agentlab/runs.db`; see [`ai-loops.md`](ai-loops.md) and [`../packages/quality-loop/README.md`](../packages/quality-loop/README.md).
 
 Start it:
 
 ```bash
-make loopkit-matrix
-loopkit summary
+make qloop-matrix
+qloop summary
+# free-text gate (ser5):
+/data/agentlab/jobs/quality-gate.sh --task "…" --strategy refine
 ```
 
-Why this: `single` is always the baseline; `refine` and `best_of_n` spend cheap local tokens only after the baseline exists. Aliases are `general`, `coder`, `heavy`, `judge`, and `scout`.
+Why this: `single` is always the baseline; `refine` and `best_of_n` spend cheap local tokens only after the baseline exists. Interactive gate uses warm models only. Aliases are `general`, `coder`, `heavy`, `judge`, and `scout`.
 
 ## From the iPhone
 
@@ -159,7 +161,7 @@ Why this: `single` is always the baseline; `refine` and `best_of_n` spend cheap 
 - The lab never hosts client production.
 - It is the dev environment, demo floor, and reference implementation.
 - No AWS Bedrock.
-- Speed figures marked `(est.)` stay marked until loopkit measures them.
+- Speed figures marked `(est.)` stay marked until qloop measures them.
 - Adopt a model change only on a measured win.
 - mini runs inference only: no loops, no experiments, nothing else ever.
 - ser5 owns queues, dashboards, proxies, backups, and experiment state.
@@ -176,4 +178,4 @@ Why this: `single` is always the baseline; `refine` and `best_of_n` spend cheap 
 | Nothing streams for minutes | Prefill wall | Prompt size versus the 128k window | Cut context, summarize, or split into smaller calls. |
 | Driver or coder is missing | Heavy model resident | `ollama ps`; look for `gpt-oss:120b` or Nemotron heavy tier | Treat heavy as scheduled eviction; finish it, then restore the warm pair. |
 | Two jobs run, the third waits | Two-way parallel queueing | `OLLAMA_NUM_PARALLEL=2` and active clients | Let it queue, or move non-urgent evals to later. Do not raise residency. |
-| Throughput is far below the table | Estimate treated as fact | Compare against loopkit runs | Keep `(est.)` labels until measured; adopt only measured wins. |
+| Throughput is far below the table | Estimate treated as fact | Compare against qloop runs | Keep `(est.)` labels until measured; adopt only measured wins. |

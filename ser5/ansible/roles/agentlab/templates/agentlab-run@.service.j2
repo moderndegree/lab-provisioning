@@ -11,6 +11,8 @@ After=network-online.target
 Type=exec
 ExecStart=/bin/bash {{ agentlab_root }}/jobs/%i.sh
 WorkingDirectory={{ agentlab_root }}
+Environment=QUALITY_LOOP_DATA={{ agentlab_root }}
+Environment=QUALITY_LOOP_BASE_URL={{ agentlab_base_url }}
 Environment=LOOPKIT_DATA={{ agentlab_root }}
 Environment=LOOPKIT_BASE_URL={{ agentlab_base_url }}
 Environment=PATH={{ agentlab_venv }}/bin:/usr/local/bin:/usr/bin:/bin

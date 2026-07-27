@@ -1,4 +1,4 @@
-from loopkit.playbook import Playbook
+from quality_loop.playbook import Playbook
 
 
 def test_apply_ops_add_update_remove(tmp_path):

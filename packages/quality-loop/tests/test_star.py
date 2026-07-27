@@ -1,6 +1,6 @@
 import json
 
-from loopkit.star import bootstrap
+from quality_loop.star import bootstrap
 
 
 def _suite(tmp_path):

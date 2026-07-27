@@ -14,14 +14,24 @@ transient 5xx during a model swap is normal on a single-node box.
 from __future__ import annotations
 
 import json
+import os
 import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 
-from loopkit.models import resolve_model
+from quality_loop.models import resolve_model
 
 DEFAULT_BASE_URL = "http://mini:11434/v1"
+
+
+def env_base_url() -> str:
+    """QUALITY_LOOP_BASE_URL preferred; LOOPKIT_BASE_URL accepted for one release."""
+    return (
+        os.environ.get("QUALITY_LOOP_BASE_URL")
+        or os.environ.get("LOOPKIT_BASE_URL")
+        or DEFAULT_BASE_URL
+    )
 
 
 class ChatError(RuntimeError):

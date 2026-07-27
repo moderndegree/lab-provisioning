@@ -195,7 +195,7 @@ token, not headline parameter count.
 
 mini keeps exactly **two base models resident**, at the global
 **131072-token window**, with no baked system prompts (agent roles live in the
-workstation opencode config and loopkit prompts - see `ollama_base_models` in
+workstation opencode config and quality-loop prompts - see `ollama_base_models` in
 `ansible/group_vars/all.yml`):
 
 | Slot | Model | Shape | Used for |

@@ -1,5 +1,8 @@
 # {{ ansible_managed }}
-# loopkit environment — experiments store runs/traces on the data disk and
+# quality-loop environment — experiments store runs/traces on the data disk and
 # talk to mini's Ollama OpenAI-compatible endpoint over the tailnet.
-export LOOPKIT_DATA="{{ agentlab_root }}"
-export LOOPKIT_BASE_URL="{{ agentlab_base_url }}"
+export QUALITY_LOOP_DATA="{{ agentlab_root }}"
+export QUALITY_LOOP_BASE_URL="{{ agentlab_base_url }}"
+# Compat (one release): older scripts/docs using LOOPKIT_*
+export LOOPKIT_DATA="${QUALITY_LOOP_DATA}"
+export LOOPKIT_BASE_URL="${QUALITY_LOOP_BASE_URL}"

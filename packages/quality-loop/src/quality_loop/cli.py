@@ -1,29 +1,29 @@
-"""loopkit CLI.
+"""quality-loop CLI (qloop).
 
-  loopkit ask "prompt" [--model general]
-  loopkit refine "task" [--worker general --judge general --rounds 3]
-  loopkit bestof "task" [-n 4]
-  loopkit eval suite.jsonl --strategy refine [--playbook pb.md --reflect --limit 5]
-  loopkit star suite.jsonl --out data.jsonl [--no-rationalize]
-  loopkit playbook show|reflect pb.md ...
-  loopkit stats [--run-id ID] [--matrix]
-  loopkit summary [--out FILE]
-  loopkit models
+  qloop gate --task "..." [--baseline "..."] [--strategy refine] --json
+  qloop ask "prompt" [--model general]
+  qloop refine "task" [--worker general --judge general --rounds 3]
+  qloop bestof "task" [-n 4]
+  qloop eval suite.jsonl --strategy refine [--playbook pb.md --reflect --limit 5]
+  qloop star suite.jsonl --out data.jsonl [--no-rationalize]
+  qloop playbook show|reflect pb.md ...
+  qloop stats [--run-id ID] [--matrix]
+  qloop summary [--out FILE]
+  qloop models
 
-Environment:
-  LOOPKIT_BASE_URL  inference endpoint (default http://mini:11434/v1)
-  LOOPKIT_DATA      run-tracking dir   (default ~/.loopkit)
+Environment (QUALITY_LOOP_* preferred; LOOPKIT_* accepted as fallback):
+  QUALITY_LOOP_BASE_URL / LOOPKIT_BASE_URL  inference endpoint
+  QUALITY_LOOP_DATA / LOOPKIT_DATA          run-tracking dir
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 
-from loopkit.client import DEFAULT_BASE_URL, ChatClient
-from loopkit.models import MODELS
+from quality_loop.client import ChatClient, env_base_url
+from quality_loop.models import MODELS
 
 
 def _client(args) -> ChatClient:
@@ -41,11 +41,28 @@ def _print_trace_answer(trace) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="loopkit", description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--base-url", default=os.environ.get("LOOPKIT_BASE_URL", DEFAULT_BASE_URL))
+    parser = argparse.ArgumentParser(
+        prog="qloop",
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("--base-url", default=env_base_url())
     parser.add_argument("--timeout", type=float, default=600.0)
     sub = parser.add_subparsers(dest="command", required=True)
+
+    p = sub.add_parser("gate", help="interactive quality gate (JSON decision + exit code)")
+    p.add_argument("--task", required=True)
+    p.add_argument("--baseline", help="existing draft to improve / fall back to")
+    p.add_argument("--strategy", default="refine", choices=["single", "refine", "best_of_n"])
+    p.add_argument("--worker", default="general")
+    p.add_argument("--judge", default="general")
+    p.add_argument("--rounds", type=int, default=2)
+    p.add_argument("-n", type=int, default=3, help="best_of_n candidates (max 3 in gate)")
+    p.add_argument("--playbook", help="inject playbook context (no reflect)")
+    p.add_argument("--json", action="store_true", dest="as_json",
+                   help="emit decision JSON on stdout (default: also true for scripting)")
+    p.add_argument("--skip-preflight", action="store_true",
+                   help="skip mini /models reachability check (tests)")
 
     p = sub.add_parser("ask", help="one-shot question")
     p.add_argument("prompt")
@@ -103,14 +120,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "models":
         for alias, spec in MODELS.items():
             mode = "reasoning" if spec.reasoning else "direct"
-            # Residency matters operationally: mini pins only two models, so
-            # anything else costs an eviction + reload on the next call.
             where = "warm" if spec.resident else "EVICTS warm pair"
             print(f"{alias:<9} → {spec.name:<28} ctx={spec.context:<7} {mode:<9} {where}")
         return 0
 
     if args.command == "stats":
-        from loopkit.storage import RunStore
+        from quality_loop.storage import RunStore
         store = RunStore()
         rows = store.matrix() if args.matrix else store.summary(args.run_id)
         if not rows:
@@ -121,8 +136,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "summary":
-        from loopkit.report import render_markdown_summary
-        from loopkit.storage import RunStore
+        from quality_loop.report import render_markdown_summary
+        from quality_loop.storage import RunStore
         text = render_markdown_summary(RunStore().matrix())
         if args.out:
             from pathlib import Path
@@ -132,7 +147,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "playbook":
-        from loopkit.playbook import Playbook
+        from quality_loop.playbook import Playbook
         pb = Playbook(args.path)
         if args.action == "show":
             print(pb.as_context() or "(empty playbook)")
@@ -143,6 +158,34 @@ def main(argv: list[str] | None = None) -> int:
         print("\n".join(applied) if applied else "NO_CHANGES")
         return 0
 
+    if args.command == "gate":
+        from quality_loop.gate import DEFAULT_TIMEOUT_S, run_gate
+        # Interactive gate uses a tighter default wall clock than offline eval.
+        timeout = args.timeout if args.timeout != 600.0 else DEFAULT_TIMEOUT_S
+        client = ChatClient(base_url=args.base_url, timeout=timeout)
+        result = run_gate(
+            client,
+            args.task,
+            strategy=args.strategy,
+            worker=args.worker,
+            judge=args.judge,
+            baseline=args.baseline,
+            rounds=args.rounds,
+            n=args.n,
+            playbook_path=args.playbook,
+            skip_preflight=args.skip_preflight,
+        )
+        # Always emit JSON for gate (scripting contract); --json is documented
+        # for callers but is the only stdout format.
+        print(result.to_json())
+        if not args.as_json:
+            print(
+                f"[{result.decision}] reason={result.reason} "
+                f"rounds={result.rounds} tokens={result.tokens}",
+                file=sys.stderr,
+            )
+        return result.exit_code
+
     client = _client(args)
 
     if args.command == "ask":
@@ -151,21 +194,21 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "refine":
-        from loopkit.loops import refine
+        from quality_loop.loops import refine
         trace = refine(client, args.task, worker=args.worker, judge=args.judge, max_rounds=args.rounds)
         _print_trace_answer(trace)
         return 0
 
     if args.command == "bestof":
-        from loopkit.loops import best_of_n
+        from quality_loop.loops import best_of_n
         trace = best_of_n(client, args.task, n=args.n, worker=args.worker,
                           judge=args.judge, temperature=args.temperature)
         _print_trace_answer(trace)
         return 0
 
     if args.command == "eval":
-        from loopkit.evals import run_suite
-        from loopkit.playbook import Playbook
+        from quality_loop.evals import run_suite
+        from quality_loop.playbook import Playbook
         playbook = Playbook(args.playbook) if args.playbook else None
         summary = run_suite(
             client, args.suite, strategy=args.strategy, worker=args.worker,
@@ -176,7 +219,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "star":
-        from loopkit.star import bootstrap
+        from quality_loop.star import bootstrap
         summary = bootstrap(
             client, args.suite, args.out, strategy=args.strategy, worker=args.worker,
             rationalize=not args.no_rationalize, limit=args.limit,

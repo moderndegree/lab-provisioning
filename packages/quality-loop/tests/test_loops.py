@@ -1,4 +1,4 @@
-from loopkit.loops import best_of_n, refine, single
+from quality_loop.loops import best_of_n, refine, single
 
 
 def test_single_returns_answer(fake_client_factory):

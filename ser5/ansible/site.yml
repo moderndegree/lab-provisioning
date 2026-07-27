@@ -12,7 +12,7 @@
 #   tailscale      → join tailnet with authkey from vault
 #   cloudflared    → Cloudflare Zero Trust tunnel (enable_cloudflared: true to activate)
 #   hermes         → Hermes gateway quadlet (enable_hermes: true to activate)
-#   agentlab       → loopkit AI-loop experiment layer (enable_agentlab: true to activate)
+#   agentlab       → quality-loop experiment layer (enable_agentlab: true to activate)
 #   observability  → Prometheus + Grafana quadlets (enable_observability: true to activate)
 #   backups        → restic snapshots + daily timer (enable_backups: true to activate)
 

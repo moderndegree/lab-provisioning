@@ -1,7 +1,7 @@
 """Run tracking: SQLite for queryable results, JSONL for full traces.
 
-Layout under the data dir (LOOPKIT_DATA, default ~/.loopkit; the agentlab
-role sets it to /data/agentlab on ser5):
+Layout under the data dir (QUALITY_LOOP_DATA / LOOPKIT_DATA fallback;
+default ~/.quality-loop; the agentlab role sets it to /data/agentlab on ser5):
 
   runs.db                    one row per (run, task) result
   traces/<run_id>.jsonl      full step-by-step traces, one task per line
@@ -17,7 +17,7 @@ import sqlite3
 import uuid
 from pathlib import Path
 
-from loopkit.loops import Trace
+from quality_loop.loops import Trace
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS results (
@@ -38,7 +38,13 @@ CREATE TABLE IF NOT EXISTS results (
 
 
 def data_dir() -> Path:
-    root = Path(os.environ.get("LOOPKIT_DATA", Path.home() / ".loopkit"))
+    """QUALITY_LOOP_DATA preferred; LOOPKIT_DATA accepted; else ~/.quality-loop."""
+    raw = (
+        os.environ.get("QUALITY_LOOP_DATA")
+        or os.environ.get("LOOPKIT_DATA")
+        or str(Path.home() / ".quality-loop")
+    )
+    root = Path(raw)
     (root / "traces").mkdir(parents=True, exist_ok=True)
     return root
 

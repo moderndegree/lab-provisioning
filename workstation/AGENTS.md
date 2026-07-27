@@ -44,3 +44,10 @@ work through Ollama's `/v1` endpoint — never rely on them.
   gateways; the sovereign remote path is the tailnet-only Hermes dashboard or SSH.
 - The orchestrator refuses to start implementation on a client repo without an
   approved OpenSpec change ID.
+
+## quality-loop (`qloop`) — free-text only
+
+The lab quality authority is `qloop` (package `quality-loop` on ser5 agentlab).
+Use it to **measure** strategies offline and to **polish free-text** when there
+is no tool/test oracle. **Do not** run `qloop gate` on coder diffs — tests and
+the reviewer are the code gate. See `.moderndegree/skills/quality-gate.md`.

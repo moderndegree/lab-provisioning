@@ -1,7 +1,7 @@
 import json
 
-from loopkit.evals import Task, extract_answer, load_suite, run_suite, score
-from loopkit.storage import RunStore
+from quality_loop.evals import Task, extract_answer, load_suite, run_suite, score
+from quality_loop.storage import RunStore
 
 
 def test_score_modes():
@@ -94,7 +94,7 @@ def test_run_suite_records_to_store(tmp_path, fake_client_factory, monkeypatch):
 
 
 def test_run_suite_injects_playbook_context(tmp_path, fake_client_factory, monkeypatch):
-    from loopkit.playbook import Playbook
+    from quality_loop.playbook import Playbook
 
     monkeypatch.setenv("LOOPKIT_DATA", str(tmp_path / "data"))
     suite = tmp_path / "s.jsonl"

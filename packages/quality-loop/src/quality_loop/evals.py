@@ -27,10 +27,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from loopkit.client import ChatClient
-from loopkit.loops import STRATEGIES, Trace
-from loopkit.playbook import Playbook
-from loopkit.storage import RunStore
+from quality_loop.client import ChatClient
+from quality_loop.loops import STRATEGIES, Trace
+from quality_loop.playbook import Playbook
+from quality_loop.storage import RunStore
 
 ANSWER_SUFFIX = 'End your reply with a line "ANSWER: <final answer>".'
 TEST_TIMEOUT_S = 20
@@ -153,7 +153,7 @@ def _run_code_against_tests(code: str, tests: str) -> bool:
     """Write the answer's code plus the task's tests to a temp file and run it
     as a subprocess with a timeout. Passes iff it exits cleanly. Isolated to a
     throwaway temp dir; no network access is granted beyond the default env."""
-    with tempfile.TemporaryDirectory(prefix="loopkit-test-") as tmpdir:
+    with tempfile.TemporaryDirectory(prefix="qloop-test-") as tmpdir:
         script = Path(tmpdir) / "check.py"
         script.write_text(f"{code}\n\n{tests}\n", encoding="utf-8")
         try:

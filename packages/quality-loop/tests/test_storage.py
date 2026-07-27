@@ -1,6 +1,6 @@
-from loopkit.loops import Trace
-from loopkit.report import render_markdown_summary
-from loopkit.storage import RunStore
+from quality_loop.loops import Trace
+from quality_loop.report import render_markdown_summary
+from quality_loop.storage import RunStore
 
 
 def _record(store, suite, strategy, worker, score):

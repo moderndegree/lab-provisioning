@@ -1,0 +1,49 @@
+# {{ ansible_managed }}
+# quality-gate — free-text polish via quality-loop (qloop) on mini (Tier L)
+
+## When to use
+
+Use this skill for **multi-constraint free-text** answers with **no tool/test
+oracle**: risk lists, rollback plans, proposals, ops runbooks, careful Q&A.
+
+**Do not use** for:
+- Code edits / diffs (OpenCode + tests own that path)
+- Client-confidential work over Telegram/Discord (use dashboard/SSH only)
+- Tasks tagged `GATE: skip` or pure plumbing ("restart service X")
+
+## How to run
+
+Shell out (PATH includes `/usr/local/bin` after agentlab provision):
+
+```bash
+{{ hermes_quality_gate_script }} \
+  --task "…" \
+  [--baseline "existing draft"] \
+  --strategy refine \
+  --worker general \
+  [--playbook /data/agentlab/playbooks/writing.md|/data/agentlab/playbooks/infra.md]
+```
+
+Stdout is one JSON object. Honor it:
+
+| decision | exit | action |
+|----------|------|--------|
+| ACCEPT or KEEP_BASELINE | 0 | return `answer` to the user |
+| SKIP | 2 | return original draft / answer without looping |
+| FAIL | 1 | surface `reason`; do not invent content |
+
+Defaults: strategy=refine, worker=general, judge=general, rounds=2, timeout=180s.
+Only warm models (`general`, `coder`) are allowed — never `heavy`/`judge`/`scout`.
+
+## Playbooks
+
+- `/data/agentlab/playbooks/writing.md` — client-facing prose
+- `/data/agentlab/playbooks/infra.md` — lab/ops free-text
+
+Do **not** run playbook reflect from chat. Reflect only after a known PASS/FAIL
+outcome via `qloop playbook reflect` or suite `--reflect`.
+
+## Tier
+
+Always Tier L: inference on mini (`{{ hermes_ollama_base_url }}`). Never send
+client-confidential material to xAI/Grok through this path.

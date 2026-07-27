@@ -2,7 +2,7 @@
 
 Two-base-model policy (mirrors `ollama_base_models` in
 mini/ansible/group_vars/all.yml): exactly two models stay resident on mini,
-with no baked system prompts — roles live in the prompts loopkit sends. Both
+with no baked system prompts — roles live in the prompts quality-loop sends. Both
 run at the 131072-token global window set on mini. Keep this table in sync with
 group_vars when the policy changes.
 
@@ -40,7 +40,7 @@ CAUTION: mini pins only the warm pair (max_loaded_models=2), so `heavy`,
 reload. Fine for a smoke test or a scheduled off-hours job; never inside an
 interactive loop. Use `evicts_warm_pair()` to check before a long run.
 
-Speed figures marked (est.) stay marked until `make loopkit-bakeoff` measures
+Speed figures marked (est.) stay marked until `make qloop-bakeoff` measures
 them on this box. Adopt a model change only on a measured win.
 """
 

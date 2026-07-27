@@ -17,7 +17,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from loopkit.client import ChatClient
+from quality_loop.client import ChatClient
 
 REFLECT_SYSTEM = """You maintain a playbook of numbered strategy bullets that guide future
 attempts at similar tasks. Given a task, an attempt trace, and its outcome, propose

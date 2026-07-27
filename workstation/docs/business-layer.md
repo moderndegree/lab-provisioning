@@ -50,7 +50,7 @@ judgment."
 
 - One opencode project (and Ollama context scope) **per client**.
 - Planned: per-client subvaults under `clients/<name>/`, with a separate index,
-  separate `LOOPKIT_DATA`, and documented teardown.
+  separate `QUALITY_LOOP_DATA`, and documented teardown.
 - Don't let one client's repo context bleed into another's session — separate
   workspaces, separate `AGENTS.md` where the engagement differs.
 

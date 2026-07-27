@@ -12,14 +12,14 @@ autoinstall + Ansible provisioning stack; lab software lives under
 | Directory | Machine | Role |
 |-----------|---------|------|
 | [`mini/`](mini/README.md) | Minisforum MS-S1 Max (Ryzen AI Max+ 395, 128 GB) | Headless LLM inference node; Vulkan/ROCm + Ollama (`qwen3-coder-next:latest` + `qwen3.6:35b-a3b-mtp-q4_K_M`, 131072 window) |
-| [`ser5/`](ser5/README.md) | Beelink SER5 (Ryzen 7 5800H, 64 GB) | Always-on driver: agentlab (loopkit), Hermes, observability, backups |
+| [`ser5/`](ser5/README.md) | Beelink SER5 (Ryzen 7 5800H, 64 GB) | Always-on driver: agentlab (quality-loop / qloop), Hermes, observability, backups |
 
 ## Software
 
 | Directory | What |
 |-----------|------|
 | [`docs/operating-manual.md`](docs/operating-manual.md) | One-page entry point: which harness when, which model where, and how to drive it from the phone |
-| [`packages/loopkit/`](packages/loopkit/README.md) | AI loop strategies (refine, best-of-N, ACE playbooks, STaR bootstrapping, evals) against mini's models — deployed to ser5 by the `agentlab` role |
+| [`packages/quality-loop/`](packages/quality-loop/README.md) | AI loop strategies (refine, best-of-N, ACE playbooks, STaR bootstrapping, evals) against mini's models — deployed to ser5 by the `agentlab` role |
 | [`workstation/`](workstation/README.md) | opencode config for the 9-agent coding team (copied/symlinked onto the dev box) |
 | [`docs/ai-loops.md`](docs/ai-loops.md) | Architecture + runbook for running AI loop experiments on the lab |
 | [`docs/roadmap.md`](docs/roadmap.md) | Phased plan: quality measurement, throughput, the cortex second brain, consulting productization |
@@ -54,9 +54,9 @@ lab-provisioning/
 │   ├── ai-loops.md          AI loop architecture + experiment runbook
 │   └── roadmap.md           phased lab/productization plan
 ├── packages/
-│   └── loopkit/             loop strategies library + CLI (pure-stdlib Python)
+│   └── quality-loop/        quality authority library + CLI qloop (pure-stdlib Python)
 │       ├── pyproject.toml
-│       ├── src/loopkit/     client, loops, playbook, evals, star, storage, cli
+│       ├── src/quality_loop/     client, loops, gate, playbook, evals, star, storage, cli
 │       ├── suites/          starter eval suites (JSONL)
 │       └── tests/
 ├── workstation/             opencode runtime config for the dev box

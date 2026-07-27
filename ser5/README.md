@@ -197,7 +197,7 @@ These flags in `ansible/group_vars/all.yml` now match the live box:
 |------|------|--------|
 | `enable_observability: true` | `observability` | Prometheus + Grafana quadlets targeting mini's metrics (mini must be reachable) |
 | `enable_hermes: true` | `hermes` | Hermes gateway, proxy, dashboard, messaging adapters, optional Grok Build skill + xAI env (see below) |
-| `enable_agentlab: true` | `agentlab` | loopkit AI-loop experiment layer under `{{ data_mount }}/agentlab` (mini must be reachable) — see [`../docs/ai-loops.md`](../docs/ai-loops.md) |
+| `enable_agentlab: true` | `agentlab` | quality-loop experiment layer under `{{ data_mount }}/agentlab` (mini must be reachable) — see [`../docs/ai-loops.md`](../docs/ai-loops.md) |
 | `enable_backups: true` | `backups` | restic snapshots + daily timer (needs a real `vault_restic_password`) — see below |
 | `enable_postgres: true` | _(not built)_ | Deferred |
 | `enable_forgejo: true` | _(not built)_ | Deferred |

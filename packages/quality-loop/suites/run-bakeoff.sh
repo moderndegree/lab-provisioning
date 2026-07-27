@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # Off-hours model bake-off: run each candidate and incumbent through the same
-# suites with the single-strategy baseline, recording rows in loopkit's runs.db.
-# Requires loopkit on PATH (or LOOPKIT_BIN set) and LOOPKIT_BASE_URL reachable.
+# suites with the single-strategy baseline, recording rows in quality-loop's runs.db.
+# Requires qloop on PATH (or QLOOP_BIN / LOOPKIT_BIN) and base URL reachable.
 set -euo pipefail
 
 SUITES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOOPKIT="${LOOPKIT_BIN:-loopkit}"
+QLOOP="${QLOOP_BIN:-${LOOPKIT_BIN:-qloop}}"
 read -ra SUITES <<< "${SUITES:-extraction citation-qa structured-output coding}"
 
-# Ollama's native root, derived from the /v1 URL loopkit talks to. Used only to
+# Ollama's native root, derived from the /v1 URL qloop talks to. Used only to
 # ask which models are actually on disk before a multi-hour run starts.
-BASE_URL="${LOOPKIT_BASE_URL:-http://mini:11434/v1}"
+BASE_URL="${QUALITY_LOOP_BASE_URL:-${LOOPKIT_BASE_URL:-http://mini:11434/v1}}"
 OLLAMA_ROOT="${BASE_URL%/v1}"
 
 MODELS=(
@@ -52,11 +52,11 @@ for model in "${MODELS[@]}"; do
   fi
   for suite in "${SUITES[@]}"; do
     echo "== ${suite} :: single :: ${model} ==" >&2
-    "$LOOPKIT" eval "${SUITES_DIR}/${suite}.jsonl" --strategy single --worker "$model"
+    "$QLOOP" eval "${SUITES_DIR}/${suite}.jsonl" --strategy single --worker "$model"
   done
 done
 
 if [ "${#skipped[@]}" -gt 0 ]; then
   echo "skipped (not installed): ${skipped[*]}" >&2
 fi
-echo "done - run 'loopkit stats --matrix' and 'loopkit summary' to compare results" >&2
+echo "done - run 'qloop stats --matrix' and 'qloop summary' to compare results" >&2

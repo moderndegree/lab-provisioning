@@ -15,7 +15,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from loopkit.client import ChatClient
+from quality_loop.client import ChatClient
 
 CRITIQUE_SYSTEM = """You are a strict reviewer. Assess the answer to the task.
 Reply with exactly one line starting with VERDICT: ACCEPT or VERDICT: REVISE,

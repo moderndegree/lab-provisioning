@@ -77,7 +77,7 @@ tailscale_version: "latest"
 # Optional roles — disabled by default. Flip to true to activate.
 enable_observability: false   # Prometheus + Grafana quadlets (monitors mini)
 enable_backups: false         # restic snapshots + daily timer (needs vault_restic_password)
-enable_agentlab: false        # loopkit AI-loop experiment layer (packages/loopkit)
+enable_agentlab: false        # quality-loop experiment layer (packages/quality-loop)
 
 # ─── Cloudflare Zero Trust tunnel ────────────────────────────────────────────
 # System-level Podman quadlet. Token lives in vault (vault_cloudflared_token).

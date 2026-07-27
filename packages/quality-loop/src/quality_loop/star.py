@@ -17,9 +17,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from loopkit.client import ChatClient
-from loopkit.evals import ANSWER_SUFFIX, Task, load_suite, score
-from loopkit.loops import STRATEGIES
+from quality_loop.client import ChatClient
+from quality_loop.evals import ANSWER_SUFFIX, Task, load_suite, score
+from quality_loop.loops import STRATEGIES
 
 RATIONALIZE_SYSTEM = """Solve the task. A trusted hint gives the correct final answer —
 work out a genuine step-by-step justification that reaches it. Do not mention the hint."""

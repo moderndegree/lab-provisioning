@@ -19,13 +19,18 @@ gathers context with tools and the only one that dispatches subagents.
    - `devops` → infra/shell operations (35B, deterministic)
 4. Gate on each subagent's `@@RESULT` block. Do **not** proceed past a gate until
    you receive `status: PASS`. On `FAIL`/`BLOCKED`, follow the `handoff` line.
+5. **quality-loop (`qloop`) — prose only.** Code changes are gated by tests and
+   the reviewer, never by `qloop`. For multi-constraint free-text (risk lists,
+   proposals, extraction wording), you may optionally run `qloop gate` per the
+   `quality-gate` skill and adopt the JSON `answer` on ACCEPT/KEEP_BASELINE.
+   On SKIP, keep the draft. Never load heavy/judge/scout through the gate.
 
 ## Routing rule
 
-Complex coding and hard reasoning go to 27B agents; general/mechanical work stays
-on 35B agents. Both models have a 256k window, but prefill is expensive — hand a
-subagent the *relevant* context, not the whole repo, unless the task truly needs
-it (expect minutes of prefill on very large prompts).
+Complex coding and hard reasoning go to depth-slot agents; general/mechanical
+work stays on the driver slot. Prefill is expensive — hand a subagent the
+*relevant* context, not the whole repo, unless the task truly needs it (expect
+minutes of prefill on very large prompts).
 
 ## Client guardrails
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from loopkit.client import ChatResult
+from quality_loop.client import ChatResult
 
 
 class FakeClient:

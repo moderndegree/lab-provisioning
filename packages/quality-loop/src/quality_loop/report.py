@@ -25,7 +25,7 @@ def render_markdown_summary(rows: list[dict]) -> str:
     lines = ["# Loopkit quality summary", "", f"Generated: {generated}", ""]
 
     if not rows:
-        lines.append("No runs recorded yet — run `loopkit eval` against a suite first.")
+        lines.append("No runs recorded yet — run `qloop eval` against a suite first.")
         return "\n".join(lines) + "\n"
 
     total_expected = len(suites) * len(STRATEGIES) * len(workers)
