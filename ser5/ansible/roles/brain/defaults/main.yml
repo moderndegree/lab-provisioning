@@ -1,8 +1,10 @@
 ---
-# ─── brain — Obsidian-compatible markdown second brain on ser5 ───────────────
-# Plain files under {{ data_mount }}/brain. No RAG/index yet (roadmap cortex).
-# Humans browse with Obsidian; agents write reviewable postmortems + use
-# ACE playbooks (shared with agentlab when that role is enabled).
+# ─── brain — Obsidian / ai-workstation cortex vault on ser5 ─────────────────
+# Plain files under {{ data_mount }}/brain. Layout matches ai-workstation's
+# lib/cortex/vault-core.ts VAULT_FOLDERS (inbox, notes, sources, journal, mocs,
+# playbooks). The Next app + cortex MCP read this path via CORTEX_VAULT_DIR.
+# Obsidian can open the same folder as a vault. Full retrieval UI lives in
+# the sibling repo: ../ai-workstation (not reimplemented here).
 
 brain_root: "{{ data_mount }}/brain"
 

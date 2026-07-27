@@ -1,66 +1,71 @@
-# second-brain — remember and learn from mistakes
+# second-brain — vault memory (lab + ai-workstation)
 
 ## Role
 
-The lab second brain is a **markdown vault** on ser5 at `/data/brain` (Obsidian-
-compatible). It stores postmortems and decisions. ACE **playbooks** live under
-`/data/brain/playbooks` (usually symlinked to `/data/agentlab/playbooks`).
+The second brain is a **markdown vault** at `/data/brain` on ser5.  
+**UI + agent MCP** live in the sibling **ai-workstation** project (not this repo):
 
-This skill does **not** replace TASK PACKAGE or quality-gate. It captures lessons
-**after** failures so the next package and playbooks improve.
+- App: `/brain` graph, note pages, quick capture → `inbox/`
+- MCP: `CORTEX_VAULT_DIR=/data/brain pnpm --dir <ai-workstation> mcp`
+
+This skill covers **when/how to learn from mistakes**. It does not replace
+TASK PACKAGE or quality-gate.
+
+## Prefer MCP when available
+
+If cortex MCP is configured in OpenCode/Hermes:
+
+| Need | Tool |
+|------|------|
+| Find related lessons | `vault_search` / `vault_list_notes` |
+| Read a note | `vault_get_note` |
+| Dump a raw thought | `vault_capture` (inbox) |
+| Neighborhood | `vault_local_graph` / `vault_backlinks` |
+
+Pull **1–3** relevant notes into the TASK PACKAGE — never the whole vault.
 
 ## When to write a postmortem
 
-**Must draft** a postmortem note (or hand off clearly for the human) when:
+**Draft** when:
 
-- User-facing answer was wrong or unsafe because of thin context / bad question
-- Subagent `BLOCKED` loops more than once on the same missing package fields
-- `qloop gate` KEEP_BASELINE / FAIL and the user still got a bad outcome
-- You repeated a known class of mistake (invented API, ignored non-goal, etc.)
+- Wrong answer from thin context / bad question
+- Repeated `BLOCKED` on the same missing package fields
+- Painful gate or user-visible miss worth not repeating
 
-**Skip** for pure typos, one-shot plumbing, or successes with nothing to learn.
+**Skip** pure typos, one-shot plumbing, clean successes.
 
-## How to draft (orchestrator or devops)
-
-On ser5 (or when the vault is mounted):
+## How to draft a postmortem (files)
 
 ```bash
 STAMP=$(date -u +%Y-%m-%d)
-SLUG="short-title"   # kebab-case
-DEST="/data/brain/notes/postmortems/${STAMP}-${SLUG}.md"
+DEST="/data/brain/notes/postmortems/${STAMP}-short-title.md"
 cp /data/brain/templates/postmortem.md "$DEST"
-# edit DEST: symptom, bad question, package gaps, fixes
+# fill: symptom, bad question, package gaps, fixes
 ```
 
-Fill at minimum:
-
-1. Symptom  
-2. Bad/wrong/incomplete question or handoff  
-3. Missing TASK PACKAGE context  
-4. 1–3 fixes for next time  
-
-Tag drafts with `status: draft` until a human accepts.
+Frontmatter should keep `tags` including `postmortem` and `status: draft` until
+a human accepts. Wiki-link related notes when you know ids (`[[ser5]]`, etc.).
 
 ## Playbook promotion
 
-If the fix is a **reusable rule** (not a one-off):
+Reusable rules → ACE playbooks (same files agents inject):
 
 ```bash
 qloop playbook reflect /data/agentlab/playbooks/infra.md \
   --task "…" --trace "…" --outcome "FAIL …"
 ```
 
-or hand-edit `/data/brain/playbooks/*.md` (same files when symlinked).
-
-Do **not** auto-rewrite the vault as ground truth without human review.
+`/data/brain/playbooks` is usually a symlink to agentlab playbooks.
 
 ## Governance
 
-- Default vault is **personal/lab** — no client-confidential dumps.
-- Prefer tools + TASK PACKAGE over stuffing the whole vault into a prompt.
-- Later cortex retrieval may pull 1–3 notes; until then, playbooks + explicit paths.
+- Personal/lab vault — no client-confidential dumps
+- Draft ≠ ground truth until reviewed
+- Packaging first; vault retrieval second; quality-gate for free-text polish
 
-## Related skills
+## Related
 
-- `task-package.md` — prevent thin handoffs *before* work
-- `quality-gate.md` — polish free-text *after* a solid package
+- `task-package.md` — prevent thin handoffs
+- `quality-gate.md` — free-text polish
+- lab docs: `docs/brain.md`
+- app: `ai-workstation` README (Cortex MCP section)
