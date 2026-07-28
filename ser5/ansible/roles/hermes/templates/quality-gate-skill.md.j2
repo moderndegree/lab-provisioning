@@ -31,13 +31,29 @@ answers through the script. Prefer generating a draft yourself, then:
 {{ hermes_quality_gate_script }} --task "…" --baseline "…draft…" --strategy refine
 ```
 
+The gate classifies your draft against the **original ask** — `answered`,
+`partial`, `off_target`, or `unsafe_or_invalid` — and stops as soon as the
+ask is answered. It does not loop to make an already-correct answer better,
+and it fails fast (does not deliver) on `unsafe_or_invalid` or persistent
+`off_target`. It also checks scope separately: if the draft acted on an
+assumption you weren't given, or did/added something nobody asked for, that
+fails too (`scope_exceeded`) even if the draft otherwise answered the ask —
+go back and ask the user instead of delivering it.
+
+Important limit: this only reviews the *text* of your draft, right before
+delivery. It has no visibility into tool calls or side effects you already
+made while producing that draft — if you already took an action, the gate
+cannot see or undo it. It can only stop you from *narrating* an unconfirmed
+action or assumption as if it were fine to deliver.
+
 Stdout is one JSON object. Honor it with no freelancing:
 
 | decision | exit | action |
 |----------|------|--------|
-| ACCEPT or KEEP_BASELINE | 0 | return `answer` to the user |
+| ACCEPT | 0 | return `answer` to the user (verdict: answered, scope: in_scope) |
+| KEEP_BASELINE | 0 | return `answer` to the user — this is the **original, unrevised** draft, not a polished one (partial, budget exhausted) |
 | SKIP | 2 | return original draft / ungated answer |
-| FAIL | 1 | surface `reason`; do not invent polished content |
+| FAIL | 1 | do **not** return `answer`; surface `reason` (e.g. `scope_exceeded`, `unsafe_or_invalid`, `off_target` / `off_target_persistent`) and `extra.critique` (what the judge flagged) |
 
 Defaults: strategy=refine, worker=general, judge=general, rounds=2, timeout=180s.
 Only warm models (`general`, `coder`) — never `heavy`/`judge`/`scout`.

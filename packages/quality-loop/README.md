@@ -17,7 +17,7 @@ for the live model/tier policy.
 | Piece | Idea |
 |-------|------|
 | `loops.single` | One-shot baseline every strategy must beat |
-| `loops.refine` | Generate → critique → revise until the judge says ACCEPT |
+| `loops.refine` | Generate → check alignment to the ask → revise only on a mismatch, until `answered` |
 | `loops.best_of_n` | Sample N candidates at temperature, judge picks the winner |
 | `gate` | Interactive quality gate (JSON + exit code); warm models only |
 | `playbook.Playbook` | ACE-style evolving context: numbered tactic bullets, ADD/UPDATE/REMOVE deltas |
@@ -65,6 +65,16 @@ Environment: `QUALITY_LOOP_BASE_URL` (default `http://mini:11434/v1`),
 `LOOPKIT_*` env vars are accepted as a one-release fallback.
 
 ### Gate decision contract
+
+`refine`'s critique step classifies the draft against the original ask —
+`answered` / `partial` / `off_target` / `unsafe_or_invalid` — and only
+iterates on a mismatch: `answered` stops immediately, `unsafe_or_invalid`
+fails fast without a revise round, and persistent `off_target` fails rather
+than keeping a wrong-question draft. A second, orthogonal `SCOPE:
+in_scope|exceeded` check blocks delivery the same way `unsafe_or_invalid`
+does whenever the draft acted on an unconfirmed assumption or added
+something the ask never requested — even if it otherwise answered the ask.
+FAIL results carry the judge's own explanation in `extra.critique`.
 
 Stdout is one JSON object. Exit codes: `0` ACCEPT/KEEP_BASELINE, `2` SKIP,
 `1` FAIL.

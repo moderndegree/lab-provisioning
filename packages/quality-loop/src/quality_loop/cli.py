@@ -32,8 +32,13 @@ def _client(args) -> ChatClient:
 
 def _print_trace_answer(trace) -> None:
     steps = ", ".join(f"{s.kind}" for s in trace.steps)
+    flags = ""
+    if trace.classification:
+        flags += f" classification={trace.classification}"
+    if trace.scope_exceeded:
+        flags += " scope_exceeded=True"
     print(
-        f"[{trace.strategy}] rounds={trace.rounds} accepted={trace.accepted} "
+        f"[{trace.strategy}] rounds={trace.rounds} accepted={trace.accepted}{flags} "
         f"tokens={trace.total_completion_tokens} steps: {steps}",
         file=sys.stderr,
     )
@@ -194,9 +199,15 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "refine":
-        from quality_loop.loops import refine
+        from quality_loop.loops import VERDICT_UNSAFE, refine
         trace = refine(client, args.task, worker=args.worker, judge=args.judge, max_rounds=args.rounds)
         _print_trace_answer(trace)
+        # Raw refine (unlike `qloop gate`) has no caller-side decision logic
+        # of its own — surface the judge's fail-fast verdicts as a nonzero
+        # exit so a flagged draft isn't indistinguishable from an ordinary
+        # unfinished "partial" one.
+        if trace.scope_exceeded or trace.classification == VERDICT_UNSAFE:
+            return 1
         return 0
 
     if args.command == "bestof":

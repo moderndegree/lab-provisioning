@@ -1,7 +1,25 @@
 """Interactive quality gate: deterministic go/no-go around free-text answers.
 
 Policy (see lab plan): warm models only, short timeouts, no playbook reflect.
+Ask-alignment first: the refine strategy's critique step classifies the draft
+against the *original* ask (answered/partial/off_target/unsafe_or_invalid,
+see quality_loop.loops) and only iterates on a mismatch — it never loops just
+to make an already-answered draft "better." A second, orthogonal check
+(SCOPE: in_scope|exceeded) blocks delivery the same way unsafe_or_invalid
+does whenever the draft acted on an assumption the ask left open, or did/
+added something the ask never requested — that is a confirm-with-the-user
+problem, not a quality problem, so it is never silently revised away.
 Decisions: ACCEPT | KEEP_BASELINE | SKIP | FAIL with process exit codes.
+  ACCEPT        verdict=answered and scope=in_scope
+  KEEP_BASELINE verdict=partial (or unparsed) after the round budget
+  FAIL          scope=exceeded (fail fast, any verdict), or
+                verdict=unsafe_or_invalid (fail fast), or off_target
+                (reason=off_target if only judged once — e.g. rounds=1 — or
+                off_target_persistent if it recurred across rounds)
+  SKIP          preflight/size guard tripped before any model call
+FAIL results carry the judge's own explanation in `extra.critique` — the
+specific assumption, addition, or gap it named — so the caller can see *why*
+without re-deriving it.
 """
 
 from __future__ import annotations
@@ -14,7 +32,12 @@ from pathlib import Path
 from typing import Any
 
 from quality_loop.client import ChatClient, ChatError
-from quality_loop.loops import STRATEGIES, Trace
+from quality_loop.loops import (
+    STRATEGIES,
+    VERDICT_OFF_TARGET,
+    VERDICT_UNSAFE,
+    Trace,
+)
 from quality_loop.models import evicts_warm_pair
 from quality_loop.playbook import Playbook
 
@@ -216,30 +239,52 @@ def run_gate(
                 )
                 base = _first_generate(trace) or trace.answer
 
-            if trace.accepted:
-                decision, reason = "ACCEPT", "accepted"
-            else:
-                decision, reason = "KEEP_BASELINE", "max_rounds"
-                answer = base
-                return GateResult(
-                    decision=decision,
-                    strategy="refine",
-                    accepted=False,
-                    answer=answer,
-                    baseline=base,
-                    rounds=trace.rounds,
-                    tokens=trace.total_completion_tokens,
-                    worker=worker,
-                    judge=judge,
-                    playbook=pb_name,
-                    reason=reason,
-                    exit_code=0,
+            # Resolve (decision, accepted, answer, reason, exit_code, extra)
+            # first, then build the GateResult once — every branch below
+            # otherwise repeats the same eight fields.
+            #
+            # Scope check wins regardless of verdict: an answer that covers
+            # the ask but acted on an unconfirmed assumption or added
+            # something unrequested must never be auto-delivered.
+            if trace.scope_exceeded:
+                decision, accepted, answer, reason, exit_code = (
+                    "FAIL", False, base, "scope_exceeded", 1,
                 )
+                extra = {"critique": _last_critique_text(trace)}
+            elif trace.accepted:
+                decision, accepted, answer, reason, exit_code = (
+                    "ACCEPT", True, trace.answer, "answered", 0,
+                )
+                extra = {}
+            elif trace.classification == VERDICT_UNSAFE:
+                # Fail fast — never deliver a draft the judge flagged unsafe
+                # or invalid, and never spend more rounds trying to fix it.
+                decision, accepted, answer, reason, exit_code = (
+                    "FAIL", False, base, "unsafe_or_invalid", 1,
+                )
+                extra = {"critique": _last_critique_text(trace)}
+            elif trace.classification == VERDICT_OFF_TARGET:
+                # "persistent" only if off_target was actually judged more
+                # than once (trace.rounds > 1) — a single-round budget that
+                # never got a second look isn't persistence, just a miss.
+                reason = "off_target_persistent" if trace.rounds > 1 else "off_target"
+                decision, accepted, answer, exit_code = "FAIL", False, base, 1
+                extra = {"critique": _last_critique_text(trace)}
+            else:
+                # partial (or an unparsed verdict, which defaults to
+                # partial): best effort was made toward the ask but ran out
+                # of budget — deliver the pre-loop baseline rather than a
+                # half-revised, never-re-checked draft.
+                decision, accepted, answer, reason, exit_code = (
+                    "KEEP_BASELINE", False, base, "max_rounds", 0,
+                )
+                extra = {}
+
             return GateResult(
                 decision=decision,
                 strategy="refine",
-                accepted=True,
-                answer=trace.answer,
+                accepted=accepted,
+                answer=answer,
                 baseline=base,
                 rounds=trace.rounds,
                 tokens=trace.total_completion_tokens,
@@ -247,7 +292,8 @@ def run_gate(
                 judge=judge,
                 playbook=pb_name,
                 reason=reason,
-                exit_code=0,
+                exit_code=exit_code,
+                extra=extra,
             )
 
         # best_of_n
@@ -337,6 +383,16 @@ def _first_generate(trace: Trace) -> str:
     return ""
 
 
+def _last_critique_text(trace: Trace) -> str:
+    """The judge's own explanation for the last verdict — the specific
+    assumption, addition, or gap it named — so a FAIL surfaces *why*, not
+    just a bare reason code."""
+    for step in reversed(trace.steps):
+        if step.kind == "critique":
+            return step.content[:500]
+    return ""
+
+
 def _refine_from_baseline(
     client: ChatClient,
     task: str,
@@ -347,19 +403,19 @@ def _refine_from_baseline(
     max_rounds: int,
     system: str | None,
 ) -> Trace:
-    """Critique/revise starting from a provided draft instead of generating first."""
-    import re
+    """Critique/revise starting from a provided draft instead of generating first.
 
+    Mirrors loops.refine's ask-alignment protocol via the shared
+    loops._refine_round helper: classify the draft against the original ask,
+    stop immediately on answered/unsafe_or_invalid/scope_exceeded, and only
+    spend a revise round on partial/off_target.
+    """
     from quality_loop.loops import (
-        CRITIQUE_MAX_TOKENS,
-        CRITIQUE_SYSTEM,
         MAX_REFINE_ROUNDS,
-        REVISE_SYSTEM,
+        VERDICT_ANSWERED,
         Step,
         Trace,
-        _loop_kw,
-        _norm,
-        _step_from,
+        _refine_round,
     )
 
     rounds = max(1, min(int(max_rounds), MAX_REFINE_ROUNDS, MAX_ROUNDS_INTERACTIVE))
@@ -370,45 +426,26 @@ def _refine_from_baseline(
     )
     answer = baseline
     prev_critique = ""
-    # system is reserved for future inject into critique context
+    # A baseline draft is already supplied — there's no generate call to seed
+    # with a system prompt, so it's unused on this path (unlike loops.refine).
     _ = system
 
     for round_no in range(1, rounds + 1):
         trace.rounds = round_no
-        critique = client.ask(
-            f"TASK:\n{task}\n\nANSWER:\n{answer}",
-            model=judge,
-            system=CRITIQUE_SYSTEM,
-            **_loop_kw(max_tokens=CRITIQUE_MAX_TOKENS),
+        outcome = _refine_round(
+            client, task, answer, worker=worker, judge=judge, prev_critique=prev_critique
         )
-        verdict_accept = bool(re.search(r"VERDICT:\s*ACCEPT", critique.content, re.I))
-        same_critique = bool(prev_critique) and _norm(critique.content) == _norm(prev_critique)
-        trace.steps.append(
-            _step_from("critique", critique, {"accept": verdict_accept, "stalled": same_critique})
-        )
-        if verdict_accept or same_critique:
-            if verdict_accept:
-                trace.accepted = True
+        trace.classification = outcome.verdict
+        trace.scope_exceeded = outcome.scope_exceeded
+        trace.steps.append(outcome.critique_step)
+        if outcome.revise_step is not None:
+            trace.steps.append(outcome.revise_step)
+        if outcome.verdict == VERDICT_ANSWERED and not outcome.scope_exceeded:
+            trace.accepted = True
+        answer = outcome.answer
+        if outcome.stop:
             break
-        prev_critique = critique.content
-        revision = client.chat(
-            [
-                {"role": "system", "content": REVISE_SYSTEM},
-                {"role": "user", "content": task},
-                {"role": "assistant", "content": answer},
-                {
-                    "role": "user",
-                    "content": f"Reviewer feedback:\n{critique.content}\n\nProduce the improved answer.",
-                },
-            ],
-            model=worker,
-            **_loop_kw(),
-        )
-        trace.steps.append(_step_from("revise", revision))
-        new_answer = revision.content
-        if _norm(new_answer) == _norm(answer):
-            break
-        answer = new_answer
+        prev_critique = outcome.critique_content
 
     trace.answer = answer
     return trace
