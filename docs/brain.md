@@ -22,9 +22,8 @@ CORTEX_VAULT_DIR=/data/brain
 CORTEX_VAULT_DIR=/data/brain pnpm --dir ~/projects/ai-workstation mcp
 ```
 
-MCP tools (from ai-workstation README): `vault_stats`, `vault_search`,
-`vault_list_notes`, `vault_get_note`, `vault_backlinks`, `vault_local_graph`,
-`vault_capture`. Prompts: `triage_inbox`, `research_vault`.
+MCP tool/prompt list lives in ai-workstation's own README — don't duplicate it
+here, it will drift.
 
 ## Provision
 
@@ -64,10 +63,10 @@ Syncthing ser5 ↔ workstation is recommended later; not automated in this role.
 
 `enable_backups` includes `{{ data_mount }}/brain` in restic paths.
 
-## Not here (use ai-workstation / future cortex timers)
+## Not here (use ai-workstation)
 
 - 3D graph UI, wiki-link rendering
-- Nightly inbox triage loops as systemd timers (roadmap Phase 3 maintenance)
+- Inbox triage, digest, contradiction-sweep, or resurfacing loops
 - Hybrid embedding retrieval for the vault (app has embeddings path for its own DB)
 
 ## Related

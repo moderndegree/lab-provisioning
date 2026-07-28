@@ -1,0 +1,35 @@
+---
+# Open WebUI — the ChatGPT-style browser UI, talking to mini's Ollama over the
+# tailnet. Disabled by default — flip enable_openwebui: true in group_vars/all.yml.
+enable_openwebui: false
+
+# Pin to a release tag for reproducible deploys; "main" tracks upstream latest.
+# https://github.com/open-webui/open-webui/pkgs/container/open-webui
+openwebui_image: "ghcr.io/open-webui/open-webui:main"
+
+# Data (accounts, chat history, uploaded docs for RAG) persists on the data disk.
+openwebui_data_dir: "{{ data_mount }}/services/openwebui/data"
+
+# Root-only-readable env file holding the generated WEBUI_SECRET_KEY (see tasks).
+openwebui_env_file: "{{ data_mount }}/services/openwebui/webui.env"
+
+# Open WebUI listens on 8080 inside the container.
+openwebui_port: 8080
+
+# Loopback-only, same posture as roles/observability's Grafana — ser5 has no
+# blanket tailscale0 UFW allow (unlike mini). Reach it remotely via
+# `tailscale serve --bg --https=8080 http://127.0.0.1:8080` or the Cloudflare
+# tunnel (enable_cloudflared) once a hostname is routed to it.
+openwebui_host: "127.0.0.1"
+
+# Reaches mini's Ollama over the tailnet — see openwebui.network.j2 for the
+# DNSSearch trick that makes "mini" resolve from inside the container netns.
+openwebui_ollama_base_url: "http://mini:11434"
+
+# Let `podman auto-update` pull a newer image on its timer.
+openwebui_autoupdate: true
+
+# Open WebUI's own signup flow (separate from Cloudflare Access). Leave true for
+# first provision so you can create the admin account, then flip to false and
+# re-run `make provision` to stop accepting new self-service signups.
+openwebui_enable_signup: true

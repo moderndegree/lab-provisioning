@@ -24,6 +24,7 @@ autoinstall + Ansible provisioning stack; lab software lives under
 | [`docs/ai-loops.md`](docs/ai-loops.md) | Architecture + runbook for running AI loop experiments on the lab |
 | [`docs/brain.md`](docs/brain.md) | Second brain vault on ser5 (`/data/brain`); UI/MCP in sibling **ai-workstation** |
 | [`docs/roadmap.md`](docs/roadmap.md) | Phased plan: quality measurement, throughput, the cortex second brain, consulting productization |
+| [`docs/todo.md`](docs/todo.md) | Open punch list from the last critical review — operational follow-ups, not roadmap work |
 
 ---
 
@@ -72,7 +73,7 @@ lab-provisioning/
 │       ├── group_vars/
 │       │   ├── all.example.yml      placeholder template (tracked); all.yml is gitignored
 │       │   └── vault.yml.example    placeholder secrets (tracked); vault.yml is gitignored
-│       └── roles/{base,amdgpu_rocm,ollama,harness,tailscale,cloudflared}/
+│       └── roles/{base,amdgpu_rocm,ollama,harness,tailscale,containers,cloudflared}/
 │   └── autoinstall/
 │       ├── user-data.example    ${PLACEHOLDER} template (tracked); user-data is gitignored
 │       └── meta-data
@@ -88,7 +89,7 @@ lab-provisioning/
         ├── group_vars/
         │   ├── all.example.yml    placeholder params (tracked)
         │   └── vault.yml.example  placeholder secrets (tracked; encrypt after init)
-        └── roles/{base,desktop,storage,workstation,virtualization,containers,tailscale,observability,backups}/
+        └── roles/{base,desktop,storage,devtools,virtualization,containers,tailscale,hermes,agentlab,brain,openwebui,observability,backups}/
     └── autoinstall/
         ├── user-data.example  ${PLACEHOLDER} template
         └── meta-data

@@ -184,7 +184,7 @@ make provision
 | `base` | Apt upgrade, base packages, UFW (default-deny + SSH), timezone, locale, user account, authorized keys |
 | `desktop` | Installs `ubuntu-desktop-minimal` (GNOME + GDM3) |
 | `storage` | Partitions + formats the 1 TB SATA SSD (first run only); mounts at `{{ data_mount }}`; creates `vms/`, `backups/`, `services/`, `media/` subdirs |
-| `workstation` | git, ansible, ansible-lint, podman, libvirt-clients, neovim, ripgrep, jq, tmux, yamllint, Node/`n`/opencode-ai, **Grok Build CLI** — usable dev workstation and Ansible control node |
+| `devtools` | git, ansible, ansible-lint, podman, libvirt-clients, neovim, ripgrep, jq, tmux, yamllint, Node/`n`/opencode-ai, **Grok Build CLI** — usable dev workstation and Ansible control node |
 | `virtualization` | libvirt + qemu-kvm + virt-manager; adds user to `libvirt` and `kvm` groups; defines `ser5-vms` storage pool on `{{ data_mount }}/vms` |
 | `containers` | Rootless Podman; enables user lingering; creates `~/.config/systemd/user/` for quadlet drop-ins |
 | `tailscale` | Adds Tailscale apt repo, installs pinned version, joins tailnet with `vault_tailscale_authkey` |
@@ -199,11 +199,8 @@ These flags in `ansible/group_vars/all.yml` now match the live box:
 | `enable_hermes: true` | `hermes` | Hermes gateway, proxy, dashboard, messaging adapters, optional Grok Build skill + xAI env (see below) |
 | `enable_agentlab: true` | `agentlab` | quality-loop experiment layer under `{{ data_mount }}/agentlab` (mini must be reachable) — see [`../docs/ai-loops.md`](../docs/ai-loops.md) |
 | `enable_brain: true` | `brain` | Obsidian-compatible second brain under `{{ data_mount }}/brain` — see [`../docs/brain.md`](../docs/brain.md) |
+| `enable_openwebui: true` | `openwebui` | Open WebUI browser chat UI, reaching mini's Ollama over the tailnet — see below |
 | `enable_backups: true` | `backups` | restic snapshots + daily timer (needs a real `vault_restic_password`) — see below |
-| `enable_postgres: true` | _(not built)_ | Deferred |
-| `enable_forgejo: true` | _(not built)_ | Deferred |
-| `enable_jellyfin: true` | _(not built)_ | Deferred |
-| `enable_coolify: true` | _(not built)_ | Deferred |
 
 ---
 
@@ -211,7 +208,7 @@ These flags in `ansible/group_vars/all.yml` now match the live box:
 
 ### Workstation: Grok Build CLI
 
-The `workstation` role installs [Grok Build](https://x.ai/cli) (xAI’s coding agent
+The `devtools` role installs [Grok Build](https://x.ai/cli) (xAI’s coding agent
 CLI) via the official installer into `~/.grok/bin`, puts it on `PATH` in
 `.bashrc`, and seeds `~/.grok/config.toml` once (never overwrites operator edits).
 
@@ -315,7 +312,7 @@ Tier L route to mini Ollama):
 
 1. **Coding skill** — `hermes skills install official/autonomous-ai-agents/grok`  
    Hermes can spawn the `grok` CLI for features/PRs/refactors (headless `-p`
-   preferred). Requires Grok Build on PATH (workstation role) + `grok login`.  
+   preferred). Requires Grok Build on PATH (devtools role) + `grok login`.  
    Gated by `enable_hermes_grok_skill: true` (default when Hermes is enabled in
    role defaults).
 
@@ -361,6 +358,32 @@ References:
 - [Connect Grok to Hermes Agent](https://x.ai/news/grok-hermes)
 - [xAI Grok OAuth guide](https://hermes-agent.nousresearch.com/docs/guides/xai-grok-oauth)
 - [Hermes Grok Build skill](https://hermes-agent.nousresearch.com/docs/user-guide/skills/optional/autonomous-ai-agents/autonomous-ai-agents-grok)
+
+---
+
+## Open WebUI (`enable_openwebui: true`)
+
+Browser chat UI, deployed as a rootless Podman quadlet (`roles/openwebui`,
+requires `roles/containers` for lingering/quadlet support). Lives on ser5, not
+mini — mini's hard rule is inference only.
+
+- **Reaches mini's Ollama over the tailnet**, not `host.containers.internal`
+  (mini is a different physical machine). The `openwebui.network` quadlet sets
+  `DNSSearch={{ tailnet_dns_search }}` so Tailscale MagicDNS resolves `mini`
+  from inside the container's network namespace — the same trick
+  `roles/observability` uses to reach mini's node-exporter.
+- **Loopback-only by default** (`openwebui_host: 127.0.0.1`), matching
+  Grafana's posture — ser5 has no blanket tailscale0 UFW allow the way mini
+  does. For phone/remote access, either run
+  `tailscale serve --bg --https=8080 http://127.0.0.1:8080` or route a
+  Cloudflare tunnel hostname to `http://localhost:8080` (`enable_cloudflared`).
+- **First-run setup:** the first account you create in the UI becomes the admin.
+  `openwebui_enable_signup: true` (default) leaves signup open for that first run;
+  flip it to `false` in `group_vars/all.yml` and re-run `make provision`
+  afterward to stop accepting new self-service signups.
+- Session cookies are signed with a `WEBUI_SECRET_KEY` generated once on first
+  provision and persisted at `{{ data_mount }}/services/openwebui/webui.env`
+  (`0600`, owned by `username`) — re-provisioning does not invalidate sessions.
 
 ---
 

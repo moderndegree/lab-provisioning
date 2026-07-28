@@ -1,7 +1,7 @@
 ---
-# Open WebUI — rootless Podman quadlet, chat UI for mini's local Ollama.
-# The containers role (which runs earlier in site.yml) already enables lingering
-# and creates ~/.config/containers/systemd/, so this role just deploys the unit.
+# Open WebUI — rootless Podman quadlet, browser chat UI reaching mini's Ollama
+# over the tailnet. The containers role (runs earlier in site.yml) already
+# enables lingering and creates ~/.config/containers/systemd/.
 
 - name: openwebui stub — role is disabled
   ansible.builtin.debug:
@@ -13,8 +13,8 @@
 - name: Deploy Open WebUI
   when: enable_openwebui | bool
   block:
-    - name: Resolve {{ node_user }} UID (needed for systemctl --user calls)
-      ansible.builtin.command: "id -u {{ node_user }}"
+    - name: Resolve {{ username }} UID (needed for systemctl --user calls)
+      ansible.builtin.command: "id -u {{ username }}"
       register: openwebui_user_uid
       changed_when: false
 
@@ -22,8 +22,8 @@
       ansible.builtin.file:
         path: "{{ openwebui_data_dir }}"
         state: directory
-        owner: "{{ node_user }}"
-        group: "{{ node_user }}"
+        owner: "{{ username }}"
+        group: "{{ username }}"
         mode: "0750"
 
     # WEBUI_SECRET_KEY signs Open WebUI's session JWTs. Without a persisted value,
@@ -40,16 +40,34 @@
     - name: Set ownership/permissions on Open WebUI env file
       ansible.builtin.file:
         path: "{{ openwebui_env_file }}"
-        owner: "{{ node_user }}"
-        group: "{{ node_user }}"
+        owner: "{{ username }}"
+        group: "{{ username }}"
         mode: "0600"
+
+    - name: Ensure user containers/systemd quadlet directory exists
+      ansible.builtin.file:
+        path: "{{ user_home }}/.config/containers/systemd"
+        state: directory
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0755"
+
+    - name: Write Open WebUI Podman network quadlet
+      ansible.builtin.template:
+        src: openwebui.network.j2
+        dest: "{{ user_home }}/.config/containers/systemd/openwebui.network"
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0644"
+      notify:
+        - openwebui daemon-reload
 
     - name: Template Open WebUI quadlet unit
       ansible.builtin.template:
         src: openwebui.container.j2
-        dest: "{{ node_home }}/.config/containers/systemd/openwebui.container"
-        owner: "{{ node_user }}"
-        group: "{{ node_user }}"
+        dest: "{{ user_home }}/.config/containers/systemd/openwebui.container"
+        owner: "{{ username }}"
+        group: "{{ username }}"
         mode: "0644"
       notify:
         - openwebui daemon-reload
@@ -65,7 +83,7 @@
         state: started
         scope: user
       become: true
-      become_user: "{{ node_user }}"
+      become_user: "{{ username }}"
       environment:
         XDG_RUNTIME_DIR: "/run/user/{{ openwebui_user_uid.stdout }}"
       when: not ansible_check_mode
@@ -77,7 +95,7 @@
         state: started
         scope: user
       become: true
-      become_user: "{{ node_user }}"
+      become_user: "{{ username }}"
       environment:
         XDG_RUNTIME_DIR: "/run/user/{{ openwebui_user_uid.stdout }}"
       when:

@@ -4,7 +4,7 @@
     daemon_reload: true
     scope: user
   become: true
-  become_user: "{{ node_user }}"
+  become_user: "{{ username }}"
   environment:
     XDG_RUNTIME_DIR: "/run/user/{{ openwebui_user_uid.stdout }}"
 
@@ -14,6 +14,6 @@
     state: restarted
     scope: user
   become: true
-  become_user: "{{ node_user }}"
+  become_user: "{{ username }}"
   environment:
     XDG_RUNTIME_DIR: "/run/user/{{ openwebui_user_uid.stdout }}"

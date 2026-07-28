@@ -13,7 +13,6 @@
 #     roles/ollama/defaults/main.yml       context, parallelism, model tiers
 #     roles/amdgpu_rocm/defaults/main.yml  gpu_backend, ROCm/Vulkan pinning
 #     roles/base/defaults/main.yml         amdgpu_top version
-#     roles/openwebui/defaults/main.yml    Open WebUI image, port, signup
 #     roles/cloudflared/defaults/main.yml  tunnel image, autoupdate
 #
 # Role defaults are the LOWEST-precedence vars in Ansible, so anything you set
@@ -41,7 +40,7 @@ node_hostname: "{{ inventory_hostname }}"
 ansible_user: "{{ node_user }}"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Data disk  (REQUIRED — data_mount is consumed by the ollama and openwebui roles)
+# Data disk  (REQUIRED — data_mount is consumed by the ollama role)
 # ─────────────────────────────────────────────────────────────────────────────
 # Set has_data_disk false when there is no dedicated data disk (single-disk node);
 # /data then becomes a plain directory on the root filesystem instead.
@@ -72,16 +71,12 @@ auto_reboot: true
 # commented means you inherit policy updates automatically on `git pull`.
 # Uncommenting pins the value on this box until you remove the line again.
 
-# ─── Remote access (roles/cloudflared, roles/openwebui) ───
-# Tailscale is the primary, fully-private path and is always on. Enable these for
-# browser access without a VPN client. cloudflared only *starts* once a real
-# vault_cloudflared_token is set, so enabling it with a placeholder token is safe.
-# Open WebUI is mini's browser/phone chat UI at http://mini:8080 over the tailnet.
+# ─── Remote access (roles/cloudflared) ───
+# Tailscale is the primary, fully-private path and is always on. Enable this for
+# browser access to the tunnel without a VPN client. cloudflared only *starts*
+# once a real vault_cloudflared_token is set, so enabling it with a placeholder
+# token is safe. Open WebUI now lives on ser5 (roles/openwebui there), not mini.
 # enable_cloudflared: true
-# enable_openwebui: true
-# First provision: leave signup true, create the admin account in the UI, then set
-# it false and re-run `make provision` to stop accepting new self-service signups.
-# openwebui_enable_signup: false
 
 # ─── GPU backend (roles/amdgpu_rocm/defaults/main.yml) ───
 # Default is "vulkan" (committed path, +7-26% decode vs ROCm). Both stacks are

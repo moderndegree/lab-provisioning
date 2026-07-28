@@ -26,7 +26,7 @@ This lab is three things: the dev environment for a solo AI consulting practice,
 | Device | Role | Runs | Does not run | Why this, on this hardware |
 |---|---|---|---|---|
 | mini | Inference appliance | Headless Ubuntu 26.04, Ollama on `:11434`, Vulkan/RADV backend, tailnet-only | Loops, experiments, dashboards, queues, client apps | Strix Halo has 128 GB unified LPDDR5X and ~110 GB usable GPU pool; protect it from anything that can crash or OOM. |
-| ser5 | Always-on driver | Hermes, quality-loop/agentlab, second brain (`/data/brain`), Grok Build CLI, Prometheus+Grafana, restic backups | Local models | Ryzen 7 5800H + 64 GB DDR4 is enough for orchestration; `/data` holds durable state. |
+| ser5 | Always-on driver | Hermes, quality-loop/agentlab, second brain (`/data/brain`), Grok Build CLI, Prometheus+Grafana, Open WebUI (opt-in), restic backups | Local models | Ryzen 7 5800H + 64 GB DDR4 is enough for orchestration; `/data` holds durable state. |
 | workstation | Primary cockpit | Copilot CLI, opencode client, repo work | Local models | RTX 4080 Super 16 GB and 32 GB system RAM lose to mini for this fleet; drive mini instead. |
 | iPhone | Remote control surface | Tailscale, Hermes dashboard, GitHub mobile, Grafana (Open WebUI only if `enable_openwebui` is turned on) | Bulk editing, production hosting | Starts work, reviews PRs, checks health; it is not the lab. |
 
@@ -155,7 +155,7 @@ Why this: `single` is always the baseline; `refine` and `best_of_n` spend cheap 
 6. Treat Telegram and Discord as third-party paths: notifications and personal lab work only, never client-confidential.
 7. To start real coding from the couch, use GitHub mobile: assign an issue to the Copilot cloud agent, then review the PR.
 8. Use Grafana on ser5 for host metrics when the lab feels slow.
-9. Raw model chat from the phone needs Open WebUI on mini, which ships **disabled** (`enable_openwebui: false` in `mini/ansible/group_vars/all.yml`). Turn it on and re-provision if you want it; it is a convenience, not the cockpit.
+9. Raw model chat from the phone needs Open WebUI on ser5, which ships **disabled** (`enable_openwebui: false` in `ser5/ansible/group_vars/all.yml`). Turn it on and re-provision if you want it; it is a convenience, not the cockpit.
 10. If a phone path asks for secrets, stop and move to the workstation.
 
 ## Hard rules
