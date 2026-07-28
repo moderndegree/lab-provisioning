@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quality-loop"
+version = "0.1.0"
+description = "Measured quality loops (refine, best-of-N, ACE playbooks, STaR, evals, gate) against the lab's local inference node"
+requires-python = ">=3.10"
+# Zero runtime dependencies by design: quality-loop must run on a freshly
+# provisioned ser5 with nothing but the system Python. Everything uses the
+# stdlib (urllib for HTTP, sqlite3 for run tracking, json/argparse for the CLI).
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+]
+
+[project.scripts]
+qloop = "quality_loop.cli:main"
+loopkit = "quality_loop.cli:main"  # compat one release
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

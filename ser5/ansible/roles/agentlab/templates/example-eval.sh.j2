@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # {{ ansible_managed }} (seeded once; edit freely — Ansible will not overwrite)
 # Example experiment: baseline vs refine on the smoke suite, with an evolving
-# playbook. Compare afterwards with:  loopkit stats
+# playbook. Compare afterwards with:  qloop stats
 set -euo pipefail
 
 SUITE="{{ agentlab_root }}/suites/smoke.jsonl"
 PLAYBOOK="{{ agentlab_root }}/playbooks/smoke.md"
 
-loopkit eval "$SUITE" --strategy single --worker general
-loopkit eval "$SUITE" --strategy refine --worker general --playbook "$PLAYBOOK" --reflect
-loopkit stats
+qloop eval "$SUITE" --strategy single --worker general
+qloop eval "$SUITE" --strategy refine --worker general --playbook "$PLAYBOOK" --reflect
+qloop stats

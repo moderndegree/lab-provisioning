@@ -77,6 +77,13 @@ hermes_messaging_platforms:
 enable_hermes_grok_skill: true
 hermes_grok_skill: "official/autonomous-ai-agents/grok"
 
+# Local quality-loop gate skill: free-text polish via /data/agentlab/jobs/quality-gate.sh
+# (Tier L / mini only). Does not install a network skill — drops a markdown skill
+# under HERMES_HOME for Hermes to discover, or for operators to paste into prompts.
+enable_hermes_quality_gate: true
+hermes_quality_gate_script: "{{ data_mount }}/agentlab/jobs/quality-gate.sh"
+hermes_quality_gate_skill_dir: "{{ hermes_home }}/skills/quality-gate"
+
 # Write vault_xai_api_key into HERMES_HOME/.env when true and the vault value
 # is real (not a PLACEHOLDER). Prefer OAuth for SuperGrok; use API key for
 # headless / pay-as-you-go.

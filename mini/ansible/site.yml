@@ -9,7 +9,8 @@
 #   tailscale   → tailnet access
 #   containers  → rootless Podman; user lingering; quadlet support
 #   cloudflared → Cloudflare Zero Trust tunnel (enable_cloudflared: true to activate)
-#   openwebui   → Open WebUI chat UI for local Ollama (enable_openwebui: true to activate)
+#
+# Open WebUI moved to ser5 (roles/openwebui there) — mini stays inference-only.
 
 - name: Provision mini
   hosts: mini
@@ -23,8 +24,6 @@
     - role: containers
     - role: cloudflared
       when: enable_cloudflared | bool
-    - role: openwebui
-      when: enable_openwebui | bool
 
 # Reboot last — after the provision play's handlers (update-grub, update-initramfs)
 # have flushed — so the gfx1151 kernel cmdline is regenerated *then* applied in one

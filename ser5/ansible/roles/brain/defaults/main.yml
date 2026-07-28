@@ -1,0 +1,13 @@
+---
+# ─── brain — Obsidian / ai-workstation cortex vault on ser5 ─────────────────
+# Plain files under {{ data_mount }}/brain. Layout matches ai-workstation's
+# lib/cortex/vault-core.ts VAULT_FOLDERS (inbox, notes, sources, journal, mocs,
+# playbooks). The Next app + cortex MCP read this path via CORTEX_VAULT_DIR.
+# Obsidian can open the same folder as a vault. Full retrieval UI lives in
+# the sibling repo: ../ai-workstation (not reimplemented here).
+
+brain_root: "{{ data_mount }}/brain"
+
+# When agentlab is present, point vault playbooks at the same ACE files agents use.
+brain_link_agentlab_playbooks: true
+brain_agentlab_playbooks: "{{ data_mount }}/agentlab/playbooks"

@@ -1,5 +1,5 @@
 ---
-# agentlab — deploy loopkit (packages/loopkit in this repo) onto ser5.
+# agentlab — deploy quality-loop (packages/quality-loop in this repo) onto ser5.
 # Gated by enable_agentlab in site.yml. Long-running experiments run as
 # systemd user units (lingering is enabled by the containers role) so they
 # survive SSH disconnects and reboots don't leave zombies.
@@ -28,8 +28,8 @@
     - "{{ agentlab_root }}/datasets"
     - "{{ agentlab_root }}/jobs"
 
-# ─── Push the loopkit source from the repo checkout ───────────────────────────
-- name: Sync loopkit package source to the host
+# ─── Push the quality-loop source from the repo checkout ──────────────────────
+- name: Sync quality-loop package source to the host
   ansible.posix.synchronize:
     src: "{{ agentlab_local_pkg }}/"
     dest: "{{ agentlab_src }}"
@@ -50,8 +50,8 @@
     recurse: true
   when: agentlab_sync.changed
 
-# ─── Virtualenv + install (loopkit is stdlib-only; pip has no net deps) ───────
-- name: Create loopkit virtualenv
+# ─── Virtualenv + install (quality-loop is stdlib-only; pip has no net deps) ──
+- name: Create quality-loop virtualenv
   ansible.builtin.command:
     cmd: "python3 -m venv {{ agentlab_venv }}"
     creates: "{{ agentlab_venv }}/bin/python"
@@ -59,7 +59,7 @@
   become_user: "{{ username }}"
   register: agentlab_venv_created
 
-- name: Install loopkit into the virtualenv
+- name: Install quality-loop into the virtualenv
   ansible.builtin.command:
     cmd: "{{ agentlab_venv }}/bin/pip install --upgrade {{ agentlab_src }}"
   become: true
@@ -67,13 +67,19 @@
   when: agentlab_sync.changed or agentlab_venv_created.changed
   changed_when: true
 
-- name: Symlink loopkit onto the system PATH
+- name: Symlink qloop onto the system PATH
   ansible.builtin.file:
-    src: "{{ agentlab_venv }}/bin/loopkit"
+    src: "{{ agentlab_venv }}/bin/qloop"
+    dest: /usr/local/bin/qloop
+    state: link
+
+- name: Symlink loopkit compat alias onto the system PATH
+  ansible.builtin.file:
+    src: "{{ agentlab_venv }}/bin/qloop"
     dest: /usr/local/bin/loopkit
     state: link
 
-- name: Export loopkit environment for interactive shells
+- name: Export quality-loop environment for interactive shells
   ansible.builtin.template:
     src: agentlab-env.sh.j2
     dest: /etc/profile.d/agentlab.sh
@@ -92,11 +98,46 @@
     group: "{{ username }}"
     mode: "0644"
 
+- name: Seed starter ACE playbooks
+  ansible.builtin.copy:
+    content: "{{ item.content }}"
+    dest: "{{ agentlab_root }}/playbooks/{{ item.name }}"
+    force: false
+    owner: "{{ username }}"
+    group: "{{ username }}"
+    mode: "0644"
+  loop:
+    - name: writing.md
+      content: |
+        # Playbook — writing
+        <!-- seeded by agentlab; evolved via qloop playbook reflect / eval --reflect -->
+
+        1. Lead with the decision or recommendation, then supporting detail.
+        2. Call out rollback or undo steps whenever a change is proposed.
+        3. Prefer concrete checklists over vague advice.
+    - name: infra.md
+      content: |
+        # Playbook — infra
+        <!-- seeded by agentlab; evolved via qloop playbook reflect / eval --reflect -->
+
+        1. Prefer warm models on mini; never load heavy/judge/scout during daytime interactive work.
+        2. State validation commands (curl, systemctl, ollama ps) before claiming success.
+        3. Treat /data as durable and OS disk as disposable; say what path holds state.
+
 - name: Seed an example experiment job
   ansible.builtin.template:
     src: example-eval.sh.j2
     dest: "{{ agentlab_root }}/jobs/example-eval.sh"
     force: false
+    owner: "{{ username }}"
+    group: "{{ username }}"
+    mode: "0755"
+
+- name: Seed the interactive quality-gate wrapper
+  ansible.builtin.template:
+    src: quality-gate.sh.j2
+    dest: "{{ agentlab_root }}/jobs/quality-gate.sh"
+    force: true
     owner: "{{ username }}"
     group: "{{ username }}"
     mode: "0755"

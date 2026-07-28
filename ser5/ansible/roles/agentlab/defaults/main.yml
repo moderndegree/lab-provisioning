@@ -1,17 +1,17 @@
 ---
-# ─── agentlab — loopkit experiment layer on ser5 ─────────────────────────────
+# ─── agentlab — quality-loop experiment layer on ser5 ───────────────────────
 # ser5 is the always-on driver box: loops run here, inference happens on mini
 # over the tailnet. Everything lives under {{ data_mount }}/agentlab so runs,
 # playbooks, and datasets survive an OS-disk wipe.
 
 agentlab_root: "{{ data_mount }}/agentlab"
 agentlab_venv: "{{ agentlab_root }}/venv"
-agentlab_src: "{{ agentlab_root }}/src/loopkit"
+agentlab_src: "{{ agentlab_root }}/src/quality-loop"
 
-# Inference endpoint loopkit talks to (Ollama OpenAI-compatible API on mini,
+# Inference endpoint quality-loop talks to (Ollama OpenAI-compatible API on mini,
 # reached over the tailnet; see mini/ansible/group_vars/all.yml ollama_host).
 agentlab_base_url: "http://mini:11434/v1"
 
-# Control-node path to the loopkit package inside this repo checkout.
+# Control-node path to the quality-loop package inside this repo checkout.
 # The role pushes it to the host with rsync — no deploy key or clone needed.
-agentlab_local_pkg: "{{ playbook_dir }}/../../packages/loopkit"
+agentlab_local_pkg: "{{ playbook_dir }}/../../packages/quality-loop"

@@ -1,0 +1,66 @@
+# Second brain ({{ brain_root }})
+
+Obsidian-compatible **markdown vault**. This directory is the plain-file truth
+for the lab second brain (roadmap "cortex"). Software on top is replaceable.
+
+## Primary UI: AI Workstation
+
+The sibling app **[ai-workstation](https://github.com/moderndegree/ai-workstation)**
+is the command center for this vault:
+
+| Surface | What |
+|---------|------|
+| `/brain` | 3D knowledge graph, note pages, wiki-links, backlinks |
+| Quick capture | Writes to `inbox/` |
+| Cortex MCP | Agents search/read/capture via `pnpm mcp` + `CORTEX_VAULT_DIR` |
+
+On ser5 (or any host with the vault mounted):
+
+```bash
+# .env.local in ai-workstation
+CORTEX_VAULT_DIR={{ brain_root }}
+
+# MCP for OpenCode / Hermes / Claude Desktop
+CORTEX_VAULT_DIR={{ brain_root }} pnpm --dir /path/to/ai-workstation mcp
+```
+
+Empty local vaults can use the app's **seed** (lab MOCs from the roadmap).
+This provisioned vault is never overwritten by the app seed.
+
+## Optional: Obsidian
+
+**Open folder as vault** → this directory. Templates folder = `templates/`.
+Use when you want offline graph/edit without running Next.js.
+
+## Layout (matches ai-workstation cortex kinds)
+
+| Path | Kind | Purpose |
+|------|------|---------|
+| `inbox/` | inbox | Raw capture; triage later |
+| `notes/` | note | Atomic notes (incl. `postmortems/`, `decisions/`) |
+| `mocs/` | moc | Maps of content |
+| `journal/` | journal | Daily notes |
+| `sources/` | source | Archived clips |
+| `playbooks/` | playbook | ACE tactics (`qloop` / agentlab; often a symlink) |
+| `templates/` | (meta) | Copy-from postmortem/decision skeletons |
+
+Dotdirs (`.obsidian`, `.cortex`, `.stfolder`) are ignored by the app index.
+
+## Learn from mistakes
+
+1. Copy `templates/postmortem.md` → `notes/postmortems/YYYY-MM-DD-title.md`
+2. Fill symptom → bad question → TASK PACKAGE gaps → fixes
+3. Promote durable rules into `playbooks/*.md` or `qloop playbook reflect`
+4. Browse/link in **ai-workstation** `/brain` or Obsidian
+
+## Governance
+
+- Personal/lab vault by default — client material needs isolation (roadmap Phase 4)
+- LLMs draft; files decide — review before treating notes as ground truth
+- restic backs up `{{ brain_root }}` when `enable_backups` is on
+
+## Related (this repo)
+
+- `docs/brain.md` — operator guide
+- `workstation/.moderndegree/skills/task-package.md` / `quality-gate.md` / `second-brain.md`
+- `/data/agentlab` — measured loops (`qloop`)

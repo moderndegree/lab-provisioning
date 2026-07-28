@@ -6,13 +6,15 @@
 #   base           → kernel, apt, UFW, user account, SSH keys
 #   desktop        → GNOME (ubuntu-desktop-minimal)
 #   storage        → mount 1TB SATA SSD at {{ data_mount }}; create subdirs
-#   workstation    → git, ansible, podman, libvirt-clients, editor; dev workstation + Ansible control node
+#   devtools       → git, ansible, podman, libvirt-clients, editor; dev workstation + Ansible control node
 #   virtualization → libvirt + qemu-kvm + virt-manager; IaC test-lab pool on {{ data_mount }}/vms
 #   containers     → rootless Podman; user lingering; quadlet support
 #   tailscale      → join tailnet with authkey from vault
 #   cloudflared    → Cloudflare Zero Trust tunnel (enable_cloudflared: true to activate)
 #   hermes         → Hermes gateway quadlet (enable_hermes: true to activate)
-#   agentlab       → loopkit AI-loop experiment layer (enable_agentlab: true to activate)
+#   agentlab       → quality-loop experiment layer (enable_agentlab: true to activate)
+#   brain          → Obsidian-compatible second-brain vault under /data/brain
+#   openwebui      → Open WebUI quadlet, reaches mini over the tailnet (enable_openwebui: true to activate)
 #   observability  → Prometheus + Grafana quadlets (enable_observability: true to activate)
 #   backups        → restic snapshots + daily timer (enable_backups: true to activate)
 
@@ -24,7 +26,7 @@
     - role: base
     - role: desktop
     - role: storage
-    - role: workstation
+    - role: devtools
     - role: virtualization
     - role: containers
     - role: tailscale
@@ -34,6 +36,10 @@
       when: enable_hermes | bool
     - role: agentlab
       when: enable_agentlab | bool
+    - role: brain
+      when: enable_brain | bool
+    - role: openwebui
+      when: enable_openwebui | bool
     - role: observability
       when: enable_observability | bool
     - role: backups

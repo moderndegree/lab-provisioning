@@ -37,13 +37,13 @@ ansible/
     tailscale/           tailnet join
     containers/          rootless Podman; user lingering; quadlet support
     cloudflared/         Cloudflare Tunnel (Podman quadlet; remote-managed token)
-    openwebui/           Open WebUI chat UI (Podman quadlet; talks to local Ollama)
 ```
 
 Role execution order is fixed in `ansible/site.yml`:
-`base → amdgpu_rocm → ollama → tailscale → containers → cloudflared → openwebui`.
+`base → amdgpu_rocm → ollama → tailscale → containers → cloudflared`.
 Dependencies flow top-to-bottom (e.g. `ollama` assumes GPU userspace is already
-installed; `cloudflared`/`openwebui` assume `containers` has already set up quadlet support).
+installed; `cloudflared` assumes `containers` has already set up quadlet support).
+Open WebUI lives on ser5 now (`roles/openwebui` there) — mini stays inference-only.
 
 ## Commands
 

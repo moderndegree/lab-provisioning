@@ -10,7 +10,7 @@ piece sits where it does, and the runbook for a typical experiment.
 │                                                                          │
 │  mini (MS-S1 Max, Strix Halo, 128 GB unified)     ser5 (SER5, 64 GB)     │
 │  ── inference appliance, nothing else ──          ── always-on driver ── │
-│  Ollama :11434 (OpenAI-compatible /v1)            agentlab: loopkit      │
+│  Ollama :11434 (OpenAI-compatible /v1)            agentlab: qloop        │
 │  two warm MoE base models, 128k global ctx, no      loops · playbooks    │
 │  baked prompts (max_loaded=2, keep_alive=-1):       evals · SQLite runs  │
 │    qwen3-coder-next:latest     MoE (3B active) —   systemd user jobs    │
@@ -34,17 +34,30 @@ Division of labor:
   SSH disconnects.
 - **Two warm base models, roles in prompts.** Exactly two models stay resident
   on mini, with no baked system prompts — agent roles live in the prompts that
-  loopkit and opencode send, so one loaded model serves many agents. Reasoning
+  qloop and opencode send, so one loaded model serves many agents. Reasoning
   is a per-request toggle (`reasoning_effort: "none"` on /v1). The warm slots
   are `qwen3-coder-next:latest` and `qwen3.6:35b-a3b-mtp-q4_K_M`; both are MoE
   because mini is bandwidth-bound and decode speed tracks active parameters
-  read per token, not total parameters. loopkit's aliases (`general`, `coder`,
+  read per token, not total parameters. qloop's aliases (`general`, `coder`,
   `heavy`, `judge`, `scout`) encode the routing.
 
 For the day-to-day operating policy, escalation tiers, and model inventory, see
 [`operating-manual.md`](operating-manual.md).
 
-## The loop stack (packages/loopkit)
+## Leverage map (how the stack uses qloop)
+
+| Surface | Role of quality-loop |
+|---------|----------------------|
+| **agentlab offline** | Primary: eval matrix, `stats`/`summary`, playbook reflect, STaR |
+| **Hermes free-text** | Interactive: `/data/agentlab/jobs/quality-gate.sh` → `qloop gate` |
+| **OpenCode coding** | **None** for qloop — tests + reviewer + `@@RESULT`. Context packaging is the orchestrator TASK PACKAGE skill (not qloop) |
+| **OpenCode prose** | `qloop gate` after a solid TASK PACKAGE; never on code diffs |
+
+OpenCode handoffs: see `workstation/.moderndegree/skills/task-package.md` — small
+models get dense packages (goal, done-when, constraints, pasted excerpts), not
+raw chat or whole-repo dumps.
+
+## The loop stack (packages/quality-loop)
 
 Three composable layers, all producing scored, persisted traces:
 
@@ -64,7 +77,7 @@ Three composable layers, all producing scored, persisted traces:
 
 Everything is measured (`evals.py` + `storage.py`): every run lands in
 `/data/agentlab/runs.db` (SQLite) with full traces in
-`/data/agentlab/traces/*.jsonl`. `loopkit stats` compares strategies on score
+`/data/agentlab/traces/*.jsonl`. `qloop stats` compares strategies on score
 *and* token cost.
 
 ## Runbook: a typical experiment
@@ -75,14 +88,14 @@ ssh ser5
 vim /data/agentlab/suites/mytask.jsonl     # {"id","prompt","expected","match"} per line
 
 # 2. baseline first — always
-loopkit eval /data/agentlab/suites/mytask.jsonl --strategy single --worker general
+qloop eval /data/agentlab/suites/mytask.jsonl --strategy single --worker general
 
 # 3. the loop under test, with an evolving playbook
-loopkit eval /data/agentlab/suites/mytask.jsonl --strategy refine \
+qloop eval /data/agentlab/suites/mytask.jsonl --strategy refine \
         --playbook /data/agentlab/playbooks/mytask.md --reflect
 
 # 4. compare
-loopkit stats
+qloop stats
 
 # 5. long-horizon / unattended: wrap steps 2–4 in a job script
 cp /data/agentlab/jobs/example-eval.sh /data/agentlab/jobs/mytask.sh && vim !$
@@ -108,7 +121,7 @@ control point. Pass what the task needs, not the corpus.
 
 ## Phase 1 baseline matrix and the quarterly bake-off
 
-The Phase 1 suites live in `packages/loopkit/suites/`: `extraction.jsonl`,
+The Phase 1 suites live in `packages/quality-loop/suites/`: `extraction.jsonl`,
 `citation-qa.jsonl`, `structured-output.jsonl`, `coding.jsonl` (plus the
 original `smoke.jsonl` for wiring checks, not a benchmark). Three extra match
 modes support them beyond exact/contains/regex/numeric:
@@ -125,26 +138,26 @@ Run the full 4-suite x 3-strategy x 2-worker matrix (single always establishes
 the baseline per combo):
 
 ```bash
-make loopkit-matrix                    # from the repo root; needs mini reachable
-loopkit stats --matrix                 # one row per suite x strategy x worker (latest run)
-loopkit summary                        # one-page markdown: matrix + best-strategy deltas
-loopkit summary --out quality.md       # write it to a file instead of stdout
+make qloop-matrix                    # from the repo root; needs mini reachable
+qloop stats --matrix                 # one row per suite x strategy x worker (latest run)
+qloop summary                        # one-page markdown: matrix + best-strategy deltas
+qloop summary --out quality.md       # write it to a file instead of stdout
 ```
 
 **Quarterly bake-off ritual** — when a new candidate base model shows up:
 
 1. Pull the candidate onto mini as a third, temporary model (or swap it into an
    already-idle slot) — never disturb the warm pair mid-experiment.
-2. Run the same 4 suites against it: `loopkit eval <suite> --strategy single
+2. Run the same 4 suites against it: `qloop eval <suite> --strategy single
    --worker <candidate-tag>` (repeat for `refine`/`best_of_n` if the single
    baseline looks competitive).
-3. `loopkit summary` — compare the candidate's row-for-row scores and token
+3. `qloop summary` — compare the candidate's row-for-row scores and token
    cost against the current `general`/`coder` matrix.
 4. Adopt only on a measured win (better mean score at comparable or better
    tokens/s); otherwise the candidate is rejected and the incumbent stays.
    Record the decision (a line in this file or a run-store note) — the
    two-model policy holds, only the *occupants* change.
-5. Re-run `make loopkit-matrix` fully once an occupant changes, so the baseline
+5. Re-run `make qloop-matrix` fully once an occupant changes, so the baseline
    matrix always reflects who's actually resident.
 
 Current cycle: `glm-4.7-flash:latest` is the live challenger against incumbent
@@ -167,19 +180,19 @@ local confirmation in the same matrix.
   (`enable_backups`) → node metrics in Grafana (`enable_observability`).
   `runs.db` is the lab notebook; treat it as append-only.
 - **Security posture is inherited:** everything is tailnet-only (UFW default
-  deny), loopkit adds no listening ports, and no secrets — the Ollama endpoint
+  deny), qloop adds no listening ports, and no secrets — the Ollama endpoint
   is unauthenticated *inside* the tailnet only.
 
 ## Future work (deliberate deferrals)
 
 - **LoRA/QLoRA on the Strix Halo iGPU** — gfx1151 training support (PyTorch
-  ROCm) is still community-grade; loopkit already emits SFT-ready datasets, so
+  ROCm) is still community-grade; qloop already emits SFT-ready datasets, so
   training plugs in the day the stack is trustworthy. Until then, fine-tune in
   a rented GPU hour with the bootstrapped data if a result matters.
 - **llama-server/vLLM backend** — standalone llama.cpp on Vulkan roughly
   doubles decode throughput vs Ollama on this box (~98–103 t/s on Qwen3-30B).
   Worth a gated `llamacpp` role on mini if loop throughput becomes the
-  bottleneck; loopkit only needs `LOOPKIT_BASE_URL` pointed at the new port.
+  bottleneck; qloop only needs `QUALITY_LOOP_BASE_URL` pointed at the new port.
 - **Heavy-tier scheduling** — the heavy models are now documented (`heavy` and
   `judge` aliases), but the queue that evicts a warm model only off-hours still
   needs to be wired.

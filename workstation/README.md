@@ -13,6 +13,10 @@ symlink into, your development machine.
 | [AGENTS.md](AGENTS.md) | project root | Injected at session start; the `@@RESULT` contract |
 | [.moderndegree/prompts/](.moderndegree/prompts/) | project root | Per-agent system prompts referenced by `opencode.json` |
 | [docs/business-layer.md](docs/business-layer.md) | reference | Tier L/G/X/Z routing, sovereignty, OpenSpec gates |
+| [.moderndegree/skills/task-package.md](.moderndegree/skills/task-package.md) | project root | **Required** problem understanding + context packaging before subagent handoffs |
+| [.moderndegree/skills/quality-gate.md](.moderndegree/skills/quality-gate.md) | project root | **Required** free-text polish via `qloop gate` (never code diffs) |
+| [.moderndegree/skills/second-brain.md](.moderndegree/skills/second-brain.md) | project root | Postmortems + playbook promotion after misses (`/data/brain`) |
+| [.moderndegree/skills/loop-budget.md](.moderndegree/skills/loop-budget.md) | project root | Anti-spin circuit breakers for agents + qloop |
 
 ## The split that drives everything
 
@@ -67,6 +71,35 @@ invoke by name:
 
 If you never log in, both `build` and every default subagent keep running
 entirely on mini, so the sovereign path is the failure-safe default.
+
+## quality-loop (`qloop`) on the workstation
+
+The OpenCode orchestrator **must** run `qloop gate` on multi-constraint free-text
+(see skill + orchestrator prompt). Install once so agents can find the binary:
+
+```bash
+make qloop-venv
+# put on PATH for agent sessions, e.g.:
+export PATH="$PWD/.venv/bin:$PATH"
+.venv/bin/qloop models
+```
+
+See [../packages/quality-loop/README.md](../packages/quality-loop/README.md) and
+[../docs/ai-loops.md](../docs/ai-loops.md).
+
+## Cortex MCP (second brain)
+
+`opencode.json` enables a local **cortex** MCP server from the sibling
+[ai-workstation](../../ai-workstation) repo, pointed at `CORTEX_VAULT_DIR=/data/brain`
+(ser5 vault after `enable_brain`). Adjust `--dir` / vault path if your layout
+differs. Requires `pnpm install` in ai-workstation.
+
+Agents **must** use it when available:
+
+1. **Before dispatch** — `vault_search` → up to 3 notes in the TASK PACKAGE  
+   (see `.moderndegree/skills/task-package.md`).
+2. **After painful misses** — `vault_capture` / postmortem  
+   (see `.moderndegree/skills/second-brain.md`).
 
 ## Reasoning control (verified against Ollama 0.31.2)
 

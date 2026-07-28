@@ -1,0 +1,19 @@
+---
+- name: openwebui daemon-reload
+  ansible.builtin.systemd:
+    daemon_reload: true
+    scope: user
+  become: true
+  become_user: "{{ username }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ openwebui_user_uid.stdout }}"
+
+- name: restart openwebui
+  ansible.builtin.systemd:
+    name: openwebui.service
+    state: restarted
+    scope: user
+  become: true
+  become_user: "{{ username }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ openwebui_user_uid.stdout }}"

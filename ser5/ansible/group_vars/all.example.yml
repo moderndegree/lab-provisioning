@@ -73,11 +73,18 @@ grok_default_model: "grok-build-0.1"
 # version that exists at https://pkgs.tailscale.com/stable/ (e.g. "1.98.4").
 tailscale_version: "latest"
 
+# MagicDNS search domain, used by roles/observability and roles/openwebui so a
+# rootless Podman container can resolve tailnet hostnames like "mini". Find
+# yours with `tailscale status --json | jq -r .MagicDNSSuffix` (no trailing dot).
+tailnet_dns_search: "YOUR_TAILNET.ts.net"
+
 # ─── Feature flags ───────────────────────────────────────────────────────────
 # Optional roles — disabled by default. Flip to true to activate.
 enable_observability: false   # Prometheus + Grafana quadlets (monitors mini)
 enable_backups: false         # restic snapshots + daily timer (needs vault_restic_password)
-enable_agentlab: false        # loopkit AI-loop experiment layer (packages/loopkit)
+enable_agentlab: false        # quality-loop experiment layer (packages/quality-loop)
+enable_brain: false           # Obsidian-compatible second brain under /data/brain
+enable_openwebui: false       # Open WebUI browser chat UI, reaching mini over the tailnet
 
 # ─── Cloudflare Zero Trust tunnel ────────────────────────────────────────────
 # System-level Podman quadlet. Token lives in vault (vault_cloudflared_token).
@@ -110,12 +117,5 @@ enable_hermes_grok_skill: false
 enable_hermes_xai_api_key: false
 hermes_web_backend: ""
 
-# ─── Future stubs (not yet implemented) ───────────────────────────────────────
-# Set true only after the corresponding role is built.
-enable_postgres: false
-enable_forgejo: false
-enable_jellyfin: false
-enable_coolify: false
-
 # ─── Repo URL (for bootstrap documentation) ───────────────────────────────────
-repo_url: "https://github.com/YOUR_GH_USERNAME/ser5-provisioning"
+repo_url: "https://github.com/YOUR_GH_USERNAME/lab-provisioning"

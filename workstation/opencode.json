@@ -53,12 +53,27 @@
     "AGENTS.md",
     ".moderndegree/skills/*.md"
   ],
+  "mcp": {
+    "cortex": {
+      "type": "local",
+      "command": [
+        "pnpm",
+        "--dir",
+        "/home/brian/projects/ai-workstation",
+        "mcp"
+      ],
+      "environment": {
+        "CORTEX_VAULT_DIR": "/data/brain"
+      },
+      "enabled": true
+    }
+  },
   "agent": {
     "build": {
       "mode": "primary",
       "model": "ollama/qwen3.6:35b-a3b-mtp-q4_K_M",
       "reasoningEffort": "none",
-      "description": "Orchestrator. Gathers context, dispatches subagents, gates on @@RESULT.",
+      "description": "Orchestrator. Cortex vault search + TASK PACKAGE, dispatches subagents, @@RESULT gates; must qloop-gate multi-constraint free-text (never code).",
       "prompt": "{file:./.moderndegree/prompts/orchestrator.md}"
     },
     "planner": {
@@ -122,7 +137,7 @@
       "mode": "subagent",
       "model": "ollama/qwen3.6:35b-a3b-mtp-q4_K_M",
       "reasoningEffort": "none",
-      "description": "Infra and shell operations. Deterministic, no reasoning.",
+      "description": "Infra and shell operations, including qloop gate when asked. Deterministic, no reasoning.",
       "prompt": "{file:./.moderndegree/prompts/devops.md}"
     },
     "heavy": {
