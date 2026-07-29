@@ -32,9 +32,23 @@ CREATE TABLE IF NOT EXISTS results (
     rounds      INTEGER NOT NULL,
     completion_tokens INTEGER NOT NULL,
     answer      TEXT NOT NULL,
+    judge_model TEXT,
+    critique_rounds INTEGER,
+    verdict_parsed INTEGER,
+    scope_parsed INTEGER,
     PRIMARY KEY (run_id, task_id)
 );
 """
+
+# Columns added after the initial schema — applied via ALTER TABLE to any
+# runs.db that predates them, since CREATE TABLE IF NOT EXISTS is a no-op on
+# an existing table.
+_ADDED_COLUMNS = {
+    "judge_model": "judge_model TEXT",
+    "critique_rounds": "critique_rounds INTEGER",
+    "verdict_parsed": "verdict_parsed INTEGER",
+    "scope_parsed": "scope_parsed INTEGER",
+}
 
 
 def data_dir() -> Path:
@@ -55,7 +69,14 @@ class RunStore:
         (self.root / "traces").mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(self.root / "runs.db")
         self.db.execute(SCHEMA)
+        self._migrate()
         self.db.commit()
+
+    def _migrate(self) -> None:
+        existing = {row[1] for row in self.db.execute("PRAGMA table_info(results)")}
+        for name, ddl in _ADDED_COLUMNS.items():
+            if name not in existing:
+                self.db.execute(f"ALTER TABLE results ADD COLUMN {ddl}")
 
     def new_run_id(self) -> str:
         stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d-%H%M%S")
@@ -71,8 +92,25 @@ class RunStore:
         score: float,
         trace: Trace,
     ) -> None:
+        # Judge reliability (not just answer quality): every critique step
+        # already carries parsed/scope_parsed in its meta (see loops._refine_round);
+        # this is where it stops being trace-only and becomes queryable.
+        critique_steps = [s for s in trace.steps if s.kind == "critique"]
+        judge_model = critique_steps[-1].model if critique_steps else None
+        verdict_parsed = (
+            int(all(s.meta.get("parsed", False) for s in critique_steps))
+            if critique_steps else None
+        )
+        scope_parsed = (
+            int(all(s.meta.get("scope_parsed", False) for s in critique_steps))
+            if critique_steps else None
+        )
         self.db.execute(
-            "INSERT OR REPLACE INTO results VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            """INSERT OR REPLACE INTO results (
+                   run_id, started_at, suite, task_id, strategy, worker, score,
+                   accepted, rounds, completion_tokens, answer,
+                   judge_model, critique_rounds, verdict_parsed, scope_parsed
+               ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 run_id,
                 datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
@@ -85,6 +123,10 @@ class RunStore:
                 trace.rounds,
                 trace.total_completion_tokens,
                 trace.answer,
+                judge_model,
+                len(critique_steps),
+                verdict_parsed,
+                scope_parsed,
             ),
         )
         self.db.commit()
@@ -132,3 +174,21 @@ class RunStore:
             if key not in latest:
                 latest[key] = row
         return sorted(latest.values(), key=lambda r: (r["suite"], r["strategy"], r["worker"]))
+
+    def judge_stats(self) -> list[dict]:
+        """VERDICT/SCOPE parse rate per judge model, by day. This is the
+        reliability signal a judge-model bake-off needs alongside answer
+        quality: a candidate can score well on suites while quietly drifting
+        off the VERDICT:/SCOPE: format, which this would otherwise hide."""
+        rows = self.db.execute(
+            """SELECT judge_model, substr(started_at, 1, 10) AS day,
+                      COUNT(*) AS critiqued_tasks,
+                      ROUND(AVG(verdict_parsed), 3) AS verdict_parse_rate,
+                      ROUND(AVG(scope_parsed), 3) AS scope_parse_rate
+               FROM results
+               WHERE judge_model IS NOT NULL
+               GROUP BY judge_model, day
+               ORDER BY day DESC, judge_model"""
+        ).fetchall()
+        cols = ["judge_model", "day", "critiqued_tasks", "verdict_parse_rate", "scope_parse_rate"]
+        return [dict(zip(cols, r)) for r in rows]

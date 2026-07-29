@@ -20,6 +20,15 @@ inventory and routing tiers.
 
 ---
 
+**Status check-in (2026-07-28):** a review of intent vs. implementation found
+Phase 3/4-shaped work (second-brain wiring, business-layer tiers, Hermes
+surfaces) had gotten built ahead of Phase 1's own acceptance criteria, even
+though the sequencing below says measurement comes first. Answer: yes, the
+two-goal split had drifted toward consulting-foundation work at measured
+quality's expense. Decision: **Phase 4 is frozen** (see its section) and no
+new subsystem work starts until Phase 1's acceptance is met. Re-ask this
+question at each quarterly bake-off; update this note if the answer changes.
+
 ## Phase 1 — Measurement foundation (do first; everything else is judged by it)
 
 Quality claims and consulting proposals both need numbers. The harness exists
@@ -88,6 +97,12 @@ Obsidian and ai-workstation via `CORTEX_VAULT_DIR=/data/brain`.
 roadmap, not a lab-provisioning session.
 
 ## Phase 4 — Consulting productization
+
+**FROZEN (2026-07-28):** no new tier enforcement, client isolation, or
+demo-surface work until there is a concrete prospect or pilot engagement to
+build it for. Design docs are fine; new code isn't. Lift this once Phase 1's
+acceptance is met *and* a real engagement exists — not just because it's
+been a while.
 
 Make the sovereignty pitch enforceable and the lab demoable.
 

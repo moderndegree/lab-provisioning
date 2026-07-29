@@ -7,7 +7,7 @@
   qloop eval suite.jsonl --strategy refine [--playbook pb.md --reflect --limit 5]
   qloop star suite.jsonl --out data.jsonl [--no-rationalize]
   qloop playbook show|reflect pb.md ...
-  qloop stats [--run-id ID] [--matrix]
+  qloop stats [--run-id ID] [--matrix] [--judge-parse]
   qloop summary [--out FILE]
   qloop models
 
@@ -114,6 +114,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--run-id")
     p.add_argument("--matrix", action="store_true",
                    help="one row per suite x strategy x worker (latest run of each)")
+    p.add_argument("--judge-parse", action="store_true", dest="judge_parse",
+                   help="VERDICT/SCOPE parse rate per judge model, by day")
 
     p = sub.add_parser("summary", help="one-page markdown quality summary from runs.db")
     p.add_argument("--out", help="write to a file instead of stdout")
@@ -132,7 +134,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "stats":
         from quality_loop.storage import RunStore
         store = RunStore()
-        rows = store.matrix() if args.matrix else store.summary(args.run_id)
+        if args.judge_parse:
+            rows = store.judge_stats()
+        else:
+            rows = store.matrix() if args.matrix else store.summary(args.run_id)
         if not rows:
             print("no recorded runs", file=sys.stderr)
             return 0
