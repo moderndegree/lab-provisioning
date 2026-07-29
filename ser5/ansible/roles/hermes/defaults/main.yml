@@ -42,15 +42,16 @@ hermes_dashboard_port: 9119
 hermes_tailnet_interface: "tailscale0"
 hermes_dashboard_tailnet_interface: "tailscale0"
 
-# ─── Messaging gateways (Telegram / Discord) ─────────────────────────────────
-# The gateway unit runs `hermes gateway start --all`, so platform selection is
-# handled by Hermes config. This list documents the paired platforms and drives
-# token writing into HERMES_HOME/.env when the matching vaulted value is real
-# (non-empty and not PLACEHOLDER*), matching the XAI_API_KEY handling below.
+# ─── Messaging gateway (Discord) ──────────────────────────────────────────────
+# `--all` on the gateway unit just means "kill stale gateway processes across
+# all profiles before starting" — it is not a platform selector. Hermes itself
+# decides which platforms to activate from HERMES_HOME/.env + config.yaml, so
+# enable_hermes_discord just gates whether Ansible writes the Discord token
+# into .env (matching the XAI_API_KEY handling below). Telegram is not
+# Ansible-managed — set up manually on the box if/when wanted (bot token +
+# `hermes pairing approve telegram <code>`, a non-automatable step anyway).
 enable_hermes_messaging: true
-hermes_messaging_platforms:
-  - "telegram"
-  - "discord"
+enable_hermes_discord: true
 #
 # Governance / privacy boundary:
 # Telegram and Discord gateways route through Telegram's and Discord's servers.

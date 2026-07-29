@@ -10,6 +10,16 @@ Wants=network-online.target
 [Container]
 Image={{ cloudflared_image }}
 ContainerName=cloudflared
+# Host networking (NOT the default Podman bridge): origin services (Open WebUI,
+# Hermes dashboard/proxy, Grafana) bind to 127.0.0.1 on the host's real network
+# stack, not into any container network namespace — "http://localhost:<port>"
+# ingress rules in the Zero Trust dashboard need Network=host to resolve there
+# instead of cloudflared's own loopback. It also sidesteps ser5's default-deny
+# UFW routed/forward policy, which otherwise blocks the isolated bridge
+# network's outbound DNS/HTTPS entirely (confirmed live: without this, the
+# container's DNS lookups to the LAN resolver and Cloudflare's edge both
+# timed out, crash-looping the tunnel). Same fix already applied on mini.
+Network=host
 # Connector token (TUNNEL_TOKEN) sourced from a root-only env file, not inlined
 # here — this quadlet is world-readable (0644).
 EnvironmentFile=/etc/cloudflared/token.env

@@ -101,27 +101,22 @@
         - restart hermes-gateway
         - restart hermes-proxy
 
-    - name: Write Hermes messaging bot tokens into env when vaulted
+    # Telegram is not managed by Ansible — set up manually on the box
+    # (bot token + `hermes pairing approve telegram <code>`) if/when wanted.
+    - name: Write Hermes Discord bot token into env when vaulted
       ansible.builtin.lineinfile:
         path: "{{ hermes_home }}/.env"
-        regexp: "^{{ item.env_var }}="
-        line: "{{ item.env_var }}={{ item.value }}"
+        regexp: "^DISCORD_BOT_TOKEN="
+        line: "DISCORD_BOT_TOKEN={{ vault_hermes_discord_bot_token }}"
         state: present
         owner: "{{ username }}"
         group: "{{ username }}"
         mode: "0600"
-      loop:
-        - platform: "telegram"
-          env_var: "TELEGRAM_BOT_TOKEN"
-          value: "{{ vault_hermes_telegram_bot_token | default('') }}"
-        - platform: "discord"
-          env_var: "DISCORD_BOT_TOKEN"
-          value: "{{ vault_hermes_discord_bot_token | default('') }}"
       when: >-
         (enable_hermes_messaging | bool)
-        and (item.platform in (hermes_messaging_platforms | default([])))
-        and (item.value | default('') | length > 0)
-        and not (item.value | default('') is search('^PLACEHOLDER'))
+        and (enable_hermes_discord | bool)
+        and (vault_hermes_discord_bot_token | default('') | length > 0)
+        and not (vault_hermes_discord_bot_token | default('') is search('^PLACEHOLDER'))
       no_log: true
       notify:
         - restart hermes-gateway

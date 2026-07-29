@@ -124,11 +124,14 @@
     - name: Flush handlers (daemon-reload before enable/start)
       ansible.builtin.meta: flush_handlers
 
-    # ─── Enable and start services ────────────────────────────────────────────
-    - name: Ensure Prometheus user service is enabled and started
+    # ─── Start services ───────────────────────────────────────────────────────
+    # No enabled: true — these are Quadlet-generated units (from each
+    # .container file's own [Install] WantedBy=), and `systemctl enable` on a
+    # generated/transient unit fails with "Unit ... is transient or
+    # generated". Quadlet wires its own autostart at generation time.
+    - name: Ensure Prometheus user service is started
       ansible.builtin.systemd:
         name: prometheus.service
-        enabled: true
         state: started
         scope: user
       become: true
@@ -136,10 +139,9 @@
       environment:
         XDG_RUNTIME_DIR: "/run/user/{{ obs_user_uid.stdout }}"
 
-    - name: Ensure Grafana user service is enabled and started
+    - name: Ensure Grafana user service is started
       ansible.builtin.systemd:
         name: grafana.service
-        enabled: true
         state: started
         scope: user
       become: true

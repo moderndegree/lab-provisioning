@@ -1,6 +1,6 @@
 # Podman bridge network for the observability stack (Ansible-managed, do not edit by hand).
 # Both the prometheus and grafana quadlets join this network; Grafana resolves
 # Prometheus by container name (http://prometheus:9090) within this network.
-# DNSSearch enables Tailscale MagicDNS resolution (e.g., "mini" → mini.{{ tailnet_dns_search }})
+# DNS search domain (Tailscale MagicDNS, e.g. "mini" → mini.{{ tailnet_dns_search }}) is a
+# per-container key (DNSSearch=), not a network one — set on prometheus.container.j2 instead.
 [Network]
-DNSSearch={{ tailnet_dns_search }}

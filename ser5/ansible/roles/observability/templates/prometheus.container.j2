@@ -13,6 +13,9 @@ Wants=network-online.target
 Image=docker.io/prom/prometheus:{{ prometheus_version }}
 ContainerName=prometheus
 Network=obs.network
+# mini is a different physical machine, reached over the tailnet — DNSSearch=
+# is what makes "mini" resolve here (Tailscale MagicDNS suffix).
+DNSSearch={{ tailnet_dns_search }}
 UserNS=keep-id
 User=root
 PublishPort=0.0.0.0:{{ prometheus_port }}:{{ prometheus_port }}

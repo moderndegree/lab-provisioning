@@ -239,7 +239,7 @@ mini's warm pair is `qwen3-coder-next:latest` for depth plus
 
 | Surface | Unit / command | Reachability | Use |
 |---------|----------------|--------------|-----|
-| Messaging gateway | `hermes-gateway.service` → `hermes gateway start --all` | Outbound to Telegram/Discord; no inbound UFW rule | Chat-driven personal/lab tasks and free push notifications |
+| Messaging gateway | `hermes-gateway.service` → `hermes gateway start --all` | Outbound to Discord (Telegram: manual setup, not Ansible-managed); no inbound UFW rule | Chat-driven personal/lab tasks and free push notifications |
 | OpenAI-compatible proxy | `hermes-proxy.service` on `:8645` | UFW-scoped to `tailscale0` | Other tailnet machines use Hermes routing via `/v1` |
 | Dashboard | `hermes-dashboard.service` on `:9119` | UFW-scoped to `tailscale0` | Browser UI; sovereign phone surface for client-confidential work |
 
@@ -250,18 +250,23 @@ enable_hermes: true
 enable_hermes_proxy: true
 enable_hermes_dashboard: true
 enable_hermes_messaging: true
-hermes_messaging_platforms: ["telegram", "discord"]
+enable_hermes_discord: true
 ```
 
-Vault bot tokens are written to `HERMES_HOME/.env` only when non-empty and not
-`PLACEHOLDER*`:
+Discord's bot token is written to `HERMES_HOME/.env` only when
+`enable_hermes_messaging` and `enable_hermes_discord` are both true and
+`vault_hermes_discord_bot_token` (Discord Developer Portal → Bot tab) is
+non-empty and not `PLACEHOLDER*`.
 
-- `vault_hermes_telegram_bot_token` — Telegram @BotFather
-- `vault_hermes_discord_bot_token` — Discord Developer Portal → Bot tab
+Telegram is **not** Ansible/vault-managed — there's no `enable_hermes_telegram`
+flag or vaulted token. Set it up manually on the box if/when wanted:
+`TELEGRAM_BOT_TOKEN` into `HERMES_HOME/.env` yourself, same as the pairing
+step below.
 
 ### Messaging gateway setup and pairing runbook
 
-After provisioning and vaulting real bot tokens:
+After provisioning and vaulting a real Discord bot token (and, if used,
+setting up Telegram manually):
 
 ```bash
 export HERMES_HOME=/data/services/hermes

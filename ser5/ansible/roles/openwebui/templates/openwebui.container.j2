@@ -11,8 +11,9 @@ Wants=network-online.target
 Image={{ openwebui_image }}
 ContainerName=openwebui
 Network=openwebui.network
-# mini is a different physical machine, reached over the tailnet — the
-# DNSSearch= in openwebui.network.j2 is what makes "mini" resolve here.
+# mini is a different physical machine, reached over the tailnet — DNSSearch=
+# is what makes "mini" resolve here (Tailscale MagicDNS suffix).
+DNSSearch={{ tailnet_dns_search }}
 Environment=OLLAMA_BASE_URL={{ openwebui_ollama_base_url }}
 # Persisted WEBUI_SECRET_KEY (see tasks/main.yml) — keeps sessions valid across
 # container restarts/updates.
