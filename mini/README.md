@@ -60,7 +60,8 @@ lab-provisioning/
       ollama/                       Ollama LLM server + systemd override
       harness/                      (empty — opencode and Hermes both on ser5/workstation)
       tailscale/                    tailnet join
-      containers/                   rootless Podman; user lingering; quadlet support
+      containers/                   rootless Podman; user lingering; subuid/subgid; quadlet
+      toolboxes/                    Strix Halo AI toolboxes via distrobox (enable_toolboxes)
       cloudflared/                  Cloudflare Tunnel (Podman quadlet; token-gated start)
 ```
 
@@ -237,6 +238,129 @@ are both ignored on `/v1` - native `/api/chat` honours `think:false`).
 
 ---
 
+## Strix Halo toolboxes (`enable_toolboxes: true`)
+
+Containerised AI stacks from [strix-halo-toolboxes.com](https://strix-halo-toolboxes.com/),
+run through `distrobox`. Each image ships its own gfx1151-patched GPU userspace, so you
+can run and benchmark llama.cpp backends, ComfyUI, vLLM, or a fine-tuning stack **without
+touching the single ROCm/Vulkan install** the `amdgpu_rocm` role puts on the host.
+
+These are on-demand shells, not services. Nothing starts at boot and the Ollama service on
+`:11434` is unaffected — Ollama stays the committed serving path; toolboxes are for the
+workloads it cannot express.
+
+Created by default (`toolboxes_instances` in `ansible/roles/toolboxes/defaults/main.yml`):
+
+| Toolbox | Image tag | Why |
+|---------|-----------|-----|
+| `llama-vulkan-radv` | `vulkan-radv` | Upstream's most compatible backend; matches this box's committed `gpu_backend` |
+| `llama-rocm-7.2.4` | `rocm-7.2.4` | Matches the host's pinned ROCm — the performance comparison |
+| `vllm-therock` | `vllm-therock-gfx1151:latest` | Continuous batching — the only stack here that measures multi-user throughput |
+
+ComfyUI, LLM fine-tuning, DwarfStar, AMDVLK, ROCm 6.4.4, and the stable-ROCm vLLM build are
+listed and commented out in the same file. Uncomment and re-run `make provision` to add one.
+
+Use them via the generated launcher in `~/.local/bin`:
+
+```bash
+# confirm the GPU is visible from inside the toolbox
+llama-vulkan-radv llama-cli --list-devices     # expect: gfx1151
+
+# download a GGUF into the shared model dir (visible from every toolbox)
+llama-vulkan-radv hf download unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF \
+  --local-dir /data/toolboxes/models/qwen3-coder-30B-A3B
+
+# serve it — ALWAYS pass -fa 1 and --no-mmap on Strix Halo
+llama-vulkan-radv llama-server \
+  -m /data/toolboxes/models/qwen3-coder-30B-A3B/<file>.gguf \
+  -c 8192 -ngl 999 -fa 1 --no-mmap --host 0.0.0.0 --port 8081
+
+# no arguments drops you into an interactive shell
+llama-rocm-7.2.4
+```
+
+### Concurrency benchmarking with vLLM
+
+vLLM is the reason there is a serving stack here besides Ollama: it does continuous
+batching, so it can saturate Strix Halo's memory bandwidth with many simultaneous
+sequences. Single-stream t/s will look *worse* than llama.cpp — aggregate throughput is
+the number it exists to produce.
+
+It consumes HuggingFace repos, not GGUFs. The launcher is `vllm-therock`, not `vllm`, so it
+does not shadow the real `vllm` binary.
+
+**Models** come from the `hf` CLI, installed on the host by this role via pipx. `HF_HOME` is
+set to `/data/toolboxes/models/huggingface` for host shells (`/etc/profile.d/huggingface.sh`)
+*and* for every toolbox (`--env` in the flag profiles), so there is one cache and one token
+on both sides of the container boundary:
+
+```bash
+hf download cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit     # ~20 GB, straight into the shared cache
+hf cache scan                                      # what is on disk and how big
+HF_HUB_ENABLE_HF_TRANSFER=1 hf download <repo>     # faster, less informative progress
+```
+
+Gated repos (`meta-llama/*`, `google/gemma-*`) need the licence accepted on the model page
+plus a token — either set `vault_hf_token` (Placeholder Table below) or run `hf auth login`
+once on mini. Both write the same `$HF_HOME/token`.
+
+**Then serve and bench** (vLLM listens on `:8000`, in two shells):
+
+```bash
+sudo systemctl stop ollama                # not optional for a valid measurement
+
+vllm-therock rocm-smi --showproductname   # expect: Radeon 8060S Graphics
+vllm-therock start-vllm                   # TUI wizard: pick a model, it sets the flags
+
+# or drive it manually
+vllm-therock vllm serve cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit \
+  --max-model-len 8192 --max-num-seqs 32 --gpu-memory-utilization 0.75
+vllm-therock vllm bench serve --model cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit \
+  --base-url http://localhost:8000 --dataset-name random \
+  --max-concurrency 32 --num-prompts 256
+
+sudo systemctl start ollama               # put the appliance back
+```
+
+**Set `--gpu-memory-utilization` explicitly.** vLLM's default is 0.9 of what ROCm reports as
+device memory, and on this box that report is the GTT size from the kernel cmdline —
+`amdgpu.gttsize=131072`, i.e. 128 GiB on a machine with 122 GiB of real RAM. Taking the
+default asks vLLM to preallocate ~115 GiB of KV cache and leaves the OS to be OOM-killed.
+Start at 0.75 and walk it up while watching `amdgpu_top`.
+
+Sweep `--max-concurrency` (1, 4, 8, 16, 32) against a fixed `--max-num-seqs` to find where
+throughput stops scaling. Upstream's published numbers for this hardware are at
+[kyuz0.github.io/amd-strix-halo-vllm-toolboxes](https://kyuz0.github.io/amd-strix-halo-vllm-toolboxes/).
+
+Watch-outs specific to toolboxes:
+
+- **`-fa 1 --no-mmap` is mandatory.** Upstream reports crashes and severe slowdowns on
+  Strix Halo without flash attention and no-mmap.
+- **Toolboxes share the host network namespace.** A port bound inside one is a real mini
+  port. Never use 11434 — that is Ollama. The `tailscale0` UFW rule already covers any
+  port you pick, so a `llama-server` here is reachable from the tailnet with no new rules.
+- **They compete with Ollama for the same 128 GB.** Stop or unload warm models
+  (`ollama stop <model>`) before loading a large GGUF in a toolbox.
+- **`/etc/udev/rules.d/70-kfd.rules` is load-bearing** and sets mode 0666 on `/dev/kfd`
+  and the render nodes. Rootless Podman runs the toolbox under `--userns keep-id`, and a
+  host GID not mapped into that namespace cannot satisfy the kernel check, so `render`/
+  `video` membership does not reliably reach inside the container. This is upstream's
+  documented fix for headless hosts. It grants GPU compute to any local
+  user — acceptable on a single-user tailnet-only node, so set
+  `toolboxes_permissive_udev: false` if that ever stops being true.
+- **Never put a *named* group in `toolboxes_flags_*`.** Under rootless Podman
+  `--group-add render` resolves against the *container image's* `/etc/group`, so it grants
+  nothing — or stops the container starting at all if the image has no such group. No
+  `--group-add` is needed: distrobox already forwards the host's real gids via
+  `--annotation run.oci.keep_original_groups=1`.
+- **Images are refreshed on request, not on converge.** `make provision` pulls only images
+  it does not already have. `make toolbox-refresh` re-pulls; existing containers keep the
+  old image until you `distrobox rm <name>` on mini and re-provision.
+- **Upstream recommends `amd_iommu=off`** (5-12% faster). mini runs `iommu=pt amd_iommu=on`
+  on purpose so the amdxdna NPU driver can bind SVA. Accepted trade-off — see Watch-outs.
+
+---
+
 ## Watch-outs
 
 - **No ROCm nightlies (7.9–7.12).** They cap memory allocation at 64 GB — useless on
@@ -267,6 +391,7 @@ are both ignored on `/v1` - native `/api/chat` honours `think:false`).
 | `make vault-edit` | Decrypt, edit, and re-encrypt vault.yml |
 | `make vault-encrypt` | Encrypt plaintext vault.yml for the first time |
 | `make install-deps` | Install required Ansible collections (run once) |
+| `make toolbox-refresh` | Re-pull Strix Halo toolbox images to the latest builds |
 
 ---
 
@@ -368,6 +493,7 @@ After `make render`, only the vault secrets still need manual entry:
 |---|-------------|-------|---------------|
 | 1 | `PLACEHOLDER_TAILSCALE_AUTH_KEY` | `vault.yml` → `vault_tailscale_authkey` | https://login.tailscale.com/admin/settings/keys |
 | 2 | `PLACEHOLDER_CLOUDFLARED_TOKEN` | `vault.yml` → `vault_cloudflared_token` | Cloudflare Zero Trust → Networks → Tunnels → Create a tunnel → Cloudflared (tunnel stays stopped until set) |
+| 3 | `PLACEHOLDER_HF_TOKEN` | `vault.yml` → `vault_hf_token` | https://huggingface.co/settings/tokens — **optional**, only for gated repos (`meta-llama/*`, `google/gemma-*`). No token file is written while unset |
 
 ---
 

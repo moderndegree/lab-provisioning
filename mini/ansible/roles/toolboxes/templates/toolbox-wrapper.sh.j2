@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# {{ item.name }} — Strix Halo toolbox launcher
+# Managed by Ansible (mini/ansible/roles/toolboxes) — do not edit by hand.
+#
+#   image: {{ item.image }}
+#   models: {{ toolboxes_models_dir }}   (same path inside the toolbox)
+#
+# Usage:
+#   {{ item.name }}                          interactive shell inside the toolbox
+{% if item.name.startswith('vllm') %}
+#   {{ item.name }} rocm-smi --showproductname   confirm the GPU is visible
+#   {{ item.name }} start-vllm                   TUI wizard: pick a model, it
+#                                              sets the launch flags for you
+#
+# Manual serve + concurrency bench (HF repo ids, not GGUFs; cache is on the data
+# disk via HF_HOME):
+#   {{ item.name }} vllm serve <org/model> --max-model-len 8192 --max-num-seqs 32
+#   {{ item.name }} vllm bench serve --model <org/model> \
+#       --base-url http://localhost:8000 --dataset-name random \
+#       --max-concurrency 32 --num-prompts 256
+#
+# STOP OLLAMA FIRST (`sudo systemctl stop ollama`). Two warm Ollama models at
+# 131072 context plus a vLLM KV cache do not fit in 128 GB together, and a
+# throughput number measured while they contend is not a number.
+{% else %}
+#   {{ item.name }} llama-cli --list-devices  confirm the GPU is visible
+#   {{ item.name }} llama-server -m {{ toolboxes_models_dir }}/<model>.gguf \
+#       -c 8192 -ngl 999 -fa 1 --no-mmap --host 0.0.0.0 --port 8081
+#
+# ALWAYS pass -fa 1 (flash attention) and --no-mmap on Strix Halo — upstream
+# reports crashes and severe slowdowns without them.
+{% endif %}
+#
+# Ports bound inside a toolbox are host ports (distrobox shares the host netns).
+# 11434 is Ollama's; pick something else — vLLM's own default is 8000. UFW allows
+# everything on tailscale0, so a server here is reachable from the tailnet with
+# no extra rules.
+set -euo pipefail
+
+if [ "$#" -eq 0 ]; then
+  exec distrobox enter --name {{ item.name }}
+fi
+
+exec distrobox enter --name {{ item.name }} -- "$@"

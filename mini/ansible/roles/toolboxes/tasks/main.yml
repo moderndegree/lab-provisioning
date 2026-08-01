@@ -1,0 +1,235 @@
+---
+# Strix Halo AI toolboxes (https://strix-halo-toolboxes.com/) via distrobox.
+#
+# Runs AFTER roles/containers: Podman itself and systemd user lingering are set
+# up there. Lingering is load-bearing here, not cosmetic — rootless Podman needs
+# /run/user/<uid> to exist, and without lingering that directory only exists
+# while an interactive login session is open, so an Ansible run over SSH would
+# create toolboxes that vanish from `podman ps` the moment the run ends.
+
+# ─── Packages ────────────────────────────────────────────────────────────────
+- name: Install distrobox and rootless container prerequisites
+  ansible.builtin.apt:
+    name: "{{ toolboxes_packages }}"
+    state: present
+
+# ─── GPU device permissions ──────────────────────────────────────────────────
+# See the trade-off note in defaults/main.yml before disabling this.
+- name: Allow rootless containers to reach the compute and render devices
+  ansible.builtin.copy:
+    dest: "{{ toolboxes_udev_rule_path }}"
+    content: |
+      # Managed by Ansible (roles/toolboxes) — do not edit.
+      # Rootless Podman runs the toolbox under --userns keep-id; a host GID that
+      # is not mapped into that namespace cannot satisfy the kernel's check on
+      # these nodes, so render/video membership on the host does not reliably
+      # carry into a toolbox and the GPU is simply not enumerated inside it.
+      SUBSYSTEM=="kfd", KERNEL=="kfd", MODE="0666"
+      SUBSYSTEM=="drm", KERNEL=="renderD*", MODE="0666"
+    owner: root
+    group: root
+    mode: "0644"
+  when: toolboxes_permissive_udev | bool
+  notify: reload udev rules
+
+- name: Remove the permissive GPU device rule when disabled
+  ansible.builtin.file:
+    path: "{{ toolboxes_udev_rule_path }}"
+    state: absent
+  when: not (toolboxes_permissive_udev | bool)
+  notify: reload udev rules
+
+# Apply the rule now rather than at the end of the play: the distrobox tasks
+# below run in this same play and would otherwise create containers against
+# device nodes that still carry the old 0660 modes.
+- name: Apply udev changes before creating toolboxes
+  ansible.builtin.meta: flush_handlers
+
+# ─── Paths ───────────────────────────────────────────────────────────────────
+- name: Create the shared toolbox model directory
+  ansible.builtin.file:
+    path: "{{ toolboxes_models_dir }}"
+    state: directory
+    owner: "{{ node_user }}"
+    group: "{{ node_user }}"
+    mode: "0755"
+
+- name: Ensure the user bin directory exists
+  ansible.builtin.file:
+    path: "{{ toolboxes_bin_dir }}"
+    state: directory
+    owner: "{{ node_user }}"
+    group: "{{ node_user }}"
+    mode: "0755"
+
+# ─── HuggingFace cache and CLI ───────────────────────────────────────────────
+- name: Create the shared HuggingFace cache directory
+  ansible.builtin.file:
+    path: "{{ toolboxes_hf_home }}"
+    state: directory
+    owner: "{{ node_user }}"
+    group: "{{ node_user }}"
+    mode: "0755"
+
+# Host shells only. The containers get the same value via --env in the flag
+# profiles, because /etc/profile.d is the host's and each image has its own.
+- name: Point host shells at the shared HuggingFace cache
+  ansible.builtin.copy:
+    dest: /etc/profile.d/huggingface.sh
+    content: |
+      # Managed by Ansible (roles/toolboxes) — do not edit.
+      # One cache for the host CLI and every toolbox; see roles/toolboxes/defaults.
+      export HF_HOME={{ toolboxes_hf_home }}
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install pipx for the HuggingFace CLI
+  ansible.builtin.apt:
+    name: pipx
+    state: present
+  when: toolboxes_install_hf_cli | bool
+
+# pipx rather than pip: Ubuntu 26.04 marks the system interpreter
+# externally-managed (PEP 668) and refuses `pip install --user`. PIPX_BIN_DIR
+# defaults to ~/.local/bin, which is already toolboxes_bin_dir and already on
+# PATH via Ubuntu's stock ~/.profile. `creates` is the idempotency guard —
+# `pipx install` on an existing package exits non-zero.
+- name: Install the HuggingFace CLI
+  ansible.builtin.command:
+    cmd: "pipx install {{ toolboxes_hf_cli_spec }}"
+    creates: "{{ toolboxes_bin_dir }}/hf"
+  become_user: "{{ node_user }}"
+  environment:
+    HOME: "{{ node_home }}"
+  when: toolboxes_install_hf_cli | bool
+
+# Only for gated repos. Written by hand rather than via `hf auth login` so a
+# rebuilt box does not need an interactive step; `hf auth login` writes the same
+# file, so the two are interchangeable.
+- name: Install the HuggingFace token for gated repositories
+  ansible.builtin.copy:
+    dest: "{{ toolboxes_hf_home }}/token"
+    content: "{{ toolboxes_hf_token }}"
+    owner: "{{ node_user }}"
+    group: "{{ node_user }}"
+    mode: "0600"
+  no_log: true
+  when:
+    - toolboxes_hf_token | length > 0
+    - not toolboxes_hf_token.startswith('PLACEHOLDER')
+
+# ─── Rootless Podman context ─────────────────────────────────────────────────
+# Every podman/distrobox call below runs as node_user, not root, because a
+# rootful toolbox would not share the user's $HOME and would defeat the point.
+# Rootless Podman then needs XDG_RUNTIME_DIR pointing at that user's runtime
+# dir; sudo does not set it, so it is passed explicitly.
+- name: Look up the node user's uid
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ node_user }}"
+
+# ansible_facts[...] rather than the bare getent_passwd top-level fact:
+# INJECT_FACTS_AS_VARS is deprecated and stops defaulting to True in
+# ansible-core 2.24, at which point the top-level name disappears.
+- name: Build the rootless Podman environment
+  ansible.builtin.set_fact:
+    toolboxes_user_env:
+      HOME: "{{ node_home }}"
+      XDG_RUNTIME_DIR: "/run/user/{{ ansible_facts['getent_passwd'][node_user][1] }}"
+
+# ─── Images ──────────────────────────────────────────────────────────────────
+- name: Check which toolbox images are already present
+  ansible.builtin.command:
+    cmd: "podman image exists {{ item.image }}"
+  become_user: "{{ node_user }}"
+  environment: "{{ toolboxes_user_env }}"
+  loop: "{{ toolboxes_instances }}"
+  loop_control:
+    label: "{{ item.image }}"
+  register: toolboxes_image_check
+  changed_when: false
+  failed_when: false
+
+# A first pull is 10-30 GB per image and `podman pull` writes nothing to the SSH
+# channel until it finishes, so a synchronous task risks the connection dying of
+# idleness long before the download does. Backgrounding it on the host and
+# polling keeps the control connection busy; 2h is the ceiling per image.
+- name: Pull toolbox images
+  ansible.builtin.command:
+    cmd: "podman pull {{ item.item.image }}"
+  become_user: "{{ node_user }}"
+  environment: "{{ toolboxes_user_env }}"
+  loop: "{{ toolboxes_image_check.results }}"
+  loop_control:
+    label: "{{ item.item.image }}"
+  when: item.rc != 0 or (toolboxes_pull_always | bool)
+  changed_when: true
+  async: 7200
+  poll: 30
+
+# ─── Toolboxes ───────────────────────────────────────────────────────────────
+- name: Check which toolbox containers already exist
+  ansible.builtin.command:
+    cmd: "podman container exists {{ item.name }}"
+  become_user: "{{ node_user }}"
+  environment: "{{ toolboxes_user_env }}"
+  loop: "{{ toolboxes_instances }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: toolboxes_container_check
+  changed_when: false
+  failed_when: false
+
+# --no-entry skips the desktop launcher (this box is headless). The model dir is
+# bind-mounted at the SAME path inside the container so a path printed by one
+# toolbox pastes straight into another; distrobox only shares $HOME by default
+# and toolboxes_models_dir deliberately lives outside it.
+- name: Create toolboxes
+  ansible.builtin.command:
+    cmd: >-
+      distrobox create
+      --name {{ item.item.name }}
+      --image {{ item.item.image }}
+      --volume {{ toolboxes_models_dir }}:{{ toolboxes_models_dir }}:rw
+      --additional-flags "{{ item.item.flags }}"
+      --no-entry
+      --yes
+  become_user: "{{ node_user }}"
+  environment: "{{ toolboxes_user_env }}"
+  loop: "{{ toolboxes_container_check.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: item.rc != 0
+  changed_when: true
+  register: toolboxes_created
+
+# `distrobox create` only defines the container; the first `enter` is what runs
+# the one-time in-container setup (user, groups, mounts). Doing it here means the
+# first real interactive use is instant instead of a surprise multi-minute setup,
+# and it fails the play loudly now if GPU passthrough is broken.
+- name: Initialise newly created toolboxes
+  ansible.builtin.command:
+    cmd: "distrobox enter --no-tty --name {{ item.item.item.name }} -- true"
+  become_user: "{{ node_user }}"
+  environment: "{{ toolboxes_user_env }}"
+  loop: "{{ toolboxes_created.results }}"
+  loop_control:
+    label: "{{ item.item.item.name }}"
+  when: not (item.skipped | default(false))
+  changed_when: true
+
+# ─── Host launchers ──────────────────────────────────────────────────────────
+# One script per toolbox so llama.cpp is usable from a plain mini shell without
+# remembering distrobox syntax: `llama-vulkan-radv llama-server -m ...`.
+- name: Install host wrapper scripts
+  ansible.builtin.template:
+    src: toolbox-wrapper.sh.j2
+    dest: "{{ toolboxes_bin_dir }}/{{ item.name }}"
+    owner: "{{ node_user }}"
+    group: "{{ node_user }}"
+    mode: "0755"
+  loop: "{{ toolboxes_instances }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: toolboxes_create_wrappers | bool

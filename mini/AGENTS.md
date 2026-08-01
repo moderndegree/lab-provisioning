@@ -35,12 +35,13 @@ ansible/
     ollama/              Ollama server + systemd override
     harness/             (empty — opencode and Hermes both on ser5/workstation)
     tailscale/           tailnet join
-    containers/          rootless Podman; user lingering; quadlet support
+    containers/          rootless Podman; user lingering; subuid/subgid; quadlet support
+    toolboxes/           Strix Halo AI toolboxes (distrobox; enable_toolboxes)
     cloudflared/         Cloudflare Tunnel (Podman quadlet; remote-managed token)
 ```
 
 Role execution order is fixed in `ansible/site.yml`:
-`base → amdgpu_rocm → ollama → tailscale → containers → cloudflared`.
+`base → amdgpu_rocm → ollama → tailscale → containers → toolboxes → cloudflared`.
 Dependencies flow top-to-bottom (e.g. `ollama` assumes GPU userspace is already
 installed; `cloudflared` assumes `containers` has already set up quadlet support).
 Open WebUI lives on ser5 now (`roles/openwebui` there) — mini stays inference-only.
@@ -63,6 +64,7 @@ if absent, `make provision` falls back to prompting (`--ask-vault-pass`).
 | `make provision` | Converge mini (idempotent; `.vault_pass` or prompts) |
 | `make ping` | SSH connectivity check |
 | `make vault-edit` / `make vault-encrypt` | Manage `ansible/group_vars/vault.yml` |
+| `make toolbox-refresh` | Re-pull Strix Halo toolbox images (opt-in; not part of converge) |
 
 Always run `make lint` and `make syntax-check` after editing roles or vars.
 
@@ -107,6 +109,68 @@ Heavy models (`gpt-oss:120b`, `nemotron-cascade-2:latest`) are pulled but never 
 loading one evicts a warm model under `OLLAMA_MAX_LOADED_MODELS=2`, so keep them to
 scheduled/off-hours jobs. Roles live in opencode/loopkit prompts, not baked Modelfiles.
 
+## Toolboxes (`roles/toolboxes`, `enable_toolboxes`)
+
+Distrobox wrappers around the pre-built images from
+[strix-halo-toolboxes.com](https://strix-halo-toolboxes.com/) — llama.cpp
+(Vulkan RADV/AMDVLK, ROCm 6.4.4/7.2.4), ComfyUI, vLLM, QLoRA fine-tuning, and
+DwarfStar. They are **on-demand shells, not services**: nothing is enabled at
+boot, nothing is bound to a port by Ansible, and the Ollama service on `:11434`
+is untouched. Their reason to exist is that each image carries its own
+gfx1151-patched GPU userspace, so backends can be A/B-benchmarked without
+touching the one ROCm/Vulkan stack `amdgpu_rocm` installs on the host.
+
+Which images get created is `toolboxes_instances` in
+`roles/toolboxes/defaults/main.yml`; the default set is the two llama.cpp
+backends worth comparing plus `vllm-therock`, with the rest commented out and
+ready to uncomment. Each toolbox gets a host launcher at `~/.local/bin/<name>`
+and a shared model directory bind-mounted at the same path inside every
+container — hence `vllm-therock` rather than `vllm`, which would shadow the real
+binary.
+
+`vllm-therock` exists for concurrency work specifically — continuous batching, which
+neither Ollama nor llama.cpp does well on this box — and is a bench rig, not a
+second serving path. It serves on `:8000`. Any throughput measured while
+`ollama.service` is up is noise: two warm models at 131072 context plus a vLLM
+KV cache do not fit in 122 GiB.
+
+Models arrive through the `hf` CLI (pipx-installed on the host by this role,
+because Ubuntu 26.04 is PEP 668 externally-managed). `HF_HOME` is
+`toolboxes_hf_home` under the shared model dir and is set **twice on purpose** —
+`/etc/profile.d/huggingface.sh` for host shells, `--env` in every flag profile
+for the containers. They must agree, or `$HF_HOME/token` is invisible to one
+side and gated downloads fail there only. `vault_hf_token` is optional and only
+matters for gated repos; unset writes no token file.
+
+**`--gpu-memory-utilization` must be passed explicitly** when serving. vLLM's
+0.9 default is a fraction of what ROCm reports as device memory, which here is
+`amdgpu.gttsize=131072` (128 GiB) on a 122 GiB machine — the default preallocates
+a KV cache larger than RAM. 0.75 is the sane starting point.
+
+Three non-obvious constraints:
+
+- **`70-kfd.rules` is load-bearing.** Rootless Podman runs the toolbox under
+  `--userns keep-id`; a host GID that is not mapped into that namespace cannot
+  satisfy the kernel check on `/dev/kfd`, so the node user's `render`/`video`
+  membership does not reliably reach inside the container. The role's udev rule
+  (0666 on `kfd` and `renderD*`) is upstream's documented Ubuntu fix. Removing it
+  silently breaks GPU access in every toolbox — the GPU stops appearing in
+  `llama-cli --list-devices` — while the host itself keeps working fine.
+- **Never use a *named* `--group-add`** in `toolboxes_flags_*`. Under rootless
+  Podman the name resolves against the container image's `/etc/group` and the
+  gid lands inside the user namespace, so `--group-add render` grants no access
+  to `/dev/kfd` — and if the image lacks the group the container refuses to
+  start outright. No `--group-add` is needed at all: distrobox already sets
+  `--annotation run.oci.keep_original_groups=1` on every rootless create, which
+  is what `--group-add keep-groups` compiles down to (crun only; Ubuntu's
+  Podman defaults to crun).
+- **Toolboxes share the host network namespace** (also ipc and pid — distrobox
+  shares all three by default). A `llama-server` or `vllm serve` started inside
+  one binds a real mini port — never 11434.
+
+Upstream tells you to always pass `-fa 1` and `--no-mmap` to llama.cpp on Strix
+Halo; without them it crashes or crawls. The wrapper script header repeats this.
+
 ## gfx1151 / Strix Halo gotchas (high blast radius — be careful)
 
 - GPU is **gfx1151**, not on AMD's official ROCm matrix. Recognition depends on
@@ -124,6 +188,11 @@ scheduled/off-hours jobs. Roles live in opencode/loopkit prompts, not baked Mode
   managed in `base` via `/etc/default/grub`. A change notifies the `update-grub` handler
   and sets the `reboot_needed` fact; the final play in `ansible/site.yml` then reboots
   the host (when `auto_reboot: true`, the default).
+- The toolboxes upstream recommends `amd_iommu=off` (benchmarked 5-12% faster than
+  any IOMMU-enabled mode). mini deliberately runs `iommu=pt amd_iommu=on` instead,
+  because the amdxdna NPU driver needs SVA and fails to bind without it. That is a
+  known, accepted trade-off — do not "fix" it to match upstream's docs without
+  deciding to give up the NPU first.
 - BIOS settings (latest BIOS, UMA 512MB, IOMMU off, power mode) are a **manual one-time
   prerequisite** — out of Ansible's scope. See `README.md`.
 - `gpu_backend: vulkan` in `ansible/group_vars/all.yml` is the committed primary; ROCm

@@ -78,6 +78,15 @@ auto_reboot: true
 # token is safe. Open WebUI now lives on ser5 (roles/openwebui there), not mini.
 # enable_cloudflared: true
 
+# ─── Strix Halo AI toolboxes (roles/toolboxes) ───
+# Containerised llama.cpp / ComfyUI / vLLM / fine-tuning stacks from
+# https://strix-halo-toolboxes.com/, run through distrobox. Nothing here starts
+# at boot and nothing touches the Ollama service on :11434 — they are on-demand
+# shells that carry their own gfx1151-patched GPU stack. Off by default because
+# turning it on pulls tens of GB of images on the next provision; which images
+# is `toolboxes_instances` in roles/toolboxes/defaults/main.yml.
+# enable_toolboxes: true
+
 # ─── GPU backend (roles/amdgpu_rocm/defaults/main.yml) ───
 # Default is "vulkan" (committed path, +7-26% decode vs ROCm). Both stacks are
 # installed either way, so this one line is the entire revert.
