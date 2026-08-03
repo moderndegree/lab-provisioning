@@ -44,7 +44,7 @@ Strix Halo is memory-bandwidth-bound, not compute-bound. Decode speed tracks act
 | `nemotron3:33b` | 27 GB, Nemotron-3-Nano-30B-A3B family | ~55-80 t/s (est.) | Bench-off | Long-context candidate | 1M context and Mamba layers make long context cheap; keep one winner. |
 | `nemotron-3-nano:latest` | 24 GB, same family, different quant | ~55-80 t/s (est.) | Bench-off | Long-context candidate | Compare against `nemotron3:33b`; do not keep both by habit. |
 | `qwen3.6:27b-mtp-q4_K_M` | 17 GB, dense 27B | ~11-15 t/s (est.) | Demoted rollback | Only if coder-next fails | Dense reads the whole model per token; roughly 6x slower than the driver. |
-| `qwen3.6:35b-a3b-mtp-q8_0` | 38 GB, q8 MoE | About half q4 throughput | Retirement candidate | Quality bake-off only | q8 spends bandwidth for marginal quality gain. |
+| `qwen3.6:35b-a3b-mtp-q8_0` | 38 GB, q8 MoE | 65.7 t/s measured — **76%** of q4, not half | Quality bake-off candidate | Worth testing against q4 | Costs ~24% latency, not the ~50% previously assumed here. The old estimate predated MTP, which offsets more of the extra bandwidth at q8 than at q4. Whether the quality gain justifies 24% is still unmeasured — settle it with a qloop bake-off. |
 | `qwen3.6:27b-mtp-q8_0` | 29 GB, q8 dense | About half q4 throughput | Retirement candidate | Quality bake-off only | Dense plus q8 is the wrong direction on this box. |
 | `nemotron-3-nano:4b` | 2.8 GB | 150+ t/s | `scout` alias | Throwaway smoke tests only | Even tiny models evict a warm slot; never leave it resident. |
 

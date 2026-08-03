@@ -37,11 +37,12 @@ ansible/
     tailscale/           tailnet join
     containers/          rootless Podman; user lingering; subuid/subgid; quadlet support
     toolboxes/           Strix Halo AI toolboxes (distrobox; enable_toolboxes)
+    llamacpp/            llama-server as a user unit in a toolbox (enable_llamacpp)
     cloudflared/         Cloudflare Tunnel (Podman quadlet; remote-managed token)
 ```
 
 Role execution order is fixed in `ansible/site.yml`:
-`base → amdgpu_rocm → ollama → tailscale → containers → toolboxes → cloudflared`.
+`base → amdgpu_rocm → ollama → tailscale → containers → toolboxes → llamacpp → cloudflared`.
 Dependencies flow top-to-bottom (e.g. `ollama` assumes GPU userspace is already
 installed; `cloudflared` assumes `containers` has already set up quadlet support).
 Open WebUI lives on ser5 now (`roles/openwebui` there) — mini stays inference-only.
@@ -114,9 +115,12 @@ scheduled/off-hours jobs. Roles live in opencode/loopkit prompts, not baked Mode
 Distrobox wrappers around the pre-built images from
 [strix-halo-toolboxes.com](https://strix-halo-toolboxes.com/) — llama.cpp
 (Vulkan RADV/AMDVLK, ROCm 6.4.4/7.2.4), ComfyUI, vLLM, QLoRA fine-tuning, and
-DwarfStar. They are **on-demand shells, not services**: nothing is enabled at
-boot, nothing is bound to a port by Ansible, and the Ollama service on `:11434`
-is untouched. Their reason to exist is that each image carries its own
+DwarfStar. They are **on-demand shells, not services** — with one exception:
+`roles/llamacpp` runs llama-server as a boot-enabled user unit inside
+`llama-vulkan-radv` (see below), which makes that one toolbox load-bearing rather
+than disposable. Everything else is enabled by nothing and bound to no port by
+Ansible, and the Ollama service on `:11434` is untouched. Their reason to exist
+is that each image carries its own
 gfx1151-patched GPU userspace, so backends can be A/B-benchmarked without
 touching the one ROCm/Vulkan stack `amdgpu_rocm` installs on the host.
 
@@ -128,11 +132,72 @@ and a shared model directory bind-mounted at the same path inside every
 container — hence `vllm-therock` rather than `vllm`, which would shadow the real
 binary.
 
-`vllm-therock` exists for concurrency work specifically — continuous batching, which
-neither Ollama nor llama.cpp does well on this box — and is a bench rig, not a
-second serving path. It serves on `:8000`. Any throughput measured while
-`ollama.service` is up is noise: two warm models at 131072 context plus a vLLM
-KV cache do not fit in 122 GiB.
+`vllm-therock` is a **bench rig only**, and as of 2026-08-02 it lost the one
+argument for its existence. It was kept for continuous batching on the theory
+that llama.cpp batches poorly here. Measured on Qwen3.6-35B-A3B, single-stream /
+aggregate at concurrency 8:
+
+| runtime | c=1 | c=8 |
+|---------|-----|-----|
+| vLLM 0.22 toolbox, tuned MoE config | 24.8 | 85.7 |
+| vLLM 0.20 via Lemonade (AMD's gfx1151 build) | 25.2 | 93.9 |
+| llama.cpp `-np 8` | 75.1 | **168.6** |
+| llama.cpp `-np 8` + MTP `n=1` | **86.7** | 120.7 |
+
+llama.cpp wins **both** ends, so `roles/llamacpp` is the serving path and vLLM is
+for A/B curiosity. Two independent vLLM builds landing within 2% of each other is
+the tell: every vLLM-compatible quant of this model (AWQ, compressed-tensors,
+FP8) leaves the GatedDeltaNet projections, `lm_head`, `self_attn` and shared
+experts in BF16 — about 3.6 GiB of the ~4.15 GiB read per decoded token. GGUF
+q4_K_M quantizes all of it. That is a checkpoint property, not a runtime one, so
+no vLLM flag closes it. Do not re-litigate this without new numbers.
+
+vLLM also needs `--enable-auto-tool-choice --tool-call-parser qwen3_xml` before
+any client that sends a `tools` array works at all, and the parser must be
+`qwen3_xml`/`qwen3_coder` rather than the usually-recommended `hermes` — this
+model's template emits the XML form, and a mismatched parser fails silently by
+never detecting a tool call. llama-server needs none of that (`--jinja` is on by
+default). It serves on `:8000`. Any throughput measured while `ollama.service` is
+up is noise: two warm models at 131072 context plus a vLLM KV cache do not fit in
+122 GiB.
+
+## llama.cpp serving path (`roles/llamacpp`, `enable_llamacpp`)
+
+`llama-server` on `:8090`, a systemd **user** unit running inside the
+`llama-vulkan-radv` toolbox, enabled at boot. This is what Open WebUI on ser5
+points at. Full rationale and measurements are in
+`roles/llamacpp/defaults/main.yml`; the three things that bite:
+
+- **MTP is a per-workload trade, not a free win.** `--spec-type draft-mtp` with
+  `--spec-draft-n-max 1` buys ~15% interactive latency and costs ~29% aggregate
+  throughput. Set `llamacpp_mtp: false` for the qloop/agent workload. Acceptance
+  is healthy (50-58%); the ceiling is structural — verifying n+1 tokens routes to
+  up to `8*(n+1)` experts instead of 8, so longer drafts cost what they save.
+  Confirm it is live by grepping the journal for `MTP draft context`; without the
+  flag the loader silently logs `unused tensor blk.40.nextn.* -- ignoring`.
+- **`ExecStopPost` is load-bearing.** `distrobox enter` is a `podman exec` client,
+  so the unit's cgroup holds only that client. Without the host-side `pkill`,
+  `systemctl --user stop` reports success while llama-server keeps running and
+  holding `:8090`, and the next converge fails on a port collision with an
+  invisible survivor. It works because distrobox shares the host PID namespace.
+- **Ollama and llama-server cannot both be up.** llama-server holds ~22 GiB
+  resident. `ollama.service` stays installed for model management but is not
+  started alongside it.
+- **`-c` is TOTAL context, divided by `-np`** — llama.cpp statically partitions
+  the KV cache (no PagedAttention-style pooling). Per-slot is `-c / -np`, and a
+  single request over that share fails outright with `request (N tokens) exceeds
+  the available context size (M tokens)` even on an idle server. Size it for the
+  worst-case single request: `-c 32768 -np 8` gives each caller only 4096 tokens,
+  which an ordinary Open WebUI chat overruns. Current `-c 262144 -np 8` =
+  32768/slot, measured at ~28 GiB resident.
+- **DO NOT raise context blind — it can hang the box.** `-c 2097152` (262144/slot)
+  does not fail cleanly: it wedges the amdgpu DRM suballocator with the process
+  stuck in uninterruptible sleep (`state Ds`, `wchan drm_suballoc_new`),
+  immune to SIGKILL, holding ~63 GiB and the GPU device. Recovery required a
+  reboot, and the shutdown itself hung for ~7 minutes because systemd cannot kill
+  a `D`-state task. The real ceiling is what the DRM suballocator will hand out
+  without hanging, which is well below what fits in 122 GiB. Step up one
+  increment at a time and confirm each load before committing it.
 
 Models arrive through the `hf` CLI (pipx-installed on the host by this role,
 because Ubuntu 26.04 is PEP 668 externally-managed). `HF_HOME` is
