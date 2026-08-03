@@ -18,7 +18,14 @@
 # WHAT THEY ARE NOT: a replacement for the Ollama service. Ollama on :11434 is
 # still the appliance's committed serving path (see roles/ollama). Toolboxes are
 # for benchmarking backends, running raw GGUFs, image/video generation, and
-# fine-tuning — workloads Ollama cannot express. Nothing here is enabled at boot.
+# fine-tuning — workloads Ollama cannot express.
+#
+# ONE EXCEPTION to "nothing here is enabled at boot": roles/llamacpp runs
+# llama-server as a systemd user unit inside the llama-vulkan-radv toolbox, and
+# that IS enabled at boot. It measured ~3x faster than vLLM on this box, so it
+# became the serving path rather than a bench. Everything else here is still
+# on-demand. Consequence: llama-vulkan-radv is no longer disposable — deleting
+# or recreating it takes the serving path down with it.
 
 # Master switch, consulted by site.yml. Defaults off so a fresh clone does not
 # silently pull tens of GB of images on its first provision; mini's own
@@ -74,6 +81,41 @@ toolboxes_models_dir: "{{ data_mount }}/toolboxes/models"
 # ~/.local/bin on PATH when the directory exists, which this role guarantees.
 toolboxes_bin_dir: "{{ node_home }}/.local/bin"
 toolboxes_create_wrappers: true
+
+# Tuned Triton fused-MoE configs + the device-name shim that lets vLLM find
+# them. Lives under toolboxes_models_dir because that is the only path
+# bind-mounted into the containers, so it survives `distrobox rm` and
+# `make toolbox-refresh` — the configs cost ~10 minutes of GPU time each to
+# regenerate and must not live inside a disposable image.
+#
+# WHY A SHIM IS NEEDED. The vllm-therock image prepends a patch to
+# vllm/platforms/rocm.py ending in an unconditional
+# `sys.modules["amdsmi"] = MagicMock()`, so RocmPlatform.get_device_name()
+# returns a MagicMock rather than a string. vLLM builds every fused-MoE tuning
+# lookup from that name:
+#   E=256,N=512,device_name=<MagicMock ... id='128122929281888'>,dtype=int4_w4a16.json
+# The repr embeds the object's address, so the filename changes on every start
+# and no tuned config can ever match — vLLM silently logs "Using default MoE
+# config. Performance might be sub-optimal!" and runs untuned block sizes.
+#
+# Putting the real amdsmi on PYTHONPATH does NOT fix it. The only importable
+# copy is the host's ROCm 7.2.4 build reached through /run/host, and loading its
+# libamd_smi into a ROCm 7.14 process breaks HIP init outright ("RuntimeError:
+# 0 active drivers"). The image's mock is unconditional and would win anyway.
+# So sitecustomize.py pins the name instead; `site` imports it in every
+# interpreter, including the spawned EngineCore subprocesses that a wrapper
+# around `vllm serve` would miss.
+#
+# MEASURED on Qwen3.6-35B-A3B-AWQ-4bit (E=256, N=512, int4_w4a16):
+#   MoE kernel   239 us -> 154 us  (-35%)
+#   decode c=1   21.9  -> 24.8 t/s (+13%)
+#   decode c=8   54.3  -> 83.7 t/s (+54% aggregate)
+# Regenerate after a model or vLLM change with:
+#   vllm-therock env RAY_OVERRIDE_RESOURCES='{"GPU":1}' python3 benchmark_moe.py \
+#     --model <repo> --tp-size 1 --batch-size 1 8 16 --dtype int4_w4a16 --tune
+# then rename the emitted file to the device_name this shim pins.
+toolboxes_vllm_tuned_dir: "{{ toolboxes_models_dir }}/vllm-tuned"
+toolboxes_vllm_pin_device_name: "AMD Radeon 8060S Graphics"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HuggingFace cache and CLI
@@ -145,11 +187,21 @@ toolboxes_flags_rocm: >-
 # Same devices as the ROCm profile; kept separate so vLLM-only tuning (env vars,
 # ulimits, RDMA devices for clustering) has somewhere to go that does not
 # perturb the llama.cpp benchmark toolboxes.
+#
+# PYTHONPATH and VLLM_TUNED_CONFIG_FOLDER are the fused-MoE tuning wiring
+# described above: the first makes `site` load sitecustomize.py (which pins the
+# GPU name so a tuned config filename is deterministic), the second tells vLLM
+# where to look. They must point at the same directory. Dropping either one is
+# silent — vLLM falls back to default block sizes and only says so in an
+# easily-missed startup warning, so check for "Using configuration from ..."
+# in the serve log after changing this.
 toolboxes_flags_vllm: >-
   --device /dev/dri
   --device /dev/kfd
   --security-opt seccomp=unconfined
   --env HF_HOME={{ toolboxes_hf_home }}
+  --env PYTHONPATH={{ toolboxes_vllm_tuned_dir }}
+  --env VLLM_TUNED_CONFIG_FOLDER={{ toolboxes_vllm_tuned_dir }}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Which toolboxes to create

@@ -1,0 +1,84 @@
+# Managed by Ansible (mini/ansible/roles/toolboxes) — do not edit by hand.
+"""Give vLLM a deterministic GPU name inside the Strix Halo vLLM toolbox.
+
+WHY THIS EXISTS
+---------------
+The kyuz0/vllm-therock-gfx1151 image prepends a patch to
+`vllm/platforms/rocm.py` that ends with an unconditional
+
+    sys.modules["amdsmi"] = MagicMock()
+
+so vLLM's `RocmPlatform.get_device_name()` returns a MagicMock rather than a
+string. Every fused-MoE tuning-config lookup is built from that name:
+
+    E=256,N=512,device_name=<MagicMock ... id='128122929281888'>,dtype=int4_w4a16.json
+
+The MagicMock repr embeds the object's *address*, so the filename changes on
+every process start. vLLM therefore can never find a tuned config and silently
+falls back to `Using default MoE config. Performance might be sub-optimal!` --
+which on this box costs ~882us per expert layer, ~77% of decode time.
+
+Fixing it by putting the real amdsmi on PYTHONPATH does NOT work: the only
+importable copy is the host's ROCm 7.2.4 build reached through /run/host, and
+loading its libamd_smi into a ROCm 7.14 process breaks HIP init outright
+("RuntimeError: 0 active drivers"). The image's mock is also unconditional, so
+it would win regardless.
+
+So we pin the name instead. This runs via `site` in *every* interpreter,
+including the spawned EngineCore subprocesses, which a wrapper script around
+`vllm serve` would not reliably cover.
+
+Deploy with:  --env PYTHONPATH=<dir containing this file>
+"""
+
+import importlib.abc
+import importlib.machinery
+import sys
+
+# Must match the device_name embedded in the tuned config filenames sitting in
+# VLLM_TUNED_CONFIG_FOLDER. Spaces become underscores in vLLM's lookup, so this
+# is written pre-substitution exactly as amdsmi would have reported it.
+DEVICE_NAME = "{{ toolboxes_vllm_pin_device_name }}"
+
+_TARGET = "vllm.platforms.rocm"
+
+
+def _patch(module):
+    platform = getattr(module, "RocmPlatform", None)
+    if platform is None:
+        return
+    platform.get_device_name = classmethod(lambda cls, device_id=0: DEVICE_NAME)
+
+
+class _PostImportPatcher(importlib.abc.MetaPathFinder, importlib.abc.Loader):
+    """Delegate the real import, then patch the module once it exists."""
+
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname != _TARGET:
+            return None
+        # Step aside so the normal finders resolve it, then wrap their loader.
+        sys.meta_path.remove(self)
+        try:
+            spec = importlib.machinery.PathFinder.find_spec(fullname, path)
+        finally:
+            sys.meta_path.insert(0, self)
+        if spec is None or spec.loader is None:
+            return None
+        inner = spec.loader
+
+        class _Wrapped(importlib.abc.Loader):
+            def create_module(self, spec):
+                return inner.create_module(spec)
+
+            def exec_module(self, module):
+                inner.exec_module(module)
+                _patch(module)
+
+        spec.loader = _Wrapped()
+        return spec
+
+
+if _TARGET in sys.modules:
+    _patch(sys.modules[_TARGET])
+else:
+    sys.meta_path.insert(0, _PostImportPatcher())

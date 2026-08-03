@@ -15,6 +15,26 @@
 # Manual serve + concurrency bench (HF repo ids, not GGUFs; cache is on the data
 # disk via HF_HOME):
 #   {{ item.name }} vllm serve <org/model> --max-model-len 8192 --max-num-seqs 32
+#
+# SERVING QWEN3.6 TO A CHAT UI (Open WebUI et al) — these three are not optional:
+#   {{ item.name }} vllm serve cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit \
+#       --gpu-memory-utilization 0.4 --max-model-len 262144 --max-num-seqs 32 \
+#       --enable-auto-tool-choice --tool-call-parser qwen3_xml \
+#       --reasoning-parser qwen3
+#
+# Without the first two, any client that sends a `tools` array gets
+#   '"auto" tool choice requires --enable-auto-tool-choice and --tool-call-parser'
+# and the request fails outright. The parser must be qwen3_xml (or its alias
+# qwen3_coder) and NOT hermes: this model's chat template emits the XML form,
+# <tool_call><function=name><parameter=k>v</parameter></function></tool_call>,
+# whereas hermes expects a JSON body inside <tool_call>. A mismatched parser does
+# not error — it just silently never detects a tool call.
+#
+# --reasoning-parser qwen3 splits the thinking block out of `content` into the
+# `reasoning` field (named `reasoning`, not `reasoning_content`, in this build).
+# Budget tokens accordingly: this model spends ~1200 tokens thinking even on a
+# trivial prompt, so a client with a small max_tokens gets finish_reason=length,
+# a full `reasoning`, and a null `content` — which looks like a broken server.
 #   {{ item.name }} vllm bench serve --model <org/model> \
 #       --base-url http://localhost:8000 --dataset-name random \
 #       --max-concurrency 32 --num-prompts 256
