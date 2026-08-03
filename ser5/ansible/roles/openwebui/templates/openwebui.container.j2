@@ -15,6 +15,13 @@ Network=openwebui.network
 # is what makes "mini" resolve here (Tailscale MagicDNS suffix).
 DNSSearch={{ tailnet_dns_search }}
 Environment=OLLAMA_BASE_URL={{ openwebui_ollama_base_url }}
+# vLLM speaks the OpenAI API, not Ollama's, so it needs its own wiring — see
+# openwebui_openai_base_urls in defaults/main.yml. Plural *_URLS/*_KEYS is the
+# multi-endpoint form; the lists are positional and an empty key drops that
+# endpoint silently.
+Environment=ENABLE_OPENAI_API={{ openwebui_enable_openai_api | lower }}
+Environment=OPENAI_API_BASE_URLS={{ openwebui_openai_base_urls }}
+Environment=OPENAI_API_KEYS={{ openwebui_openai_api_keys }}
 # Persisted WEBUI_SECRET_KEY (see tasks/main.yml) — keeps sessions valid across
 # container restarts/updates.
 EnvironmentFile={{ openwebui_env_file }}
