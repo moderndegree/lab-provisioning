@@ -87,6 +87,27 @@ auto_reboot: true
 # is `toolboxes_instances` in roles/toolboxes/defaults/main.yml.
 # enable_toolboxes: true
 
+# ─── llama.cpp serving path (roles/llamacpp) ───
+# llama-server on :8090, a systemd user unit inside the llama-vulkan-radv
+# toolbox. This is the fast path: 86.7 tok/s single-stream with MTP, against
+# vLLM's 25 on the same model and hardware (roles/llamacpp/defaults/main.yml has
+# the full comparison and why the gap is the checkpoint, not the runtime).
+#
+# Requires enable_toolboxes and a GGUF staged at llamacpp_model. It is the one
+# thing here that DOES start at boot, and it holds ~22 GiB resident — hence the
+# two Ollama lines below. Set llamacpp_mtp: false for batched/agent workloads,
+# where MTP costs ~29% aggregate throughput.
+# enable_llamacpp: true
+
+# ─── Ollama service lifecycle (roles/ollama/defaults/main.yml) ───
+# Uncomment these two ONLY alongside enable_llamacpp above. Ollama stays
+# installed (it is still how models are pulled) but must not serve at the same
+# time as llama-server — they cannot both hold weights in 122 GiB. Leaving them
+# commented keeps the role's default of enabled/started, which is correct when
+# Ollama is the serving path.
+# ollama_service_enabled: false
+# ollama_service_state: stopped
+
 # ─── GPU backend (roles/amdgpu_rocm/defaults/main.yml) ───
 # Default is "vulkan" (committed path, +7-26% decode vs ROCm). Both stacks are
 # installed either way, so this one line is the entire revert.

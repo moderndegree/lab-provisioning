@@ -10,6 +10,25 @@
 # silently shadow every future update to this file.
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Service lifecycle
+# ─────────────────────────────────────────────────────────────────────────────
+# Ollama stays INSTALLED — it is still how models are pulled and managed, and
+# `ollama pull` populates /data/ollama regardless of whether the daemon serves.
+# What changed on 2026-08-02 is that it is no longer the serving path:
+# roles/llamacpp runs llama-server on :8090 and measured ~87 tok/s single-stream
+# against Ollama's 70-80, because it can use the GGUF's MTP head (Ollama's fork
+# does not expose --spec-type) and because -np is tunable per workload.
+#
+# They cannot both be up: llama-server holds ~22 GiB resident and the two-warm-
+# model policy below wants most of the rest. These were hardcoded to
+# enabled/started until llamacpp existed; they are variables now so the box can
+# converge to "Ollama installed, not serving" without deleting the role. Flip
+# both back (and set enable_llamacpp: false) to make Ollama the serving path
+# again — that is the entire revert.
+ollama_service_enabled: true
+ollama_service_state: started
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Service environment (rendered into the systemd override)
 # ─────────────────────────────────────────────────────────────────────────────
 # Bind address. 0.0.0.0 makes the API reachable over the tailnet; UFW restricts
