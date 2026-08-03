@@ -1,7 +1,7 @@
 """quality-loop — measured quality loops for the moderndegree home lab.
 
 Runs against mini's Ollama OpenAI-compatible endpoint (http://mini:11434/v1).
-Loop primitives (refine, best_of_n), ACE-style evolving playbooks, an eval
+Loop primitives (single, refine), ACE-style evolving playbooks, an eval
 runner with SQLite tracking, STaR-style trace bootstrapping, and an interactive
 gate for free-text polish (warm models only).
 """

@@ -45,7 +45,6 @@ from quality_loop.loops import MAX_REFINE_ROUNDS as LOOPS_MAX_REFINE
 
 ALLOWED_MODELS = frozenset({"general", "coder"})
 MAX_ROUNDS_INTERACTIVE = 2  # hard cap for gate (≤ LOOPS_MAX_REFINE)
-MAX_BEST_OF_N = 3
 DEFAULT_TIMEOUT_S = 180.0
 TASK_SOFT_CAP_CHARS = 12_000
 PREFLIGHT_TIMEOUT_S = 3.0
@@ -125,7 +124,6 @@ def run_gate(
     judge: str = "general",
     baseline: str | None = None,
     rounds: int = MAX_ROUNDS_INTERACTIVE,
-    n: int = MAX_BEST_OF_N,
     playbook_path: str | None = None,
     skip_preflight: bool = False,
 ) -> GateResult:
@@ -143,19 +141,6 @@ def run_gate(
             exit_code=1,
         )
 
-    if strategy == "best_of_n" and n > MAX_BEST_OF_N:
-        return GateResult(
-            decision="FAIL",
-            strategy=strategy,
-            accepted=False,
-            answer=baseline or "",
-            baseline=baseline or "",
-            worker=worker,
-            judge=judge,
-            reason="n_too_large",
-            exit_code=1,
-            extra={"n": n, "max": MAX_BEST_OF_N},
-        )
 
     rounds = max(1, min(int(rounds), MAX_ROUNDS_INTERACTIVE))
 
@@ -296,56 +281,6 @@ def run_gate(
                 extra=extra,
             )
 
-        # best_of_n
-        trace = STRATEGIES["best_of_n"](
-            client, task, n=n, worker=worker, judge=judge, system=system,
-        )
-        base = baseline if baseline is not None else (_first_generate(trace) or trace.answer)
-        if trace.accepted:
-            return GateResult(
-                decision="ACCEPT",
-                strategy="best_of_n",
-                accepted=True,
-                answer=trace.answer,
-                baseline=base,
-                rounds=trace.rounds,
-                tokens=trace.total_completion_tokens,
-                worker=worker,
-                judge=judge,
-                playbook=pb_name,
-                reason="accepted",
-                exit_code=0,
-            )
-        # judge parse failed — prefer baseline when provided
-        if baseline is not None:
-            return GateResult(
-                decision="KEEP_BASELINE",
-                strategy="best_of_n",
-                accepted=False,
-                answer=baseline,
-                baseline=baseline,
-                rounds=trace.rounds,
-                tokens=trace.total_completion_tokens,
-                worker=worker,
-                judge=judge,
-                playbook=pb_name,
-                reason="judge_unparsed",
-                exit_code=0,
-            )
-        return GateResult(
-            decision="ACCEPT",
-            strategy="best_of_n",
-            accepted=False,
-            answer=trace.answer,  # candidate 1 fallback inside loops.best_of_n
-            baseline=base,
-            rounds=trace.rounds,
-            tokens=trace.total_completion_tokens,
-            worker=worker,
-            judge=judge,
-            playbook=pb_name,
-            reason="judge_unparsed",
-            exit_code=0,
-        )
     except ChatError as err:
         return GateResult(
             decision="FAIL",

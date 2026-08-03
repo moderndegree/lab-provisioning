@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 
 from quality_loop.gate import (
-    MAX_BEST_OF_N,
     GateResult,
     preflight_reachable,
     run_gate,
@@ -29,13 +28,14 @@ def test_eviction_risk_judge_alias(fake_client_factory):
     assert result.exit_code == 1
 
 
-def test_n_too_large(fake_client_factory):
+def test_best_of_n_is_rejected(fake_client_factory):
+    """best_of_n was removed: measured identical mean score to refine at 2.5x the
+    tokens (and 7x on the coding suite), so it is not a selectable strategy. A
+    caller still passing it should fail loudly rather than silently fall back."""
     client = fake_client_factory([])
-    result = run_gate(
-        client, "task", strategy="best_of_n", n=MAX_BEST_OF_N + 1, skip_preflight=True
-    )
+    result = run_gate(client, "task", strategy="best_of_n", skip_preflight=True)
     assert result.decision == "FAIL"
-    assert result.reason == "n_too_large"
+    assert result.reason == "bad_strategy"
     assert result.exit_code == 1
 
 
@@ -253,41 +253,6 @@ def test_refine_from_provided_baseline_unsafe_fails_fast(fake_client_factory):
     assert result.reason == "unsafe_or_invalid"
     assert result.answer == "seeded draft"
     assert result.exit_code == 1
-
-
-def test_best_of_n_accept(fake_client_factory):
-    client = fake_client_factory([
-        "cand1",
-        "cand2",
-        "cand3",
-        "WINNER: 2 — clearest",
-    ])
-    result = run_gate(
-        client, "task", strategy="best_of_n", n=3, skip_preflight=True
-    )
-    assert result.decision == "ACCEPT"
-    assert result.answer == "cand2"
-    assert result.exit_code == 0
-
-
-def test_best_of_n_unparsed_with_baseline(fake_client_factory):
-    client = fake_client_factory([
-        "cand1",
-        "cand2",
-        "cand3",
-        "I like the second one",  # no WINNER line
-    ])
-    result = run_gate(
-        client,
-        "task",
-        strategy="best_of_n",
-        n=3,
-        baseline="orig",
-        skip_preflight=True,
-    )
-    assert result.decision == "KEEP_BASELINE"
-    assert result.answer == "orig"
-    assert result.reason == "judge_unparsed"
 
 
 def test_gate_result_json_contract():

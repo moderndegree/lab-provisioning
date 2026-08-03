@@ -9,6 +9,10 @@ from __future__ import annotations
 
 import datetime
 
+# best_of_n is retained here deliberately even though it was removed as a
+# runnable strategy in 2026-08: runs.db still holds 96 historical best_of_n
+# rows, and dropping it from the report would silently erase them from every
+# summary. Nothing new can be recorded under it.
 STRATEGIES = ("single", "refine", "best_of_n")
 PREFERRED_WORKER_ORDER = ("general", "coder")
 

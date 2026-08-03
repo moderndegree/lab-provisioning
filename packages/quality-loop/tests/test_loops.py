@@ -5,7 +5,6 @@ from quality_loop.loops import (
     VERDICT_UNSAFE,
     _parse_scope_exceeded,
     _parse_verdict,
-    best_of_n,
     refine,
     single,
 )
@@ -237,23 +236,6 @@ def test_parse_verdict_aliases_near_miss_unsafe_labels():
         parsed_label, parsed = _parse_verdict(f"VERDICT: {label}\nsome text")
         assert parsed_label == VERDICT_UNSAFE
         assert parsed is True
-
-
-def test_best_of_n_picks_judged_winner(fake_client_factory):
-    client = fake_client_factory(["cand-1", "cand-2", "cand-3", "WINNER: 2 — most correct"])
-    trace = best_of_n(client, "task", n=3)
-    assert trace.answer == "cand-2"
-    assert trace.accepted
-    # candidates sampled with distinct seeds for diversity
-    seeds = [c.get("seed") for c in client.calls[:3]]
-    assert seeds == [0, 1, 2]
-
-
-def test_best_of_n_defaults_to_first_when_judge_unparseable(fake_client_factory):
-    client = fake_client_factory(["c1", "c2", "no idea"])
-    trace = best_of_n(client, "task", n=2)
-    assert trace.answer == "c1"
-    assert not trace.accepted
 
 
 def test_trace_token_accounting(fake_client_factory):

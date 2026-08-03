@@ -7,7 +7,6 @@ it for bootstrapped training data.
 Strategies:
   single    — one shot (the baseline every loop must beat)
   refine    — generate → critique → revise, until the judge accepts
-  best_of_n — sample k candidates at temperature, judge picks the winner
 
 Anti-spin (all loop calls):
   - reasoning_effort="none" so models do not burn the budget on hidden thinking
@@ -30,10 +29,8 @@ from quality_loop.client import ChatClient
 
 # Hard ceilings — callers may pass lower, never higher effectively for refine.
 MAX_REFINE_ROUNDS = 3
-MAX_BEST_OF_N = 8
 # Keep critiques short so a spinny model cannot ramble forever.
 CRITIQUE_MAX_TOKENS = 512
-SELECT_MAX_TOKENS = 256
 # Loop calls never enable model "thinking" — verified on Ollama /v1.
 LOOP_REASONING = "none"
 
@@ -89,14 +86,9 @@ identifies gaps between your answer and the original ask. Produce the full
 improved answer, not a diff. Close every numbered gap. Do not add sections
 the ask did not request. Stop when the ask is addressed."""
 
-SELECT_SYSTEM = """You are judging candidate answers to the same task.
-Reply with exactly one line: WINNER: <number> — then one sentence why.
-Judge on correctness first, then completeness, then clarity. Be brief."""
-
-
 @dataclass
 class Step:
-    kind: str          # generate | critique | revise | select
+    kind: str          # generate | critique | revise
     model: str
     content: str
     meta: dict = field(default_factory=dict)
@@ -109,7 +101,7 @@ class Trace:
     answer: str
     steps: list[Step] = field(default_factory=list)
     rounds: int = 0
-    accepted: bool = False   # refine: verdict == answered; best_of_n: judge picked
+    accepted: bool = False   # refine: verdict == answered
     classification: str = ""  # refine: last alignment verdict (VERDICT_*)
     scope_exceeded: bool = False  # refine: judge flagged an unconfirmed assumption/addition
 
@@ -293,47 +285,6 @@ def refine(
     return trace
 
 
-def best_of_n(
-    client: ChatClient,
-    task: str,
-    n: int = 4,
-    worker: str = "general",
-    judge: str = "general",
-    temperature: float = 0.9,
-    system: str | None = None,
-) -> Trace:
-    """Sample n candidates, then have the judge pick the best one."""
-    n = max(1, min(int(n), MAX_BEST_OF_N))
-    trace = Trace(strategy="best_of_n", task=task, answer="", rounds=1)
-    candidates: list[str] = []
-    for i in range(n):
-        result = client.ask(
-            task,
-            model=worker,
-            system=system,
-            temperature=temperature,
-            seed=i,
-            **_loop_kw(),
-        )
-        trace.steps.append(_step_from("generate", result, {"candidate": i + 1}))
-        candidates.append(result.content)
-
-    numbered = "\n\n".join(f"CANDIDATE {i + 1}:\n{c}" for i, c in enumerate(candidates))
-    selection = client.ask(
-        f"TASK:\n{task}\n\n{numbered}",
-        model=judge,
-        system=SELECT_SYSTEM,
-        **_loop_kw(max_tokens=SELECT_MAX_TOKENS),
-    )
-    match = re.search(r"WINNER:\s*(\d+)", selection.content)
-    winner = int(match.group(1)) if match else 1
-    winner = min(max(winner, 1), n)
-    trace.steps.append(_step_from("select", selection, {"winner": winner, "parsed": bool(match)}))
-    trace.answer = candidates[winner - 1]
-    trace.accepted = bool(match)
-    return trace
-
-
 def _norm(text: str) -> str:
     return re.sub(r"\s+", " ", text.strip().lower())
 
@@ -341,5 +292,4 @@ def _norm(text: str) -> str:
 STRATEGIES = {
     "single": single,
     "refine": refine,
-    "best_of_n": best_of_n,
 }

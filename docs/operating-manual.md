@@ -40,7 +40,7 @@ Strix Halo is memory-bandwidth-bound, not compute-bound. Decode speed tracks act
 | `qwen3-coder-next:latest` | 51 GB, MoE 80B-A3B hybrid Gated-DeltaNet, 512 experts / 10 active, 3B active | ~35-50 t/s (est.) | Warm depth slot | Coder, tester, planner, architect, reviewer, security-auditor | Replaces dense 27B: much stronger coding while keeping 3B active. |
 | `glm-4.7-flash:latest` | 19 GB, MoE 30B-A3B, 3B active | ~75-90 t/s (est.) | Challenger, not resident today | Driver-slot bake-off | Similar active size to the driver; measure before swapping. |
 | `gpt-oss:120b` | 65 GB, MoE 117B-A5.1B, 5.1B active | ~30 t/s (community-measured) | Heavy tier | Strongest general reasoning that fits 128 GB | Loads by evicting a warm model; useful, not resident. |
-| `nemotron-cascade-2:latest` | 24 GB, Mamba2-Transformer MoE 30B-A3B, ~3.6B active | ~60-80 t/s (est.) | Heavy tier | Math/algorithm escalation; independent judge for `best_of_n` | Different model family beats a model grading its own samples. |
+| `nemotron-cascade-2:latest` | 24 GB, Mamba2-Transformer MoE 30B-A3B, ~3.6B active | ~60-80 t/s (est.) | Heavy tier | Math/algorithm escalation; independent judge | Different model family beats a model grading its own samples. |
 | `nemotron3:33b` | 27 GB, Nemotron-3-Nano-30B-A3B family | ~55-80 t/s (est.) | Bench-off | Long-context candidate | 1M context and Mamba layers make long context cheap; keep one winner. |
 | `nemotron-3-nano:latest` | 24 GB, same family, different quant | ~55-80 t/s (est.) | Bench-off | Long-context candidate | Compare against `nemotron3:33b`; do not keep both by habit. |
 | `qwen3.6:27b-mtp-q4_K_M` | 17 GB, dense 27B | ~11-15 t/s (est.) | Demoted rollback | Only if coder-next fails | Dense reads the whole model per token; roughly 6x slower than the driver. |
@@ -130,7 +130,7 @@ Start it: run AI Workstation with `CORTEX_VAULT_DIR=/data/brain`, or open `/data
 
 ### quality-loop (`qloop`)
 
-What it is: the lab quality authority in `packages/quality-loop` (`qloop`), deployed to `/data/agentlab` by the `agentlab` role. Strategies are `single`, `refine`, and `best_of_n`, plus ACE playbooks, STaR dataset bootstrapping, and an interactive `gate` for free-text polish.
+What it is: the lab quality authority in `packages/quality-loop` (`qloop`), deployed to `/data/agentlab` by the `agentlab` role. Strategies are `single` and `refine`, plus ACE playbooks and an interactive `gate` for free-text polish. `best_of_n` and STaR bootstrapping were removed 2026-08 — see the package README for the run data that condemned them.
 
 Reach for it when: choosing models, comparing prompts, measuring quality, running eval loops, or polishing Hermes free-text (no tool oracle). Do **not** use it to re-review OpenCode code diffs. Every run lands in `/data/agentlab/runs.db`; see [`ai-loops.md`](ai-loops.md) and [`../packages/quality-loop/README.md`](../packages/quality-loop/README.md).
 
@@ -143,7 +143,7 @@ qloop summary
 /data/agentlab/jobs/quality-gate.sh --task "…" --strategy refine
 ```
 
-Why this: `single` is always the baseline; `refine` and `best_of_n` spend cheap local tokens only after the baseline exists. Interactive gate uses warm models only. Aliases are `general`, `coder`, `heavy`, `judge`, and `scout`.
+Why this: `single` is always the baseline; `refine` spends cheap local tokens only after the baseline exists. Interactive gate uses warm models only. Aliases are `general`, `coder`, `heavy`, `judge`, and `scout`.
 
 ## From the iPhone
 

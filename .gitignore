@@ -27,3 +27,7 @@ packages/loopkit/.loopkit/
 .vscode/
 *.swp
 *~
+
+# Created by ad-hoc `uv run --with pytest`; this package is deliberately
+# pure-stdlib at runtime and does not pin a dependency tree.
+uv.lock

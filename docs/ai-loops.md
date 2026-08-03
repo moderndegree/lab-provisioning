@@ -62,7 +62,8 @@ raw chat or whole-repo dumps.
 Three composable layers, all producing scored, persisted traces:
 
 1. **Strategies** (`loops.py`) — `single` (baseline), `refine`
-   (generate→critique→revise), `best_of_n` (sample+judge). This is test-time
+   (generate→critique→revise). `best_of_n` was removed after measuring identical
+   mean score to `refine` at 2.5x the tokens. This is test-time
    compute scaling: mini's ~40–100 tok/s is cheap; spend it.
 2. **Evolving context** (`playbook.py`) — ACE-style playbooks: numbered tactic
    bullets injected as system context, updated by a reflector model through
@@ -149,7 +150,7 @@ qloop summary --out quality.md       # write it to a file instead of stdout
 1. Pull the candidate onto mini as a third, temporary model (or swap it into an
    already-idle slot) — never disturb the warm pair mid-experiment.
 2. Run the same 4 suites against it: `qloop eval <suite> --strategy single
-   --worker <candidate-tag>` (repeat for `refine`/`best_of_n` if the single
+   --worker <candidate-tag>` (repeat for `refine` if the single
    baseline looks competitive).
 3. `qloop summary` — compare the candidate's row-for-row scores and token
    cost against the current `general`/`coder` matrix.

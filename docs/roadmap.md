@@ -38,7 +38,7 @@ Quality claims and consulting proposals both need numbers. The harness exists
 |---|---|
 | Three SMB-shaped eval suites | `extraction.jsonl` (structured data from messy docs), `citation-qa.jsonl` (answer + cite the right source snippet), `structured-output.jsonl` (JSON to schema, validated by scorer) |
 | One coding suite | Small, real tasks from your own repos — scored by tests, not string match |
-| Baseline matrix | Every suite × {single, refine, best_of_n} × {general, coder} recorded in runs.db |
+| Baseline matrix | Every suite × {single, refine} × {general, coder} recorded in runs.db (`best_of_n` removed 2026-08 — dominated by `refine`) |
 | Bake-off ritual | Documented quarterly procedure: candidate model → same suites → compare `qloop stats` → adopt/reject. First job: confirm the depth swap locally and settle the driver-slot challenge. The two-model policy stays; only the *occupants* change |
 
 **Acceptance:** `qloop stats` shows a full baseline matrix; a one-page

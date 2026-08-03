@@ -57,9 +57,11 @@ nothing to catch it.
 - [x] Add a `qloop stats` view: judge parse rate over time, sliceable by
       judge model. Done 2026-07-28: `RunStore.judge_stats()` +
       `qloop stats --judge-parse`.
-- [ ] When Phase 5's independent-judge work (`nemotron-cascade-2` grading
-      `best_of_n`) lands, wire the same parse-rate tracking through it —
-      don't let a second judge path silently repeat this gap.
+- [x] Phase 5's independent-judge work is moot for `best_of_n`: that strategy was
+      removed 2026-08 (identical mean score to `refine` at 2.5x the tokens over
+      356 runs). If an independent judge is ever wired into `refine`, wire the
+      same parse-rate tracking through it — don't let a second judge path
+      silently repeat this gap.
 
 ## Scale-mismatch check-in (recurring, not a one-time fix)
 

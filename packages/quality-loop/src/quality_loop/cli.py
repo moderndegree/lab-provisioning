@@ -3,9 +3,7 @@
   qloop gate --task "..." [--baseline "..."] [--strategy refine] --json
   qloop ask "prompt" [--model general]
   qloop refine "task" [--worker general --judge general --rounds 3]
-  qloop bestof "task" [-n 4]
   qloop eval suite.jsonl --strategy refine [--playbook pb.md --reflect --limit 5]
-  qloop star suite.jsonl --out data.jsonl [--no-rationalize]
   qloop playbook show|reflect pb.md ...
   qloop stats [--run-id ID] [--matrix] [--judge-parse]
   qloop summary [--out FILE]
@@ -58,11 +56,10 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("gate", help="interactive quality gate (JSON decision + exit code)")
     p.add_argument("--task", required=True)
     p.add_argument("--baseline", help="existing draft to improve / fall back to")
-    p.add_argument("--strategy", default="refine", choices=["single", "refine", "best_of_n"])
+    p.add_argument("--strategy", default="refine", choices=["single", "refine"])
     p.add_argument("--worker", default="general")
     p.add_argument("--judge", default="general")
     p.add_argument("--rounds", type=int, default=2)
-    p.add_argument("-n", type=int, default=3, help="best_of_n candidates (max 3 in gate)")
     p.add_argument("--playbook", help="inject playbook context (no reflect)")
     p.add_argument("--json", action="store_true", dest="as_json",
                    help="emit decision JSON on stdout (default: also true for scripting)")
@@ -80,27 +77,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--judge", default="general")
     p.add_argument("--rounds", type=int, default=3)
 
-    p = sub.add_parser("bestof", help="best-of-N sampling with a judge")
-    p.add_argument("task")
-    p.add_argument("-n", type=int, default=4)
-    p.add_argument("--worker", default="general")
-    p.add_argument("--judge", default="general")
-    p.add_argument("--temperature", type=float, default=0.9)
-
     p = sub.add_parser("eval", help="run a task suite through a strategy")
     p.add_argument("suite")
-    p.add_argument("--strategy", default="single", choices=["single", "refine", "best_of_n"])
+    p.add_argument("--strategy", default="single", choices=["single", "refine"])
     p.add_argument("--worker", default="general")
     p.add_argument("--playbook", help="playbook file to inject (and evolve with --reflect)")
     p.add_argument("--reflect", action="store_true", help="update the playbook after each task")
-    p.add_argument("--limit", type=int)
-
-    p = sub.add_parser("star", help="bootstrap correct traces into SFT JSONL")
-    p.add_argument("suite")
-    p.add_argument("--out", required=True)
-    p.add_argument("--strategy", default="single", choices=["single", "refine", "best_of_n"])
-    p.add_argument("--worker", default="general")
-    p.add_argument("--no-rationalize", action="store_true")
     p.add_argument("--limit", type=int)
 
     p = sub.add_parser("playbook", help="show or evolve a playbook")
@@ -215,13 +197,6 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         return 0
 
-    if args.command == "bestof":
-        from quality_loop.loops import best_of_n
-        trace = best_of_n(client, args.task, n=args.n, worker=args.worker,
-                          judge=args.judge, temperature=args.temperature)
-        _print_trace_answer(trace)
-        return 0
-
     if args.command == "eval":
         from quality_loop.evals import run_suite
         from quality_loop.playbook import Playbook
@@ -230,15 +205,6 @@ def main(argv: list[str] | None = None) -> int:
             client, args.suite, strategy=args.strategy, worker=args.worker,
             playbook=playbook, reflect=args.reflect, limit=args.limit,
             on_result=lambda t, tr, s: print(f"  {t.id}: {'PASS' if s >= 1 else 'FAIL'}", file=sys.stderr),
-        )
-        print(json.dumps(summary))
-        return 0
-
-    if args.command == "star":
-        from quality_loop.star import bootstrap
-        summary = bootstrap(
-            client, args.suite, args.out, strategy=args.strategy, worker=args.worker,
-            rationalize=not args.no_rationalize, limit=args.limit,
         )
         print(json.dumps(summary))
         return 0

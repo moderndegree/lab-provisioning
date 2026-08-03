@@ -18,11 +18,9 @@ for the live model/tier policy.
 |-------|------|
 | `loops.single` | One-shot baseline every strategy must beat |
 | `loops.refine` | Generate → check alignment to the ask → revise only on a mismatch, until `answered` |
-| `loops.best_of_n` | Sample N candidates at temperature, judge picks the winner |
 | `gate` | Interactive quality gate (JSON + exit code); warm models only |
 | `playbook.Playbook` | ACE-style evolving context: numbered tactic bullets, ADD/UPDATE/REMOVE deltas |
 | `evals.run_suite` | JSONL task suites, scored, tracked in SQLite + JSONL traces |
-| `star.bootstrap` | STaR-style: keep correct reasoning traces as SFT-ready JSONL |
 
 ### Lab leverage (how to use it)
 
@@ -50,11 +48,9 @@ Interactive `qloop gate` allows **only** `general` and `coder`.
 ```bash
 qloop ask "question" --model scout                 # smoke test (evicts — careful)
 qloop refine "hard task" --worker coder            # self-refinement loop
-qloop bestof "hard task" -n 4                      # test-time compute scaling
 qloop gate --task "hard free-text" --strategy refine --json
 qloop eval suites/smoke.jsonl --strategy refine \
         --playbook pb.md --reflect                   # eval + evolving playbook
-qloop star suites/smoke.jsonl --out sft.jsonl      # bootstrap training data
 qloop stats                                        # compare runs
 qloop stats --matrix                               # one row per suite x strategy x worker
 qloop summary                                      # one-page markdown quality summary
@@ -105,6 +101,44 @@ Never trust a loop strategy without the baseline: run `--strategy single`
 first, then the loop, on the same suite — `qloop stats` shows mean score
 *and* token cost side by side. A loop that doesn't beat single on your suite
 is burning watts.
+
+### What that method already killed
+
+`best_of_n` and `star` were removed 2026-08 after applying exactly this test to
+356 recorded runs in `runs.db`:
+
+| strategy | n | mean score | completion tokens |
+|-----------|-----|------------|-------------------|
+| refine | 96 | 1.000 | 2,526 |
+| best_of_n | 96 | 1.000 | 6,250 |
+| single | 164 | 0.939 | 869 |
+
+Per suite, `single` already scored **1.000 on coding and extraction** — where
+`best_of_n` spent 7x and 5.5x the tokens for nothing. It never beat `refine` on
+any suite while costing 2.5x overall, so it was strictly dominated and is gone.
+`gate` now rejects it as `bad_strategy` rather than silently falling back.
+
+`star` (STaR-style SFT bootstrapping) had no callers outside its own CLI
+subcommand and produced training data for fine-tuning this lab does not do.
+
+**Read the remaining numbers with suspicion too.** The loops only cleared the bar
+on the two suites with headroom (citation-qa 0.887 → 1.000, structured-output
+0.964 → 1.000), and even there at 3-6x the tokens. On a saturated suite the
+harness cannot discriminate, so **harder suites are a prerequisite** to any
+further claim that a loop earns its compute.
+
+### The bigger open question
+
+`refine` and `best_of_n` can improve fluency and alignment to the ask, but they
+cannot improve correctness against reality — the judge is the same model with the
+same blind spots (`--worker general --judge general` by default). The suites that
+carry real signal are the ones with ground truth: `json_schema` validates against
+a schema, and `test` executes the answer's code against asserts.
+
+Those verification primitives are currently used only as offline *scorers*. The
+more valuable shape is probably to use them as inline signals during agent work —
+run it, check it, correct it — rather than sampling candidates and asking a peer
+model to pick. See `../inference-bench/` for the serving-side numbers.
 
 ## Development
 

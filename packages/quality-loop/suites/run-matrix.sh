@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Phase 1 baseline matrix: every suite x {single, refine, best_of_n} x
+# Phase 1 baseline matrix: every suite x {single, refine} x
 # {general, coder}, always single first (never trust a loop without the
 # baseline — see docs/ai-loops.md). Recorded in runs.db as each combo runs.
 #
@@ -10,7 +10,7 @@ set -euo pipefail
 SUITES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 QLOOP="${QLOOP_BIN:-${LOOPKIT_BIN:-qloop}}"
 read -ra SUITES <<< "${SUITES:-extraction citation-qa structured-output coding}"
-read -ra STRATEGIES <<< "${STRATEGIES:-single refine best_of_n}"
+read -ra STRATEGIES <<< "${STRATEGIES:-single refine}"
 read -ra WORKERS <<< "${WORKERS:-general coder}"
 
 for suite in "${SUITES[@]}"; do
