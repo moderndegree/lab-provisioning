@@ -1,0 +1,5 @@
+---
+# Intentionally empty. Restarts are driven from tasks/main.yml, per instance and
+# only when that instance's unit file actually changed — a handler would fire
+# once for the whole role and reload tens of GiB of weights for every instance
+# whenever any one of them changed.

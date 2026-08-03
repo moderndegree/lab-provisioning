@@ -1,0 +1,132 @@
+---
+# llama.cpp serving path. See defaults/main.yml for why this exists, the measured
+# quant/MTP trade-offs, and the KV ceiling that will hang the GPU if exceeded.
+#
+# Runs AFTER roles/toolboxes: the binary lives inside that toolbox image, and
+# roles/containers has already enabled systemd user lingering — load-bearing
+# here, because without it /run/user/<uid> only exists during an interactive
+# login and these user units would not survive the Ansible SSH session ending.
+#
+# One systemd user unit per entry in llamacpp_instances. llama-server serves
+# exactly one model per process, so a second model is a second unit on its own
+# port, not a flag on the first.
+
+- name: Look up the node user's uid for XDG_RUNTIME_DIR
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ node_user }}"
+
+# ansible_facts[...] rather than the bare getent_passwd top-level fact:
+# INJECT_FACTS_AS_VARS stops defaulting to True in ansible-core 2.24.
+- name: Build the rootless user environment
+  ansible.builtin.set_fact:
+    llamacpp_user_env:
+      HOME: "{{ node_home }}"
+      XDG_RUNTIME_DIR: "/run/user/{{ ansible_facts['getent_passwd'][node_user][1] }}"
+
+# ─── Guard rails ─────────────────────────────────────────────────────────────
+# Both of these would otherwise surface as a unit that restarts forever with the
+# real cause buried in `journalctl --user`.
+- name: Stat each configured model file
+  ansible.builtin.stat:
+    path: "{{ item.model }}"
+  loop: "{{ llamacpp_instances }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: llamacpp_model_stat
+
+- name: Require every GGUF to be present
+  ansible.builtin.assert:
+    that: item.stat.exists
+    fail_msg: >-
+      Model not found at {{ item.item.model }} for instance
+      '{{ item.item.name }}'. Stage the GGUF into {{ llamacpp_models_dir }}
+      first — e.g. `hf download <repo> <file> --local-dir
+      {{ llamacpp_models_dir }}`, or copy it out of Ollama's blob store if the
+      same quant is already pulled there.
+  loop: "{{ llamacpp_model_stat.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+
+# Two servers on one port is a silent, confusing failure: the second unit dies
+# on bind and systemd restarts it forever while the first keeps answering.
+- name: Require instance ports to be unique
+  ansible.builtin.assert:
+    that:
+      - llamacpp_instances | map(attribute='port') | list | unique | length
+        == llamacpp_instances | length
+    fail_msg: "llamacpp_instances contains duplicate ports."
+
+# The KV ceiling is a real hazard, not a style rule — exceeding it wedges the
+# amdgpu DRM allocator in unkillable D state and costs a reboot. See the CEILING
+# block in defaults/main.yml.
+# Per-instance, not summed: the hang is a single-process allocation failure, and
+# two instances well under the threshold coexist fine (measured ~70 GiB combined).
+- name: Warn when an instance ctx is above the measured-safe ceiling
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: instance '{{ item.name }}' requests ctx {{ item.ctx }}, above the
+      {{ llamacpp_ctx_warn }} measured-safe per-process ceiling. Bring it up by
+      hand first and confirm it loads — an over-large KV request hangs the amdgpu
+      DRM allocator in unkillable D state rather than failing, costing a reboot.
+  loop: "{{ llamacpp_instances }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: item.ctx > llamacpp_ctx_warn
+
+# ─── Units ───────────────────────────────────────────────────────────────────
+- name: Ensure the systemd user unit directory exists
+  ansible.builtin.file:
+    path: "{{ node_home }}/.config/systemd/user"
+    state: directory
+    owner: "{{ node_user }}"
+    group: "{{ node_user }}"
+    mode: "0755"
+
+- name: Install a llama-server user unit per instance
+  ansible.builtin.template:
+    src: llama-server.service.j2
+    dest: "{{ node_home }}/.config/systemd/user/llama-server-{{ item.name }}.service"
+    owner: "{{ node_user }}"
+    group: "{{ node_user }}"
+    mode: "0644"
+  loop: "{{ llamacpp_instances }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: llamacpp_units
+
+# daemon-reload must happen before enable --now, otherwise a freshly written unit
+# is invisible to systemd and the enable fails.
+- name: Reload the systemd user manager
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+    scope: user
+  become_user: "{{ node_user }}"
+  environment: "{{ llamacpp_user_env }}"
+  changed_when: false
+
+# Restart only the instances whose unit actually changed: each restart reloads
+# tens of GiB of weights, so a blanket restart on every converge is expensive.
+- name: Restart changed instances
+  ansible.builtin.systemd_service:
+    name: "llama-server-{{ item.item.name }}.service"
+    scope: user
+    state: restarted
+  become_user: "{{ node_user }}"
+  environment: "{{ llamacpp_user_env }}"
+  loop: "{{ llamacpp_units.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: item.changed
+
+- name: Enable and start every instance
+  ansible.builtin.systemd_service:
+    name: "llama-server-{{ item.name }}.service"
+    scope: user
+    enabled: true
+    state: started
+  become_user: "{{ node_user }}"
+  environment: "{{ llamacpp_user_env }}"
+  loop: "{{ llamacpp_instances }}"
+  loop_control:
+    label: "{{ item.name }}"
