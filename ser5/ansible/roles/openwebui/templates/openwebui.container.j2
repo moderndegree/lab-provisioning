@@ -15,7 +15,7 @@ Network=openwebui.network
 # is what makes "mini" resolve here (Tailscale MagicDNS suffix).
 DNSSearch={{ tailnet_dns_search }}
 Environment=OLLAMA_BASE_URL={{ openwebui_ollama_base_url }}
-# vLLM speaks the OpenAI API, not Ollama's, so it needs its own wiring — see
+# llama-server speaks the OpenAI API, not Ollama's, so it needs its own wiring — see
 # openwebui_openai_base_urls in defaults/main.yml. Plural *_URLS/*_KEYS is the
 # multi-endpoint form; the lists are positional and an empty key drops that
 # endpoint silently.

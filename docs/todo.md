@@ -103,3 +103,20 @@ answer down; if it's "yes, drifted," that's what triggers the freeze above.
       maintenance-loop list (inbox triage, contradiction sweep, resurfacing)
       actually lives — link to it from here once it does, rather than leaving
       a dangling reference.
+
+## Retirement tasks — delete after all hosts converge past them
+
+- [ ] `ser5/ansible/roles/observability/tasks/main.yml` — "Retire pre-quadlet static units
+      that shadow the generator". Added 2026-08-03. Applied to ser5 by hand already;
+      keep until any rebuilt host has run it once.
+- [ ] `mini/ansible/roles/llamacpp` — legacy llama-server unit retirement.
+- [ ] `ser5/ansible/roles/hermes` — quality-gate skill removal (confirmed removed on ser5).
+
+## Watch for
+
+- [ ] Quadlet shadowing: a stale `~/.config/systemd/user/<name>.service` silently wins over
+      a quadlet-generated unit of the same name, and a converge cannot detect it — Ansible
+      and `systemctl restart` both report success while the old image keeps running. Check
+      with `systemctl --user show <unit> -p FragmentPath --value`; anything not under
+      `.../systemd/generator/` is shadowed. Audited 2026-08-03: only observability was
+      affected; openwebui and both llama-server units are clean.

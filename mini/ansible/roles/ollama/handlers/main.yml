@@ -3,8 +3,18 @@
   ansible.builtin.systemd:
     daemon_reload: true
 
+# Only restart a service that is SUPPOSED to be running. Since roles/llamacpp
+# took over serving, ollama_service_state is "stopped" — and an unconditional
+# restart here would start it anyway, because handlers run at the end of the
+# play, after the task that stopped it. That is exactly what happened on the
+# first converge of this change: Ollama came back up because editing its env
+# vars re-rendered the override and notified this handler.
+#
+# Ollama and llama-server cannot both hold weights in 122 GiB, so a stray start
+# is not cosmetic.
 - name: restart ollama
   ansible.builtin.systemd:
     name: ollama
     state: restarted
     daemon_reload: false
+  when: ollama_service_state == "started"

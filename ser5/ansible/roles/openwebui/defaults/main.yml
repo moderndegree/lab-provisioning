@@ -1,6 +1,6 @@
 ---
-# Open WebUI — the ChatGPT-style browser UI, talking to mini's Ollama over the
-# tailnet. Disabled by default — flip enable_openwebui: true in group_vars/all.yml.
+# Open WebUI — the ChatGPT-style browser UI, talking to mini's llama-server
+# instances over the tailnet. Disabled by default — flip enable_openwebui: true in group_vars/all.yml.
 enable_openwebui: false
 
 # Pin to a release tag for reproducible deploys; "main" tracks upstream latest.
@@ -63,8 +63,15 @@ openwebui_ollama_base_url: "http://mini:11434"
 # at. Those were dropped because vLLM measured ~3x slower single-stream
 # (25 vs 87 tok/s); add them back only for a bench.
 #
-#   :8090  qwen3.6-35b-a3b-mtp  quality  — 86 tok/s, MTP on, 262144 ctx/chat
-#   :8091  gpt-oss-20b          quantity — 400 tok/s aggregate at 32-way
+# Measured 2026-08-03, after the ROCm 7.14 / quadlet rebuild:
+#   :8090  qwen3.6-35b-a3b-mtp  quality  — 86 tok/s single-stream, 142 tok/s at
+#          4-way; MTP accepts ~95% of drafts (1.95 tokens per decode step vs 0.99
+#          on :8091). 131072 ctx per chat = 524288 total / 4 slots.
+#   :8091  gpt-oss-20b          quantity — 76 tok/s single-stream, 202 tok/s at
+#          8-way. 131072 ctx per chat = 1048576 total / 8 slots.
+#
+# Context is per SLOT and statically partitioned at startup, so a single chat can
+# never exceed the per-slot figure no matter how idle the box is.
 openwebui_enable_openai_api: true
 openwebui_openai_base_urls: "http://mini:8090/v1;http://mini:8091/v1"
 openwebui_openai_api_keys: "llamacpp;llamacpp"

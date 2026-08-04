@@ -6,7 +6,12 @@
 # Access Grafana at http://localhost:3000 after provisioning.
 # Suggested dashboards to import manually:
 #   - https://grafana.com/grafana/dashboards/1860  (node-exporter-full)
-#   - https://grafana.com/grafana/dashboards/20728 (Ollama)
+#   - llama.cpp exposes llamacpp:* metrics (tokens_predicted_total,
+#     n_decode_total, requests_processing, requests_deferred, n_busy_slots_per_decode).
+#     No community dashboard covers these; build panels from those names.
+#     tokens_predicted_total / n_decode_total is the MTP acceptance rate, but it
+#     is only meaningful at concurrency 1 — continuous batching decodes every
+#     active slot in one step, which inflates the ratio independently of MTP.
 
 - name: Observability role is disabled
   ansible.builtin.debug:
@@ -75,6 +80,39 @@
         mode: "0644"
       notify:
         - grafana daemon-reload
+        - restart grafana
+
+    # ─── Retire pre-quadlet static units ──────────────────────────────────────
+    # RETIREMENT TASK — delete once every host has converged past it (see docs/todo.md).
+    #
+    # These roles used to write plain .service units into ~/.config/systemd/user/.
+    # A static unit file there SHADOWS the quadlet generator's output for the same
+    # name: generator units are the lowest-precedence source systemd considers, so
+    # ~/.config/systemd/user/prometheus.service silently wins over the prometheus.service
+    # compiled from prometheus.container.
+    #
+    # This failed silently and durably. Ansible reported `ok`/`changed` on the
+    # quadlet templates, the generated unit was correct, and `systemctl restart`
+    # succeeded — while the container kept booting the image pinned in the June
+    # leftover. ser5 ran Prometheus 2.55.1 / Grafana 11.4.0 for weeks against
+    # quadlets that said 3.13.2 / 13.1.1. Nothing in a converge could surface it;
+    # only comparing the RUNNING image against the quadlet catches it.
+    #
+    # `systemctl --user show <unit> -p FragmentPath` is the check: a path under
+    # .../systemd/generator/ means the quadlet is live, anything under
+    # ~/.config/systemd/user/ means it is being shadowed.
+    - name: Retire pre-quadlet static units that shadow the generator
+      ansible.builtin.file:
+        path: "{{ user_home }}/.config/systemd/user/{{ item }}"
+        state: absent
+      loop:
+        - prometheus.service
+        - grafana.service
+        - obs-network.service
+      notify:
+        - prometheus daemon-reload
+        - grafana daemon-reload
+        - restart prometheus
         - restart grafana
 
     # ─── Quadlet units ────────────────────────────────────────────────────────
