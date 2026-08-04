@@ -1,0 +1,209 @@
+#!/usr/bin/env bash
+# Managed by Ansible (mini/ansible/roles/llama_benchy) — do not edit by hand.
+#
+# Agentic benchmark suites for mini's llama-server instances, via llama-benchy.
+#
+#   llama-benchy-suite <suite> [target]
+#
+#   suites:  depth | concurrency | prefix | thinking | mtp | all
+#   target:  quality | throughput | both        (default: both)
+#
+# WHY A WRAPPER. The flags that make results COMPARABLE are easy to get wrong by
+# hand, and getting them wrong yields a plausible number rather than an error:
+#
+#   --tokenizer   llama-benchy counts tokens with a real HF tokenizer, so it
+#                 needs an HF repo id. Our models are local GGUFs whose --alias
+#                 ("qwen3.6-35b-a3b-mtp") is NOT an HF id. Both must be passed.
+#   thinking off  Qwen3.6 spends generation budget on reasoning before answering.
+#                 Comparing it against a non-reasoning model with thinking ON
+#                 compares two different things. Off by default; the `thinking`
+#                 suite exists to measure the difference deliberately.
+#   depth cap     Context is 131072 PER SLOT here, partitioned at startup. Asking
+#                 for more benchmarks the error path.
+#   conc cap      Concurrency above a server's -np measures queueing, not the
+#                 server. Each target is swept only to its own slot count.
+set -uo pipefail
+
+export PATH="{{ node_home }}/.local/bin:${PATH}"
+export HF_HOME="{{ llama_benchy_hf_home }}"
+
+RESULTS="{{ llama_benchy_results_dir }}"
+RUNS={{ llama_benchy_runs }}
+STAMP="$(date +%Y%m%d-%H%M%S)"
+QUADLET="{{ node_home }}/.config/containers/systemd/llama-quality.container"
+
+SUITE="${1:-all}"
+TARGET="${2:-both}"
+
+mkdir -p "$RESULTS"
+
+# name port model tokenizer slots extra_body
+{% for t in llama_benchy_targets %}
+T_{{ t.name | upper }}=( "{{ t.name }}" "{{ t.port }}" "{{ t.model }}" "{{ t.tokenizer }}" "{{ t.slots }}" '{{ t.extra_body }}' )
+{% endfor %}
+
+targets() {
+  case "$TARGET" in
+    quality)    echo "QUALITY" ;;
+    throughput) echo "THROUGHPUT" ;;
+    both)       echo "QUALITY THROUGHPUT" ;;
+    *) echo "unknown target: $TARGET" >&2; exit 2 ;;
+  esac
+}
+
+# run <tag> <target-var> <extra llama-benchy args...>
+run() {
+  local tag="$1" tv="$2"; shift 2
+  local -n T="T_${tv}"
+  local name="${T[0]}" port="${T[1]}" model="${T[2]}" tok="${T[3]}" body="${T[5]}"
+  local out="${RESULTS}/${STAMP}_${tag}_${name}"
+
+  echo ""
+  echo "=============================================================="
+  echo "  ${tag}  [${name}]  ${model}  :${port}"
+  echo "=============================================================="
+
+  local -a cmd=( llama-benchy
+    --base-url "http://127.0.0.1:${port}/v1"
+    --model "$model" --tokenizer "$tok"
+    --runs "$RUNS" --format json --save-result "${out}.json" )
+  [[ -n "$body" ]] && cmd+=( --extra-body "$body" )
+  cmd+=( "$@" )
+
+  # Tee human-readable MD next to the JSON. The JSON is what gets diffed across
+  # runs; the log is what gets read when a number looks wrong.
+  "${cmd[@]}" 2>&1 | tee "${out}.log"
+  echo "  -> ${out}.json"
+}
+
+# Concurrency levels for a target, capped at its slot count.
+conc_for() {
+  local -n T="T_$1"; local slots="${T[4]}" out=""
+  for c in {{ llama_benchy_concurrency | join(' ') }}; do
+    (( c <= slots )) && out+="$c "
+  done
+  echo "$out"
+}
+
+suite_depth() {
+  # THE agent axis: context grows every turn, and decode does not stay flat.
+  # pp small / tg modest at each depth isolates "cost of already having N tokens
+  # in context" from "cost of sending a big prompt this turn".
+  for tv in $(targets); do
+    run depth "$tv" --pp 1024 --tg 256 --concurrency 1 \
+      --depth {{ llama_benchy_depths | join(' ') }} --latency-mode generation
+  done
+}
+
+suite_concurrency() {
+  # Agent-shaped: big prompt, modest generation. This is the shape that reversed
+  # the slot-count conclusion in packages/inference-bench — a long-generation
+  # sweep says "more slots is always better" and is wrong for this traffic.
+  for tv in $(targets); do
+    run concurrency "$tv" --pp 4096 --tg 256 --exact-tg --depth 0 \
+      --concurrency $(conc_for "$tv")
+  done
+}
+
+suite_prefix() {
+  # Multi-turn reuse: an agent resends system prompt + tool schemas + history
+  # every turn, so almost all of a turn's prefill is a cache hit. If this is
+  # working, effective prefill cost per turn collapses; if it is not, every turn
+  # pays full prefill and long sessions get quadratically expensive.
+  for tv in $(targets); do
+    run prefix "$tv" --pp 8192 --tg 256 --depth 0 \
+      --enable-prefix-caching --concurrency $(conc_for "$tv")
+  done
+}
+
+suite_thinking() {
+  # Quality only — gpt-oss is not a reasoning model, so there is nothing to A/B.
+  # Measures what reasoning costs in wall time for the SAME answer budget.
+  # Deliberately NOT named T: run() declares its own `local -n T`, and nesting
+  # two namerefs of the same name is how you get a confusing circular-reference
+  # failure halfway through an unattended run.
+  local -n TQ=T_QUALITY
+  local out="${RESULTS}/${STAMP}_thinking-on_quality"
+  echo ""
+  echo "=============================================================="
+  echo "  thinking ON  [quality]  (no enable_thinking:false)"
+  echo "=============================================================="
+  llama-benchy --base-url "http://127.0.0.1:${TQ[1]}/v1" \
+    --model "${TQ[2]}" --tokenizer "${TQ[3]}" --runs "$RUNS" \
+    --pp 4096 --tg 256 --concurrency 1 --depth 0 \
+    --format json --save-result "${out}.json" 2>&1 | tee "${out}.log"
+  # thinking OFF, identical otherwise
+  run thinking-off QUALITY --pp 4096 --tg 256 --concurrency 1 --depth 0
+}
+
+# ─── MTP A/B ─────────────────────────────────────────────────────────────────
+# MUTATES THE RUNNING SERVER. Restarts llama-quality with MTP off, measures, then
+# restores. A trap restores on any exit path including Ctrl-C, and the original
+# quadlet is copied aside first — but if this is interrupted hard, the recovery
+# is `make provision` from the control node, which rewrites the quadlet from the
+# template. Nothing else on the box is touched.
+#
+# This exists because the ~29% aggregate-throughput cost attributed to MTP in
+# mini/AGENTS.md was never measured on the current build, while acceptance was
+# measured at 85-97%. Those two claims are in tension and only an A/B settles it.
+restore_mtp() {
+  if [[ -f "${QUADLET}.benchbak" ]]; then
+    echo ""
+    echo "--- restoring MTP quadlet ---"
+    mv -f "${QUADLET}.benchbak" "$QUADLET"
+    systemctl --user daemon-reload
+    systemctl --user restart llama-quality
+    wait_healthy 8090 || echo "WARNING: llama-quality did not come back healthy — check it"
+    if grep -q 'spec-type draft-mtp' "$QUADLET"; then
+      echo "--- restored: MTP is back ON ---"
+    else
+      echo "!!! RESTORE FAILED — quadlet has no MTP flag. Run: make provision"
+    fi
+  fi
+}
+
+wait_healthy() {
+  local port="$1"
+  for _ in $(seq 1 120); do
+    curl -sf -m3 "http://127.0.0.1:${port}/health" >/dev/null 2>&1 && return 0
+    sleep 5
+  done
+  return 1
+}
+
+suite_mtp() {
+  local args=( --pp 4096 --tg 512 --exact-tg --depth 0 --concurrency $(conc_for QUALITY) )
+
+  echo "### MTP ON (as configured)"
+  run mtp-on QUALITY "${args[@]}"
+
+  trap restore_mtp EXIT INT TERM
+  cp -a "$QUADLET" "${QUADLET}.benchbak"
+  # Drop only the MTP flags. Everything else — model, ctx, slots — must stay
+  # byte-identical or this stops being an A/B.
+  sed -i '/--spec-type draft-mtp/d' "$QUADLET"
+  systemctl --user daemon-reload
+  systemctl --user restart llama-quality
+  if ! wait_healthy 8090; then
+    echo "server did not come up with MTP off — aborting, restoring" >&2
+    return 1
+  fi
+  echo "### MTP OFF"
+  run mtp-off QUALITY "${args[@]}"
+
+  restore_mtp
+  trap - EXIT INT TERM
+}
+
+case "$SUITE" in
+  depth)       suite_depth ;;
+  concurrency) suite_concurrency ;;
+  prefix)      suite_prefix ;;
+  thinking)    suite_thinking ;;
+  mtp)         suite_mtp ;;
+  all)         suite_depth; suite_concurrency; suite_prefix; suite_thinking ;;
+  *) echo "usage: $0 {depth|concurrency|prefix|thinking|mtp|all} [quality|throughput|both]" >&2; exit 2 ;;
+esac
+
+echo ""
+echo "results in ${RESULTS} (prefix ${STAMP})"

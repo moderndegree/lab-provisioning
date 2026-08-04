@@ -1,0 +1,73 @@
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# llama-benchy — llama-bench-style benchmarking for OpenAI-compatible endpoints
+# ─────────────────────────────────────────────────────────────────────────────
+# https://github.com/eugr/llama-benchy
+#
+# WHY THIS AND NOT packages/inference-bench: the in-repo scripts measure a
+# workload we invented (agent fan-out, tool calls, multi-turn). llama-benchy
+# measures the SERVER along axes we were guessing at — prompt-processing vs
+# token-generation split, throughput at context DEPTH, and prefix-cache reuse.
+# Depth is the one that matters most for agents and the one nothing here covered:
+# an agent's context grows every turn, and decode does not stay flat as it does.
+#
+# The two are complementary. inference-bench answers "how does my workload feel",
+# llama-benchy answers "what is this server actually capable of, and where does
+# it fall off". Keep both.
+llama_benchy_install: true
+
+# Pinned. An unpinned pipx install silently changes the measuring instrument
+# between runs, which is the one thing a benchmark must not do.
+llama_benchy_spec: "llama-benchy==0.4.0"
+
+# Results land on the data disk, not in $HOME — they are durable evidence and
+# backed up with everything else under {{ data_mount }}.
+llama_benchy_results_dir: "{{ data_mount }}/bench/llama-benchy"
+
+# HF_HOME for tokenizer downloads. llama-benchy counts tokens with the real
+# HuggingFace tokenizer rather than estimating, which is why --tokenizer must be
+# a valid HF repo even though the model itself is a local GGUF.
+llama_benchy_hf_home: "{{ llamacpp_models_dir }}/huggingface"
+
+# ─── Endpoints under test ────────────────────────────────────────────────────
+# `model` is the llama-server --alias (what the API answers to); `tokenizer` is
+# the HF repo whose tokenizer matches it. They are NOT the same string and
+# llama-benchy needs both: it refuses a --model that is not in namespace/name
+# form, because it tries to resolve a tokenizer from it.
+#
+# `extra_body` disables thinking. Qwen3.6 is a reasoning model, and with thinking
+# ON a generation budget is spent on reasoning tokens before any answer appears —
+# a 300-token cap returned EMPTY content in testing. For a throughput number to
+# mean anything across models it has to measure the same thing, so the default
+# suites disable it. The `thinking` suite deliberately turns it back on.
+llama_benchy_targets:
+  - name: "quality"
+    port: 8090
+    model: "qwen3.6-35b-a3b-mtp"
+    tokenizer: "Qwen/Qwen3.6-35B-A3B"
+    slots: 4
+    extra_body: '{"chat_template_kwargs":{"enable_thinking":false}}'
+  - name: "throughput"
+    port: 8091
+    model: "gpt-oss-20b"
+    tokenizer: "openai/gpt-oss-20b"
+    slots: 8
+    extra_body: ""
+
+# ─── Suite shapes ────────────────────────────────────────────────────────────
+# Sized to AGENT traffic, not to a synthetic sweep. An agent turn is a large
+# prompt (system + tool schemas + files + history) and a modest generation
+# (a tool call, a patch, a plan step) — so pp >> tg, which is the opposite of
+# the long-generation shape that made earlier sweeps point the wrong way
+# (see packages/inference-bench/README.md).
+llama_benchy_runs: 3
+
+# Context depth is the axis nothing else here measured. Agents accumulate
+# context every turn; this shows what that costs. Capped below the 131072
+# per-slot ceiling — asking for more than a slot holds is a benchmark of the
+# error path, not the server.
+llama_benchy_depths: [0, 4096, 16384, 32768, 65536]
+
+# Agent fan-out is small — 3-4 concurrent, not 32. Levels above a server's slot
+# count measure queueing, so each target is swept only to its own -np.
+llama_benchy_concurrency: [1, 2, 4, 8]

@@ -57,6 +57,7 @@ lab-provisioning/
     roles/
       base/                         kernel cmdline (GRUB), packages, UFW, data disk
       amdgpu_rocm/                  ROCm 7.14 userspace (TheRock tarball) + Vulkan wiring
+      llama_benchy/                 llama-benchy + the agentic benchmark suite runner
       llamacpp/                     llama-server Podman quadlets + GPU/model prerequisites
       ollama/                       Ollama LLM server + systemd override
       tailscale/                    tailnet join

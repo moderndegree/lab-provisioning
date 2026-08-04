@@ -26,6 +26,11 @@
     - role: llamacpp
       when: enable_llamacpp | bool
       tags: [llamacpp]
+    # Benchmarking only — installs a tool and a runner script, starts nothing.
+    # Kept after llamacpp because its defaults reference llamacpp_models_dir.
+    - role: llama_benchy
+      when: enable_llamacpp | bool
+      tags: [llama_benchy, bench]
     - role: cloudflared
       when: enable_cloudflared | bool
 

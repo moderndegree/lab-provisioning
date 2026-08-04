@@ -1,0 +1,43 @@
+---
+# ─── Install ─────────────────────────────────────────────────────────────────
+# pipx, not `pip install --user`: Ubuntu 26.04 marks its Python
+# externally-managed (PEP 668) and refuses the latter. Same pattern as the
+# HuggingFace CLI in roles/llamacpp.
+- name: Install pipx for llama-benchy
+  ansible.builtin.apt:
+    name: pipx
+    state: present
+  when: llama_benchy_install | bool
+
+- name: Install llama-benchy
+  community.general.pipx:
+    name: "{{ llama_benchy_spec }}"
+    state: install
+  become_user: "{{ node_user }}"
+  environment:
+    PIPX_BIN_DIR: "{{ node_home }}/.local/bin"
+  when: llama_benchy_install | bool
+
+# ─── Results directory ───────────────────────────────────────────────────────
+- name: Create the llama-benchy results directory
+  ansible.builtin.file:
+    path: "{{ llama_benchy_results_dir }}"
+    state: directory
+    owner: "{{ node_user }}"
+    group: "{{ node_user }}"
+    mode: "0755"
+  when: llama_benchy_install | bool
+
+# ─── Suite runner ────────────────────────────────────────────────────────────
+# A wrapper rather than raw llama-benchy invocations, because the flags that
+# make the numbers COMPARABLE (tokenizer per model, thinking disabled, depth
+# capped to the slot window, concurrency capped to -np) are easy to get wrong
+# by hand and silently produce a plausible-looking wrong answer.
+- name: Install the agentic benchmark suite runner
+  ansible.builtin.template:
+    src: llama-benchy-suite.sh.j2
+    dest: "{{ node_home }}/.local/bin/llama-benchy-suite"
+    owner: "{{ node_user }}"
+    group: "{{ node_user }}"
+    mode: "0755"
+  when: llama_benchy_install | bool

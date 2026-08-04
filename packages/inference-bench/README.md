@@ -1,5 +1,14 @@
 # inference-bench
 
+> **See also: `llama-benchy`** (`mini/ansible/roles/llama_benchy`, run on mini as
+> `llama-benchy-suite <suite>`). The two measure different things and you want both.
+> These scripts measure a workload we invented — agent fan-out, tool calls,
+> multi-turn — and answer "how does my workload feel". llama-benchy measures the
+> SERVER along axes these scripts guess at: the prompt-processing vs
+> token-generation split, throughput at context DEPTH, and prefix-cache reuse.
+> Depth is the one that matters most for agents and that nothing here covered —
+> an agent's context grows every turn, and decode does not stay flat as it does.
+
 Benchmarks for mini's llama.cpp serving path. These exist because **every tuning
 decision in `mini/ansible/roles/llamacpp` rests on numbers produced here** — if a
 model, quant, or llama.cpp build changes, re-run them rather than trusting the
