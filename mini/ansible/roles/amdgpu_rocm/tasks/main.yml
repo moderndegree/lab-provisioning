@@ -25,10 +25,13 @@
 # rocminfo/rocm-smi are the host-side tools for answering "what does the GPU
 # think it is" — useful on a Vulkan box too. At 8.3 GiB for a single-arch build
 # that is cheap insurance; set rocm_install_userspace: false to skip it.
+# Checksummed so a truncated or altered download fails here rather than half
+# unpacking into the ROCm prefix. See the honesty note on rocm_tarball_sha256.
 - name: Download the ROCm tarball
   ansible.builtin.get_url:
     url: "{{ rocm_tarball_url }}"
     dest: "/tmp/rocm-{{ rocm_version }}-gfx{{ rocm_gfx_target }}.tar.gz"
+    checksum: "sha256:{{ rocm_tarball_sha256 }}"
     mode: "0644"
   when:
     - rocm_install_userspace | bool

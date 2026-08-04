@@ -105,9 +105,14 @@ second run should report no changes. Things most likely to churn: the ROCm
 `unarchive` (guarded by `creates:`), the quadlet templates, and the legacy-unit
 retirement tasks.
 
-- [ ] **The ROCm tarball is ~1.71 GB.** It is already cached at
-      `/tmp/rocm-7.14.0-gfx1151.tar.gz` on mini, so the first converge should not
-      re-download it. A rebuilt box will.
+- [ ] **The ROCm tarball is ~1.71 GB and downloads from source on converge.**
+      Nothing is pre-staged — no hand-placed file in `/tmp` — so the fetch is
+      reproducible rather than trusting whatever happened to be lying around.
+      `get_url` verifies it against `rocm_tarball_sha256`, so a truncated or
+      altered download fails at the download step instead of half unpacking into
+      the ROCm prefix, where it would surface later as a broken `rocminfo`. The
+      unpack is guarded by `creates:`, so the already-installed tree is left
+      alone and the first converge just verifies and moves on.
 - [ ] **Copy the benchmarks over when you want to re-measure.** They live in the
       repo but nothing deploys them:
       `scp packages/inference-bench/*.py blewis@mini:/tmp/`

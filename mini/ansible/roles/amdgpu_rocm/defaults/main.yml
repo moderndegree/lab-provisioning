@@ -50,6 +50,15 @@ rocm_install_userspace: true
 rocm_install_method: "tarball"          # "tarball" (7.14+) or "apt" (<= 7.2.4)
 rocm_prefix: "/opt/rocm-{{ rocm_version }}"
 rocm_tarball_url: "https://repo.amd.com/rocm/tarball-multi-arch/therock-dist-linux-gfx{{ rocm_gfx_target }}-{{ rocm_version }}.tar.gz"
+
+# AMD publishes no sidecar .sha256 for these tarballs, so this hash is derived
+# rather than official: two independent fetches of 7.14.0/gfx1151 produced it, so
+# it pins the artifact as it exists today. BE HONEST ABOUT WHAT IT PROVES — it
+# catches corruption in transit and silent upstream mutation of a released
+# filename, which is the realistic failure. It is NOT a signature and does not
+# prove provenance. Recompute and update when bumping rocm_version:
+#   curl -sfL <rocm_tarball_url> | sha256sum
+rocm_tarball_sha256: "2567d5e34e470db104a62a02c36aa770cb0430175e48c1c46df0eefc05e1d77c"
 rocm_gfx_target: "1151"
 
 # Legacy apt path — only consulted when rocm_install_method == "apt".
