@@ -25,6 +25,6 @@ vault_cloudflared_token: "PLACEHOLDER_CLOUDFLARED_TOKEN"
 # HuggingFace read token (https://huggingface.co/settings/tokens). ONLY needed
 # for gated repos — meta-llama/*, google/gemma-*, and friends — where you must
 # also accept the licence on the model page. Everything else downloads without
-# it, and `hf auth login` on mini is an equivalent alternative. The toolboxes
+# it, and `hf auth login` on mini is an equivalent alternative. The llamacpp
 # role writes no token file while this is empty or still a PLACEHOLDER.
 vault_hf_token: "PLACEHOLDER_HF_TOKEN"

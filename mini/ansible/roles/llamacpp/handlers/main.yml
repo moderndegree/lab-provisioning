@@ -1,5 +1,8 @@
 ---
-# Intentionally empty. Restarts are driven from tasks/main.yml, per instance and
-# only when that instance's unit file actually changed — a handler would fire
-# once for the whole role and reload tens of GiB of weights for every instance
-# whenever any one of them changed.
+# Reloading alone only affects devices that appear afterwards; /dev/kfd and the
+# render nodes already exist, so they are retriggered in the same handler to
+# pick up the new modes without a reboot.
+- name: reload udev rules
+  ansible.builtin.shell:
+    cmd: udevadm control --reload-rules && udevadm trigger
+  changed_when: true

@@ -38,10 +38,44 @@ llamacpp_image: "docker.io/kyuz0/amd-strix-halo-toolboxes:vulkan-radv"
 # Group handle: `systemctl --user {start,stop,status} llama-servers.target`.
 llamacpp_target: "llama-servers.target"
 
-# Models live in the shared toolbox model dir — the only path bind-mounted into
-# the containers. Deliberately NOT hardlinks into /data/ollama/blobs: that would
-# hide the dependency and pin a blob alive after an `ollama rm`.
-llamacpp_models_dir: "{{ toolboxes_models_dir | default(data_mount + '/toolboxes/models') }}"
+# Where GGUFs live, bind-mounted read-only into every instance. Deliberately NOT
+# hardlinks into /data/ollama/blobs: that would hide the dependency and pin a
+# blob alive after an `ollama rm`.
+llamacpp_models_dir: "{{ data_mount }}/models"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GPU device permissions
+# ─────────────────────────────────────────────────────────────────────────────
+# Rootless Podman maps uids into a user namespace, and a host GID that is not
+# mapped there cannot satisfy the kernel's check on /dev/kfd (0660 root:render)
+# or /dev/dri/renderD128. The symptom is NOT a permission error — the GPU simply
+# fails to enumerate and llama.cpp falls back to CPU. This udev rule removes the
+# dependency on gid mapping entirely and is upstream's documented fix for
+# headless hosts.
+#
+# TRADE-OFF: 0666 grants GPU compute to every local user. mini is a headless
+# single-user node reachable only over the tailnet, so the exposed surface is the
+# same set of people who could already SSH in. Set false on any box with
+# untrusted local logins.
+llamacpp_permissive_udev: true
+llamacpp_udev_rule_path: "/etc/udev/rules.d/70-kfd.rules"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Model staging (HuggingFace CLI)
+# ─────────────────────────────────────────────────────────────────────────────
+# GGUFs are staged with `hf download`, so the CLI is the front door for every
+# model this box serves. Installed with pipx because Ubuntu 26.04 marks its
+# Python externally-managed (PEP 668) and a plain `pip install --user` is
+# refused. HF_HOME is exported to host shells so a download lands beside the
+# models rather than in ~/.cache.
+llamacpp_install_hf_cli: true
+llamacpp_hf_cli_spec: "huggingface_hub[cli,hf_transfer]"
+llamacpp_hf_home: "{{ llamacpp_models_dir }}/huggingface"
+
+# Optional. Only needed for GATED repos (meta-llama/*, google/gemma-*), where you
+# must also accept the licence on the model page. Empty writes no token file;
+# `hf auth login` on mini is a fine alternative to putting this in the vault.
+llamacpp_hf_token: "{{ vault_hf_token | default('') }}"
 
 # 0.0.0.0 so Open WebUI on ser5 reaches these over the tailnet. Not as open as it
 # looks: mini's UFW allows only 22/tcp from outside plus everything on

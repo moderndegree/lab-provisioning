@@ -3,10 +3,15 @@
 # See defaults/main.yml for the measurements behind every sizing choice, and the
 # KV ceiling that will hang the GPU if exceeded.
 #
-# Runs AFTER roles/containers (which provisions ~/.config/containers/systemd and
-# enables user lingering) and roles/toolboxes (which pulls the image). Lingering
-# is load-bearing: without it /run/user/<uid> only exists during an interactive
-# login and these user units would not survive the Ansible SSH session ending.
+# Runs AFTER roles/containers, which provisions ~/.config/containers/systemd and
+# enables systemd user lingering. Lingering is load-bearing: without it
+# /run/user/<uid> only exists during an interactive login and these user units
+# would not survive the Ansible SSH session ending.
+#
+# This role owns everything the serving path needs — the GPU udev rule, the model
+# directory, the HuggingFace CLI, the image, and the quadlets. roles/toolboxes
+# used to own the first four and was removed 2026-08; it wrapped the same image
+# in distrobox, which bought nothing a quadlet does not do better.
 
 - name: Look up the node user's uid for XDG_RUNTIME_DIR
   ansible.builtin.getent:
@@ -20,6 +25,94 @@
     llamacpp_user_env:
       HOME: "{{ node_home }}"
       XDG_RUNTIME_DIR: "/run/user/{{ ansible_facts['getent_passwd'][node_user][1] }}"
+
+# ─── GPU device permissions ──────────────────────────────────────────────────
+# See the trade-off note in defaults/main.yml before disabling this. Applied
+# before any container starts: a quadlet launched against device nodes still at
+# 0660 gets no GPU and silently falls back to CPU.
+- name: Allow rootless containers to reach the compute and render devices
+  ansible.builtin.copy:
+    dest: "{{ llamacpp_udev_rule_path }}"
+    content: |
+      # Managed by Ansible (roles/llamacpp) — do not edit.
+      # Rootless Podman maps uids into a user namespace; a host GID that is not
+      # mapped there cannot satisfy the kernel's check on these nodes, so the
+      # GPU is simply not enumerated inside the container.
+      SUBSYSTEM=="kfd", KERNEL=="kfd", MODE="0666"
+      SUBSYSTEM=="drm", KERNEL=="renderD*", MODE="0666"
+    owner: root
+    group: root
+    mode: "0644"
+  when: llamacpp_permissive_udev | bool
+  notify: reload udev rules
+
+- name: Remove the permissive GPU device rule when disabled
+  ansible.builtin.file:
+    path: "{{ llamacpp_udev_rule_path }}"
+    state: absent
+  when: not (llamacpp_permissive_udev | bool)
+  notify: reload udev rules
+
+- name: Apply udev changes before starting any container
+  ansible.builtin.meta: flush_handlers
+
+# ─── Model staging ───────────────────────────────────────────────────────────
+- name: Create the model and HuggingFace cache directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ node_user }}"
+    group: "{{ node_user }}"
+    mode: "0755"
+  loop:
+    - "{{ llamacpp_models_dir }}"
+    - "{{ llamacpp_hf_home }}"
+
+# Host shells only — so `hf download` lands beside the models by default.
+- name: Point host shells at the shared HuggingFace cache
+  ansible.builtin.copy:
+    dest: /etc/profile.d/huggingface.sh
+    content: |
+      # Managed by Ansible (roles/llamacpp) — do not edit.
+      export HF_HOME="{{ llamacpp_hf_home }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install pipx for the HuggingFace CLI
+  ansible.builtin.apt:
+    name: pipx
+    state: present
+  when: llamacpp_install_hf_cli | bool
+
+- name: Install the HuggingFace CLI
+  community.general.pipx:
+    name: "{{ llamacpp_hf_cli_spec }}"
+    state: install
+  become_user: "{{ node_user }}"
+  environment:
+    PIPX_BIN_DIR: "{{ node_home }}/.local/bin"
+  when: llamacpp_install_hf_cli | bool
+
+- name: Install the HuggingFace token for gated repositories
+  ansible.builtin.copy:
+    dest: "{{ llamacpp_hf_home }}/token"
+    content: "{{ llamacpp_hf_token }}"
+    owner: "{{ node_user }}"
+    group: "{{ node_user }}"
+    mode: "0600"
+  when: llamacpp_hf_token | length > 0
+
+# ─── Image ───────────────────────────────────────────────────────────────────
+# Pulled explicitly so the first `systemctl start` is not a multi-GB download
+# under a start timeout. Podman would auto-pull, just far less predictably.
+- name: Pull the llama.cpp image
+  containers.podman.podman_image:
+    name: "{{ item }}"
+    state: present
+  become_user: "{{ node_user }}"
+  environment: "{{ llamacpp_user_env }}"
+  loop: "{{ llamacpp_instances | map(attribute='image') | map('default', llamacpp_image) | unique | list }}"
 
 # ─── Guard rails ─────────────────────────────────────────────────────────────
 # Each of these would otherwise surface as a unit that restart-loops with the

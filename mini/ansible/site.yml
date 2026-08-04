@@ -8,8 +8,7 @@
 #   ollama      → Ollama LLM server + model variants (depends on amdgpu_rocm)
 #   tailscale   → tailnet access
 #   containers  → rootless Podman; user lingering; quadlet support
-#   toolboxes   → Strix Halo AI toolboxes via distrobox (depends on containers)
-#   llamacpp    → llama-server user unit inside a toolbox (depends on toolboxes)
+#   llamacpp    → llama-server Podman quadlets + GPU/model prerequisites
 #   cloudflared → Cloudflare Zero Trust tunnel (enable_cloudflared: true to activate)
 #
 # Open WebUI moved to ser5 (roles/openwebui there) — mini stays inference-only.
@@ -24,10 +23,6 @@
     - role: ollama
     - role: tailscale
     - role: containers
-    - role: toolboxes
-      when: enable_toolboxes | bool
-      tags: [toolboxes]
-    # After toolboxes: the llama-server binary lives inside that toolbox image.
     - role: llamacpp
       when: enable_llamacpp | bool
       tags: [llamacpp]
