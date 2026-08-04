@@ -2,7 +2,8 @@
 
 This is the layer that turns the agent pipeline into a consulting practice rather
 than a code toy. The routing tiers are the contract; some controls are structural
-today, and the remaining policy gates belong in roadmap Phase 4.
+today and the rest are still manual. (There is no roadmap to defer them to —
+`docs/roadmap.md` was deleted in 2026-08; open items live in `docs/todo.md`.)
 
 ## Routing tiers (the data-sovereignty value prop)
 
@@ -48,15 +49,18 @@ judgment."
 
 ## 3. Client isolation
 
-- One opencode project (and Ollama context scope) **per client**.
-- Planned: per-client subvaults under `clients/<name>/`, with a separate index,
-  separate `QUALITY_LOOP_DATA`, and documented teardown.
+- One opencode project **per client**.
+- Planned: per-client subvaults under `clients/<name>/`, with a separate index and
+  documented teardown. (Previously also called for a separate `QUALITY_LOOP_DATA`;
+  quality-loop was deleted in 2026-08 and nothing replaced it.)
 - Don't let one client's repo context bleed into another's session — separate
   workspaces, separate `AGENTS.md` where the engagement differs.
 
 ## Where this is wired
 
 - **Gateway / remote surfaces:** `ser5/ansible/roles/hermes`.
-- **Inference (Tier L):** `mini/ansible/roles/ollama` (two warm base models).
+- **Inference (Tier L):** `mini/ansible/roles/llamacpp` (two `llama-server`
+  instances, `:8090` quality and `:8091` throughput). Note `ser5/ansible/roles/hermes`
+  above is **not** Tier L today — it egresses to OpenRouter; see `docs/todo.md`.
 - **Agent team:** [../opencode.json](../opencode.json) + [../AGENTS.md](../AGENTS.md).
 - **Operator decision tree:** [../../docs/operating-manual.md](../../docs/operating-manual.md).

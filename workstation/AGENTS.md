@@ -46,15 +46,21 @@ Bad answers usually come from thin handoffs. Full rules:
 
 ## Placement rule (the architectural backbone)
 
-Two warm base models on mini serve every agent. mini is memory-bandwidth-bound:
-decode speed tracks **active parameters read per token**, not total parameters.
-That is why both warm slots are MoE, and why **no agent may introduce a dense
-model or a third resident model**:
+Two `llama-server` endpoints on mini serve every agent. mini is
+memory-bandwidth-bound: decode speed tracks **active parameters read per token**,
+not total parameters. That is why both are MoE, and why **no agent may introduce
+a dense model or point at a third endpoint**:
 
-- `qwen3-coder-next:latest` (MoE 80B-A3B, 3B active) — depth slot:
-  planner, architect, reviewer, security-auditor, coder, tester.
-- `qwen3.6:35b-a3b-mtp-q4_K_M` (MoE 35B-A3B, 3B active) — driver slot:
-  build (orchestrator), devops, doc-writer.
+- `http://mini:8090/v1` — `qwen3.6-35b-a3b-mtp-q4_K_M` (MoE 35B-A3B, 3B active),
+  4 slots, MTP on, 86-95 tok/s. Quality: planner, architect, reviewer,
+  security-auditor, coder, tester, build (orchestrator), devops, doc-writer.
+- `http://mini:8091/v1` — `gpt-oss-20b-MXFP4` (MoE 20B), 8 slots, 202 tok/s
+  aggregate. Throughput: bulk fan-out and worker-shaped subtasks.
+
+Both give 131072 context per slot, partitioned statically at startup — a single
+session cannot exceed it. There is no residency or eviction to reason about any
+more: llama-server holds its weights for the process lifetime. (The previous
+"two warm slots" wording described Ollama, which is now stopped.)
 
 Roles live in agent prompts, not baked model variants. Reasoning mode is set
 per agent via `reasoningEffort` in `opencode.json` (`"none"` on the

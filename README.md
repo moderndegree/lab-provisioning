@@ -11,7 +11,7 @@ autoinstall + Ansible provisioning stack; lab software lives under
 
 | Directory | Machine | Role |
 |-----------|---------|------|
-| [`mini/`](mini/README.md) | Minisforum MS-S1 Max (Ryzen AI Max+ 395, 128 GB) | Headless LLM inference node; Vulkan/ROCm + Ollama (`qwen3-coder-next:latest` + `qwen3.6:35b-a3b-mtp-q4_K_M`, 131072 window) |
+| [`mini/`](mini/README.md) | Minisforum MS-S1 Max (Ryzen AI Max+ 395, 128 GB) | Headless LLM inference node; two `llama-server` instances under Podman quadlets — `:8090` quality (`qwen3.6-35b-a3b-mtp-q4_K_M`, MTP on) and `:8091` throughput (`gpt-oss-20b`), 131072 context per slot on both. Vulkan/RADV backend, ROCm 7.14 userspace. Ollama is installed but stopped — started by hand only to try a model. |
 | [`ser5/`](ser5/README.md) | Beelink SER5 (Ryzen 7 5800H, 64 GB) | Always-on driver: Hermes, Open WebUI, observability, backups |
 
 ## Software
@@ -19,7 +19,6 @@ autoinstall + Ansible provisioning stack; lab software lives under
 | Directory | What |
 |-----------|------|
 | [`docs/operating-manual.md`](docs/operating-manual.md) | One-page entry point: which harness when, which model where, and how to drive it from the phone |
-| [`docs/provisioning-checklist.md`](docs/provisioning-checklist.md) | One-time manual steps for the llama.cpp serving change — Ansible cannot remove what it no longer manages |
 | [`packages/inference-bench/`](packages/inference-bench/README.md) | Benchmarks for mini's llama.cpp serving path — the numbers behind the `llamacpp` role's sizing |
 | [`workstation/`](workstation/README.md) | opencode config for the 9-agent coding team (copied/symlinked onto the dev box) |
 | [`docs/brain.md`](docs/brain.md) | Second brain vault on ser5 (`/data/brain`); UI/MCP in sibling **ai-workstation** |

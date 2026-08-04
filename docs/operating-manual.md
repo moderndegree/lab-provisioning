@@ -9,7 +9,7 @@ This lab is three things: the dev environment for a solo AI consulting practice,
 | Is it client-confidential? | mini over the tailnet | opencode pointed at `http://mini:8090/v1` | L | Data stays on hardware the owner controls; mini is the sovereign inference appliance. |
 | Am I at the desk on my own repos? | Windows workstation | GitHub Copilot CLI | G | Pro+ buys frontier models at a flat rate; the gaming PC is the primary cockpit. |
 | Should it run for hours without me? | ser5, or GitHub cloud | Grok Build CLI on ser5, or assign a GitHub issue to Copilot cloud agent | X or G | ser5 survives disconnects via systemd; cloud sessions need no lab uptime. |
-| Am I away from a computer? | ser5 | Hermes from the phone | L for dashboard, personal-only for chat gateways | Tailscale gives private reach; Hermes is already running and phone-shaped. |
+| Am I away from a computer? | ser5 | Hermes from the phone | **Not L — Hermes egresses to OpenRouter (verified 2026-08-04)** | Tailscale gives private reach, but reach is not confidentiality. Never client-confidential until the route is fixed. |
 | Am I choosing between models or measuring quality? | ser5 driving mini | `packages/inference-bench` scripts | L | Measurements belong off mini; mini should only answer tokens. |
 
 ## Routing tiers
@@ -32,42 +32,53 @@ This lab is three things: the dev environment for a solo AI consulting practice,
 
 ## Models on mini
 
-Strix Halo is memory-bandwidth-bound, not compute-bound. Decode speed tracks active parameters read per token, not total parameter count. The measured anchor is `qwen3.6:35b-a3b-mtp-q4_K_M`: 22 GB, MoE, 3B active, 70-80 t/s, implying ~185 GB/s effective bandwidth, about 86% of the ~215 GB/s ceiling. Consequence: MoE models win enormously here, and a dense model in a warm slot is a mistake.
+Strix Halo is memory-bandwidth-bound, not compute-bound. Decode speed tracks active parameters read per token, not total parameter count. The measured anchor is `qwen3.6-35b-a3b-mtp-q4_K_M` on `:8090`: 22 GB, MoE, 3B active, **86-95 tok/s single-stream and 142 tok/s aggregate at 4-way** (re-measured 2026-08-04 on ROCm 7.14; the older 70-80 t/s figure was the Ollama serving path). `:8091` runs `gpt-oss-20b` at 76 tok/s single-stream, 202 tok/s aggregate at 8-way. Consequence: MoE models win enormously here, and a dense model is a mistake.
 
-| Model | Size / shape | Speed | Residency | Use | Bandwidth rationale |
-|---|---:|---:|---|---|---|
-| `qwen3.6:35b-a3b-mtp-q4_K_M` | 22 GB, MoE 35B-A3B, 3B active | 70–80 t/s (measured) | Warm driver slot | Orchestrator, devops, doc-writer | The anchor: fast because only ~3B active params are read per token. |
-| `qwen3-coder-next:latest` | 51 GB, MoE 80B-A3B hybrid Gated-DeltaNet, 512 experts / 10 active, 3B active | ~35-50 t/s (est.) | Warm depth slot | Coder, tester, planner, architect, reviewer, security-auditor | Replaces dense 27B: much stronger coding while keeping 3B active. |
-| `glm-4.7-flash:latest` | 19 GB, MoE 30B-A3B, 3B active | ~75-90 t/s (est.) | Challenger, not resident today | Driver-slot bake-off | Similar active size to the driver; measure before swapping. |
-| `gpt-oss:120b` | 65 GB, MoE 117B-A5.1B, 5.1B active | ~30 t/s (community-measured) | Heavy tier | Strongest general reasoning that fits 128 GB | Loads by evicting a warm model; useful, not resident. |
-| `nemotron-cascade-2:latest` | 24 GB, Mamba2-Transformer MoE 30B-A3B, ~3.6B active | ~60-80 t/s (est.) | Heavy tier | Math/algorithm escalation; independent judge | Different model family beats a model grading its own samples. |
-| `nemotron3:33b` | 27 GB, Nemotron-3-Nano-30B-A3B family | ~55-80 t/s (est.) | Bench-off | Long-context candidate | 1M context and Mamba layers make long context cheap; keep one winner. |
-| `nemotron-3-nano:latest` | 24 GB, same family, different quant | ~55-80 t/s (est.) | Bench-off | Long-context candidate | Compare against `nemotron3:33b`; do not keep both by habit. |
-| `qwen3.6:27b-mtp-q4_K_M` | 17 GB, dense 27B | ~11-15 t/s (est.) | Demoted rollback | Only if coder-next fails | Dense reads the whole model per token; roughly 6x slower than the driver. |
-| `qwen3.6:35b-a3b-mtp-q8_0` | 38 GB, q8 MoE | 65.7 t/s measured — **76%** of q4, not half | Quality bake-off candidate | Worth testing against q4 | Costs ~24% latency, not the ~50% previously assumed here. The old estimate predated MTP, which offsets more of the extra bandwidth at q8 than at q4. Whether the quality gain justifies 24% is still unmeasured — settle it by measuring quality on real tasks. |
-| `qwen3.6:27b-mtp-q8_0` | 29 GB, q8 dense | About half q4 throughput | Retirement candidate | Quality bake-off only | Dense plus q8 is the wrong direction on this box. |
-| `nemotron-3-nano:4b` | 2.8 GB | 150+ t/s | `scout` alias | Throwaway smoke tests only | Even tiny models evict a warm slot; never leave it resident. |
+**What is actually served** (llama-server, measured 2026-08-04 on ROCm 7.14):
+
+| Endpoint | Model | Size / shape | Speed | Use |
+|---|---|---:|---:|---|
+| `:8090` quality | `qwen3.6-35b-a3b-mtp-q4_K_M` | 22 GB, MoE 35B-A3B, 3B active | 86-95 tok/s c=1; 142 agg c=4 | Everything client-confidential; the default. MTP on. |
+| `:8091` throughput | `gpt-oss-20b-MXFP4` | 12 GB, MoE 20B | 76 tok/s c=1; 202 agg c=8 | Bulk fan-out, worker agents, high concurrency. |
+
+Both give 131072 context per slot. Swap a model by editing `llamacpp_instances`
+in mini's `roles/llamacpp` — the units are named by role, not by model.
+
+The table that used to live here listed `qwen3-coder-next`, `gpt-oss:120b`, the
+Nemotron family and several bake-off candidates as "warm"/"heavy" tiers. That was
+the Ollama residency model, which no longer exists: Ollama is stopped, nothing is
+resident-by-eviction, and those tags are not served. Speeds marked `(est.)` there
+were never measured. Treat any of them as a candidate to benchmark with
+`packages/inference-bench`, not as an available route.
+
 
 Serving policy is part of the model choice. **As of 2026-08 the serving path is
 `llama-server` (mini's `roles/llamacpp`), not Ollama** — it measured ~3.5x faster
-single-stream on the same model (85.9 vs 24.8 tok/s) because it can use the
+single-stream on the same model (86-95 vs 24.8 tok/s) because it can use the
 GGUF's MTP head and its `--parallel` is tunable per workload. Ollama stays
 installed for pulling and quickly trying a model by hand, but does not serve:
 it and llama-server cannot both hold weights in 122 GiB. Start it only after
-stopping an instance. The Ollama-specific notes below still describe that
-on-demand path:
+stopping an instance.
 
-- Exactly two resident models: `OLLAMA_MAX_LOADED_MODELS=2`, `OLLAMA_KEEP_ALIVE=-1`.
-- Warm pair today: driver `qwen3.6:35b-a3b-mtp-q4_K_M` plus depth `qwen3-coder-next:latest`.
-- Global context window is 131072, not 262144.
-- Weights 51+22 = 73 GB; q8_0 KV at 2-way parallel adds ~22 GB, landing near 95 GB of the ~110 GB pool.
-- KV cost is context × parallel, so 128k at 2-way is the same budget as 64k at 4-way. Raise one only by lowering the other.
-- 256k never fit this pair and was never usable anyway: prefill is ~205 t/s, so a packed 256k prompt costs ~21 minutes before the first token.
-- 128k costs ~10 minutes worst case; the window is capacity, not a target.
-- `OLLAMA_NUM_PARALLEL=2`: two concurrent streams, then queue.
-- `/v1` cannot set `num_ctx` per request, and Modelfile `num_ctx` below native is ignored; the global env var is the control point.
-- `reasoning_effort: "none"` is the only verified way to disable thinking on `/v1` in Ollama 0.31.2.
-- `/no_think` and `think: false` are ignored on `/v1`; native `/api/chat` honors `think: false`.
+What actually serves (measured 2026-08-04, ROCm 7.14):
+
+- `:8090` quality — `qwen3.6-35b-a3b-mtp-q4_K_M`, 4 slots, MTP on. 86-95 tok/s
+  single-stream, 142 tok/s aggregate at 4-way.
+- `:8091` throughput — `gpt-oss-20b-MXFP4`, 8 slots, no MTP. 76 tok/s
+  single-stream, 202 tok/s aggregate at 8-way.
+- **131072 context per slot on both**, partitioned statically at startup
+  (`-c` total / `-np` slots). A single chat can never exceed that no matter how
+  idle the box is; there is no per-request `num_ctx`.
+- Prefill is ~205 t/s, so a packed 131072 prompt costs ~10 minutes before the
+  first token. The window is capacity, not a target.
+- Do NOT raise total context blind: `-c 2097152` hung the amdgpu allocator hard
+  enough to need a reboot. `llamacpp_ctx_warn` guards it.
+- Thinking is disabled per request with `chat_template_kwargs: {enable_thinking:
+  false}`. Budget for it when it is on — a 300-token cap was consumed entirely by
+  reasoning, returning empty content.
+
+Ollama's on-demand settings are now `context 32768 / parallel 1 / max_loaded 1 /
+keep_alive 5m` — sized for trying one model by hand, not for serving.
 
 ## The harnesses
 
@@ -87,7 +98,7 @@ Why this: the workstation is the cockpit, not the model host; 32 GB RAM and a 16
 
 ### opencode
 
-What it is: the sovereign coding harness on the workstation, pointed at `http://mini:8090/v1`. The default 9-agent team is `build` orchestrator, planner, architect, reviewer, security-auditor, coder, tester, devops, and doc-writer — all on mini. Two opt-in escalations sit alongside it: `heavy` (`gpt-oss:120b`, still Tier L but evicts a warm model) and `research` (xAI, Tier X, never client-confidential). Both need `opencode auth login` before they work, so the sovereign path is the failure-safe default.
+What it is: the sovereign coding harness on the workstation, pointed at `http://mini:8090/v1`. The default 9-agent team is `build` orchestrator, planner, architect, reviewer, security-auditor, coder, tester, devops, and doc-writer — all on mini. The `research` escalation (xAI, Tier X, never client-confidential) needs `opencode auth login`, so the sovereign path is the failure-safe default. The old `heavy` escalation (`gpt-oss:120b`) was an Ollama-era route and no longer resolves — Ollama is stopped and llama-server serves only the two models above.
 
 Reach for it when: the task is client-confidential, the repo is local, and the answer must stay Tier L. Config lives in `../workstation/opencode.json`; delivery contract is in [`../workstation/AGENTS.md`](../workstation/AGENTS.md).
 
@@ -117,7 +128,7 @@ Why this: ser5 is the always-on driver; Grok gives long autonomous coding runs w
 
 What it is: NousResearch Hermes on ser5 with `HERMES_HOME=/data/services/hermes`. It has three surfaces: messaging gateway, OpenAI-compatible proxy on `:8645`, and web dashboard on `:9119`.
 
-Reach for it when: you want the phone surface, a gateway, or a proxy that defaults to Tier L via mini (`http://mini:8090/v1`). It can delegate coding to `grok` through `official/autonomous-ai-agents/grok`.
+Reach for it when: you want the phone surface or a gateway for personal, non-confidential work. **It does not default to Tier L.** Verified 2026-08-04: its configured `OLLAMA_BASE_URL=http://mini:11434` is dead (Ollama stopped) and the proxy serves 292 OpenRouter models instead, so traffic egresses to a third party. Treat it as Tier X at best until repointed. It can delegate coding to `grok` through `official/autonomous-ai-agents/grok`.
 
 Start it:
 
@@ -150,10 +161,11 @@ Start it: run AI Workstation with `CORTEX_VAULT_DIR=/data/brain`, or open `/data
 
 ## Hard rules
 
-- Never put a dense model in a warm slot on this hardware.
-- Never a third resident model.
+- Never put a dense model on this hardware; MoE active-parameter count is what decodes fast.
+- Never start Ollama while llama-server is running — they cannot both hold weights in 122 GiB.
+- Never raise total context blind; `-c 2097152` hung the GPU allocator and needed a reboot.
 - Embeddings live on ser5's CPU.
-- Heavy models are scheduled evictions, not residents.
+- Never send client-confidential material through Hermes until its route is fixed (see `todo.md`).
 - Client-confidential work never touches Telegram or Discord.
 - Client-confidential work never leaves Tier L without explicit written consent.
 - The lab never hosts client production.
@@ -172,8 +184,9 @@ Start it: run AI Workstation with `CORTEX_VAULT_DIR=/data/brain`, or open `/data
 
 | Symptom | Likely cause | Check | Fix |
 |---|---|---|---|
-| First request is suddenly slow and logs show loading | Model got evicted | `ollama ps` on mini | Stop using `scout` or heavy models casually; reload the warm pair. |
-| Nothing streams for minutes | Prefill wall | Prompt size versus the 128k window | Cut context, summarize, or split into smaller calls. |
-| Driver or coder is missing | Heavy model resident | `ollama ps`; look for `gpt-oss:120b` or Nemotron heavy tier | Treat heavy as scheduled eviction; finish it, then restore the warm pair. |
-| Two jobs run, the third waits | Two-way parallel queueing | `OLLAMA_NUM_PARALLEL=2` and active clients | Let it queue, or move non-urgent evals to later. Do not raise residency. |
+| First request is suddenly slow | Instance restarted and is reloading weights | `systemctl --user status llama-quality llama-throughput` on mini | Wait out the load; llama-server holds weights for the process lifetime, so this is a restart, not eviction. |
+| Nothing streams for minutes | Prefill wall, or thinking | Prompt size versus the 131072/slot window; check whether `reasoning_content` is filling instead of `content` | Cut context, or disable thinking with `chat_template_kwargs: {enable_thinking: false}`. |
+| A model is missing from the list | That instance is down, or Ollama got started and is contending | `curl mini:8090/v1/models`, `curl mini:8091/v1/models`, `systemctl is-active ollama` on mini | Restart the instance; stop Ollama — it and llama-server cannot both hold weights in 122 GiB. |
+| Jobs queue behind each other | More concurrent requests than slots (4 on `:8090`, 8 on `:8091`) | `llamacpp:requests_deferred` and `llamacpp:requests_processing` in Prometheus | Let it queue, or send bulk fan-out to `:8091`. Raising slots lowers ctx/slot. |
 | Throughput is far below the table | Estimate treated as fact | Re-measure with `packages/inference-bench` | Keep `(est.)` labels until measured; adopt only measured wins. |
+| A service restarted but behaves like the old version | A stale `~/.config/systemd/user/<unit>.service` shadows the quadlet | `systemctl --user show <unit> -p FragmentPath --value` | Anything not under `.../systemd/generator/` is shadowed — delete it and `daemon-reload`. A clean converge does NOT catch this. |

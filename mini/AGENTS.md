@@ -94,19 +94,30 @@ Always run `make lint` and `make syntax-check` after editing roles or vars.
 
 ## Model policy (bandwidth-bound, not task-depth-bound)
 
-mini keeps exactly two warm base models resident at the global 131072 context window:
-`qwen3-coder-next:latest` for DEPTH and `qwen3.6:35b-a3b-mtp-q4_K_M` for DRIVER.
-Both are MoE with ~3B active parameters because Strix Halo decode speed tracks active
-parameters read per token, not headline size. The measured driver anchor is 70-80 t/s
-(~185 GB/s effective); the old dense `qwen3.6:27b-mtp-q4_K_M` is only ~11-15 t/s and
-stays on disk as rollback, not as a warm slot. The 131072 window is global: `/v1` cannot
-set `num_ctx` per request, and Modelfile downscoping is ignored. It is paired with
-`OLLAMA_NUM_PARALLEL=2` because context × parallel is the KV budget - raise one only
-by lowering the other.
+Serving is `llama-server`, not Ollama. Two instances run as Podman quadlets, defined
+in `roles/llamacpp` (`llamacpp_instances`), named by ROLE rather than by model so the
+model can be swapped without renaming the unit:
 
-Heavy models (`gpt-oss:120b`, `nemotron-cascade-2:latest`) are pulled but never resident;
-loading one evicts a warm model under `OLLAMA_MAX_LOADED_MODELS=2`, so keep them to
-scheduled/off-hours jobs. Roles live in opencode/loopkit prompts, not baked Modelfiles.
+| Unit | Port | Model | Slots | Ctx/slot | MTP |
+|---|---|---|---|---|---|
+| `llama-quality` | 8090 | `qwen3.6-35b-a3b-mtp-q4_K_M` | 4 | 131072 | on |
+| `llama-throughput` | 8091 | `gpt-oss-20b-MXFP4` | 8 | 131072 | off |
+
+Both are MoE with ~3B active parameters, because Strix Halo decode speed tracks active
+parameters read per token, not headline size. A dense model of the same size is a
+mistake here: the old dense `qwen3.6:27b-mtp-q4_K_M` measured ~11-15 t/s.
+
+Context is per SLOT and partitioned statically at startup (`-c` total / `-np` slots),
+so a single chat can never exceed 131072 no matter how idle the box is. Raising
+ctx/slot means lowering slot count or raising total, and total has a hard ceiling —
+see the context warning below.
+
+Ollama is installed but `stopped`/`disabled` (`ollama_service_*` in group_vars). It is
+for trying a model by hand, not for serving; it cannot hold weights at the same time as
+llama-server in 122 GiB. Its restart handler is gated on `ollama_service_state` so that
+editing its env vars does not start it — handlers flush after the task that stopped it.
+
+Roles live in opencode prompts, not baked Modelfiles.
 
 ## llama.cpp serving path (`roles/llamacpp`, `enable_llamacpp`)
 
@@ -135,16 +146,24 @@ while llama-server lived in the container's cgroup, and `systemctl --user stop`
 returned success while the server kept running and holding its port. A quadlet
 runs llama-server as the container's main process, so stop/restart just work —
 verified: stopping the target leaves 0 survivors and releases both ports.
-Throughput was equal or slightly better after the move (87.1 vs 85.9 tok/s at
-c=1; ~202 vs 190.7 aggregate at c=8).
+Throughput was equal or slightly better after the move. Re-measured 2026-08-04 on
+ROCm 7.14: quality 86-95 tok/s at c=1 and 142 tok/s aggregate at c=4; throughput
+76 tok/s at c=1 and 202 tok/s aggregate at c=8.
 
 The things that bite:
 
 - **MTP is a per-workload trade, not a free win.** `--spec-type draft-mtp` with
-  `--spec-draft-n-max 1` buys ~15% interactive latency and costs ~29% aggregate
-  throughput. Set `llamacpp_mtp: false` for the qloop/agent workload. Acceptance
-  is healthy (50-58%); the ceiling is structural — verifying n+1 tokens routes to
-  up to `8*(n+1)` experts instead of 8, so longer drafts cost what they save.
+  `--spec-draft-n-max 1` buys interactive latency and costs aggregate throughput.
+  Acceptance is much better than earlier notes claimed — measured 2026-08-04 from
+  `llamacpp:tokens_predicted_total / llamacpp:n_decode_total` at concurrency 1
+  (max 2.00): code 1.94, reasoning-with-thinking 1.94, prose 1.70, i.e. 85-97% of
+  drafts accepted, against 0.99 on the non-MTP instance. The old "50-58%" figure
+  is superseded. **The ~29% aggregate cost has NOT been re-measured since the
+  ROCm 7.14 rebuild** — treat it as unverified before using it to justify
+  `llamacpp_mtp: false`. Measure the ratio at concurrency 1 only: continuous
+  batching decodes every active slot in one step, which inflates it regardless of MTP.
+  The ceiling is structural — verifying n+1 tokens routes to up to `8*(n+1)`
+  experts instead of 8, so longer drafts cost what they save.
   Confirm it is live by grepping the journal for `MTP draft context`; without the
   flag the loader silently logs `unused tensor blk.40.nextn.* -- ignoring`.
 - **`seccomp=unconfined` is not optional.** The ROCm/Vulkan userspace makes

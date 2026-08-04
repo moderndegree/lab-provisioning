@@ -19,23 +19,26 @@ symlink into, your development machine.
 
 ## The split that drives everything
 
-Two warm MoE base models on mini serve all nine agents — nothing else ever
-loads (`OLLAMA_MAX_LOADED_MODELS=2`, `KEEP_ALIVE=-1`), and roles live in the
-agent prompts rather than baked Modelfile variants:
+Two `llama-server` endpoints on mini serve all nine agents, and roles live in the
+agent prompts rather than baked model variants:
 
-- **`qwen3-coder-next:latest`** (MoE 80B-A3B, 3B active, depth) — planner,
-  architect, reviewer, security-auditor, coder, tester. Complex coding and hard
-  analysis.
-- **`qwen3.6:35b-a3b-mtp-q4_K_M`** (MoE 35B-A3B, 3B active, driver) — build
-  (orchestrator), devops, doc-writer. General work and tool dispatch.
+- **`http://mini:8090/v1`** — `qwen3.6-35b-a3b-mtp-q4_K_M` (MoE 35B-A3B, 3B
+  active), 4 slots, MTP on, 86-95 tok/s single-stream. All nine agents.
+- **`http://mini:8091/v1`** — `gpt-oss-20b-MXFP4` (MoE 20B), 8 slots, 202 tok/s
+  aggregate. Bulk fan-out and worker-shaped subtasks.
 
 mini is memory-bandwidth-bound, not compute-bound. Decode speed tracks active
-parameters per token, so MoE wins; a dense model in a warm slot is a mistake.
-The global context window is now **131,072**. KV cost is context × parallel, so
-128k at `OLLAMA_NUM_PARALLEL=2` is the same KV budget as 64k at 4-way: the
-51 GB + 22 GB warm pair plus ~22 GB of q8_0 KV lands near 95 GB of the ~110 GB
-GPU pool. The trade is concurrency — a third simultaneous request queues. 256k
-does not fit this pair and was never operationally useful at ~205 t/s prefill.
+parameters per token, so MoE wins; a dense model is a mistake here.
+
+Context is **131,072 per slot**, partitioned statically at startup (`-c` total /
+`-np` slots) — a single session cannot exceed it however idle the box is, and
+there is no per-request `num_ctx`. KV cost is ctx × slots, so raise one only by
+lowering the other. Prefill runs ~205 t/s, so a packed 131k prompt costs ~10
+minutes before the first token: the window is capacity, not a target.
+
+(This section used to describe two *warm Ollama models* with residency and
+eviction. Ollama is stopped as of 2026-08; llama-server holds its weights for
+the process lifetime, so there is no eviction to reason about.)
 
 ## Windows workstation (cockpit)
 

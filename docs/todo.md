@@ -72,7 +72,9 @@ acceptance test; these are the items that outlive it.
       branch rewrote `amdgpu_rocm` (apt -> tarball), folded `roles/toolboxes`
       into `roles/llamacpp`, deleted a role, and moved the model directory. Read
       the diff.
-- [ ] **Converge each box twice.** The second run should report no changes.
+- [x] **Converge each box twice.** Done 2026-08-03. Note the acceptance test is
+      weaker than it looks: a clean second run did NOT catch the quadlet shadowing
+      below. Converge output proves task execution, not applied state.
       Most likely to churn: the ROCm `unarchive` (guarded by `creates:`), the
       quadlet templates, and the legacy-unit retirement tasks — none of which
       have ever run.
@@ -84,7 +86,9 @@ acceptance test; these are the items that outlive it.
       are dead weight afterwards: the legacy `llama-server*.service` retirement
       in `roles/llamacpp`, and the `quality-gate` skill removal in
       `roles/hermes`. Each says so in a comment.
-- [ ] **Delete `docs/provisioning-checklist.md`** when its boxes are all ticked.
+- [x] **Delete `docs/provisioning-checklist.md`** — done 2026-08-04. All boxes
+      ticked and verified end-to-end; the one open decision (`/data/agentlab`) moved
+      to Housekeeping below.
 
 ## Scale-mismatch check-in (recurring, not a one-time fix)
 
@@ -120,3 +124,40 @@ answer down; if it's "yes, drifted," that's what triggers the freeze above.
       with `systemctl --user show <unit> -p FragmentPath --value`; anything not under
       `.../systemd/generator/` is shadowed. Audited 2026-08-03: only observability was
       affected; openwebui and both llama-server units are clean.
+
+## Governance — Hermes is not Tier L (found 2026-08-04, UNRESOLVED)
+
+- [ ] **Decide where Hermes routes.** Verified by querying the running service, not
+      by reading config: `hermes_ollama_base_url` is still `http://mini:11434`, which
+      is DEAD because Ollama is now stopped. Hermes did not fall back to mini's
+      llama-server — `hermes-proxy` on `:8645` answers `/v1/models` with **292
+      OpenRouter models**, against a configured `OPENROUTER_API_KEY`.
+
+      This matters because `docs/operating-manual.md` routed "away from a computer"
+      work to Hermes as Tier L, and Tier L means "data never leaves controlled
+      hardware." Anything driven through the gateway, proxy or dashboard has been
+      able to egress to a third party. The manual and `ser5/README.md` are corrected;
+      the ROUTE is not.
+
+      Hermes speaks only `OLLAMA_BASE_URL`, so mini's OpenAI-compatible `:8090/v1` is
+      not a drop-in substitute. Options, none yet chosen:
+      1. Run Ollama on mini again purely as a Hermes backend — costs residency that
+         llama-server currently owns, and reintroduces the memory contention that
+         stopping it resolved.
+      2. Put an Ollama-protocol shim in front of `:8090`.
+      3. Accept Hermes as a Tier X personal surface and never send client material
+         through it. Cheapest, and matches how it actually behaves today.
+
+      Until this is decided, treat Hermes as third-party-egress.
+
+## Housekeeping
+
+- [ ] **Decide on `/data/agentlab` (824K on ser5) — deliberately, not by reflex.**
+      Frozen archive of quality-loop's 356 recorded runs (`runs.db`) plus a README
+      explaining what it was. Nothing writes to it. It is in restic. Keep as evidence
+      for the "what measures quality" question above, or archive and delete:
+
+      ```sh
+      mkdir -p /data/archive && cp /data/agentlab/runs.db /data/archive/qloop-runs-2026-08.db
+      rm -rf /data/agentlab
+      ```

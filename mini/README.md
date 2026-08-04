@@ -185,63 +185,59 @@ cat /proc/cmdline                 # confirm iommu=pt amd_iommu=on + GTT/ttm flag
 rocminfo | grep -i gfx1151        # ROCm sees the GPU
 dmesg | grep -i gtt               # GTT sizing
 id ollama                         # service account has render + video groups
-journalctl -u ollama | grep -i rocm
-#   expect: library=ROCm compute=gfx1151 ... total ~111 GiB available ~110 GiB
+journalctl --user -u llama-quality | grep -iE 'Vulkan|ROCm|gfx1151'
+#   expect the RADV device and ~110 GiB available
 ```
 
-Measured anchor on this node: `qwen3.6:35b-a3b-mtp-q4_K_M` (22 GB, MoE,
-3B active) decodes at **70-80 tok/s** and prefills at **~205 tok/s**, implying
-~185 GB/s effective bandwidth (~86% of the ~215 GB/s ceiling). Dense models do
-not get the same win: the old `qwen3.6:27b-mtp-q4_K_M` reads 17 GB/token and
-lands around **11-15 tok/s**. On mini, decode tracks active parameters read per
-token, not headline parameter count.
+Measured anchor on this node (2026-08-04, ROCm 7.14, llama-server):
+`qwen3.6-35b-a3b-mtp-q4_K_M` (22 GB, MoE, 3B active) decodes at **86-95 tok/s**
+single-stream and prefills at **~205 tok/s**, implying ~185 GB/s effective
+bandwidth (~86% of the ~215 GB/s ceiling). Dense models do not get the same win:
+the old `qwen3.6:27b-mtp-q4_K_M` reads 17 GB/token and lands around
+**11-15 tok/s**. On mini, decode tracks active parameters read per token, not
+headline parameter count. (The older 70-80 tok/s figure in this file was the
+Ollama serving path, which is no longer used.)
 
 ---
 
-## Model policy - two warm base models
+## Model policy - two llama-server instances
 
-mini keeps exactly **two base models resident**, at the global
-**131072-token window**, with no baked system prompts (agent roles live in the
-workstation opencode config - see `ollama_base_models` in
-`ansible/group_vars/all.yml`):
+Serving is `llama-server`, not Ollama. Two instances run as Podman quadlets from
+`llamacpp_instances` in `roles/llamacpp`, named by ROLE so the model can be
+swapped without renaming the unit. No baked system prompts — agent roles live in
+the workstation opencode config.
 
-| Slot | Model | Shape | Used for |
-|------|-------|-------|----------|
-| DEPTH | `qwen3-coder-next:latest` | 80B-A3B MoE hybrid Gated-DeltaNet (3B active) | complex coding + deep reasoning |
-| DRIVER | `qwen3.6:35b-a3b-mtp-q4_K_M` | 35B-A3B MoE (3B active) | general tasks, orchestration |
+| Unit | Port | Model | Shape | Slots | Ctx/slot | MTP | Measured |
+|---|---|---|---|---|---|---|---|
+| `llama-quality` | 8090 | `qwen3.6-35b-a3b-mtp-q4_K_M` | 35B-A3B MoE (3B active), 22 GB | 4 | 131072 | on | 86-95 tok/s c=1; 142 agg c=4 |
+| `llama-throughput` | 8091 | `gpt-oss-20b-MXFP4` | 20B MoE, 12 GB | 8 | 131072 | off | 76 tok/s c=1; 202 agg c=8 |
 
 This is a bandwidth box, not a compute box: Strix Halo has ~215 GB/s theoretical
 memory bandwidth, and decode speed tracks the **active parameters read per token**.
-The measured driver anchor hits 70-80 tok/s at ~185 GB/s effective bandwidth; the
-old dense `qwen3.6:27b-mtp-q4_K_M` reads 17 GB/token and only manages ~11-15
-tok/s while scoring ~11-15 SWE-bench Verified points below `qwen3-coder-next`.
-MoE wins enormously here; a dense model in a warm slot is a mistake. The dense 27B
-stays on disk as the one-line rollback in `ollama_base_models`.
+The quality anchor hits 86-95 tok/s at ~185 GB/s effective bandwidth; the old
+dense `qwen3.6:27b-mtp-q4_K_M` reads 17 GB/token and only manages ~11-15 tok/s.
+MoE wins enormously here; a dense model is a mistake.
 
-`OLLAMA_MAX_LOADED_MODELS=2` + `OLLAMA_KEEP_ALIVE=-1` pin the pair; running any
-third model evicts one of them (deliberate - the pair is the fleet). The 131072
-window is global because `/v1` cannot set `num_ctx` per request and a Modelfile
-`num_ctx` below native is ignored. KV cost is context × parallel, so 128k at
-`OLLAMA_NUM_PARALLEL=2` is the same ~256k-token KV budget as 64k at 4-way:
-weights (51 + 22 GB) plus ~22 GB of q8_0 KV budget ~95 GB of the ~110 GB GPU
-pool. The trade is concurrency - a third simultaneous request queues. 256k does
-not fit this pair and would cost ~21 minutes of prefill before first token
-anyway; 128k costs ~10 minutes worst case, which is a ceiling, not the norm.
+**Context is per SLOT and partitioned statically at startup** (`-c` total divided
+by `-np` slots), so a single chat can never exceed 131072 no matter how idle the
+box is, and there is no per-request `num_ctx`. Raising ctx/slot means lowering
+slot count or raising total — and total has a hard ceiling: `-c 2097152` hung the
+amdgpu DRM allocator unkillably and needed a reboot. `llamacpp_ctx_warn` guards
+against it. A packed 131072 prompt also costs ~10 minutes of prefill at ~205 t/s,
+so the window is capacity, not a target.
 
-### Heavy tier
+MTP acceptance on `:8090`, measured at concurrency 1 from
+`llamacpp:tokens_predicted_total / llamacpp:n_decode_total` (max 2.00): code 1.94,
+reasoning 1.94, prose 1.70 — 85-97% of drafts accepted, against 0.99 on `:8091`.
+Measure it at concurrency 1 only; continuous batching decodes every active slot in
+one step and inflates the ratio regardless of MTP.
 
-Pulled and kept on disk, **never resident** - loading either one evicts a warm
-model, so schedule them off-hours (for example a systemd timer job on
-ser5):
-
-| Model | Shape | Use |
-|-------|-------|-----|
-| `gpt-oss:120b` | 117B-A5.1B MoE (5.1B active), 65 GB | best general reasoning that fits; hard-problem tier |
-| `nemotron-cascade-2:latest` | 30B-A3B Mamba2-Transformer MoE (~3.6B active), 24 GB | math/algorithm escalation and independent judge |
-
-Reasoning is a per-request concern: `reasoning_effort: "none"` on `/v1` disables
-thinking (verified on Ollama 0.31.2; `/no_think` and a `think:false` body field
-are both ignored on `/v1` - native `/api/chat` honours `think:false`).
+Ollama is installed but **stopped and disabled**. It is for pulling and trying a
+model by hand, sized `context 32768 / parallel 1 / max_loaded 1 / keep_alive 5m`.
+It cannot serve alongside llama-server — the two cannot both hold weights in
+122 GiB — so stop an instance first. Thinking is disabled per request with
+`chat_template_kwargs: {enable_thinking: false}`; budget tokens for it when on,
+since reasoning can consume the whole `max_tokens` and return empty content.
 
 ---
 
@@ -288,12 +284,14 @@ nothing a quadlet does not do better and cost the ability to stop the server.
 ## Watch-outs
 
 - **No ROCm nightlies (7.9–7.12).** They cap memory allocation at 64 GB — useless on
-  this 128 GB box. Stay on the pinned 7.2.x production stream.
-- **Leave RAM headroom.** The warm pair is 51 + 22 = 73 GB of weights plus ~22 GB
-  of q8_0 KV at `OLLAMA_CONTEXT_LENGTH=131072` × `OLLAMA_NUM_PARALLEL=2`, or ~95 GB
-  of the ~110 GB GPU pool. Context and parallel multiply into the KV budget - raise
-  one only by lowering the other. Loading a third/non-resident model evicts a warm
-  model and can still pressure unified memory.
+  this 128 GB box. The pinned stream is **7.14.0 from the TheRock tarball**, which is
+  where gfx1151 became officially supported (2026-07-15). Do not "fix" this back to
+  7.2.x: that is only what `repo.radeon.com/rocm/apt` is frozen at, not the current
+  release.
+- **Leave RAM headroom.** The two llama-server instances hold 22 + 12 = 34 GB of
+  weights plus their KV, and measured ~72 GB resident of the ~110 GB GPU pool.
+  KV cost is ctx × slots, so raising one means lowering the other. Do not start
+  Ollama while they run — it cannot hold weights alongside them in 122 GiB.
 - **Re-verify after any bump.** Re-run the verify block above after any kernel or ROCm
   upgrade before trusting the node.
 - **gfx1151 is community-supported only.** Pin versions; nothing here is on AMD's
