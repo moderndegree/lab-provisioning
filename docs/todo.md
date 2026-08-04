@@ -161,3 +161,37 @@ answer down; if it's "yes, drifted," that's what triggers the freeze above.
       mkdir -p /data/archive && cp /data/agentlab/runs.db /data/archive/qloop-runs-2026-08.db
       rm -rf /data/agentlab
       ```
+
+## Inference tuning — decisions the 2026-08-04 benchmarks point at
+
+Measured with `llama-benchy-suite` on mini; raw results in `/data/bench/llama-benchy`,
+summarised in `mini/AGENTS.md`. None of these are applied — each trades something.
+
+- [ ] **Raise `llamacpp_cache_ram` on the quality instance.** Highest-value knob
+      found. A warm prefix is worth ~12x on TTFT (depth 32768: 40.2s cold -> 3.3s
+      warm), and the 8 GiB llama-server default holds only a handful of ~1 GiB
+      deep-context entries — 41 evictions were logged in a single benchmark pass.
+      Every eviction is a session that pays the cold price on its next turn.
+      Cost: unified memory shared with the GPU pool (box sat at ~72 of ~122 GiB
+      during benchmarking). Check `free -g` before choosing a value.
+
+- [ ] **Consider `-np 2` + `llamacpp_mtp: false` on quality.** Three findings
+      converge here: quality's aggregate throughput PEAKS at concurrency 2 (91.2
+      t/s) and falls to 62.1 at 4; MTP costs 18% at concurrency 2 while gaining
+      21% at 1; and fewer slots means more context per chat (262144 rather than
+      131072). Cost: two fewer concurrent sessions. This is a capacity decision.
+      Do not apply it without deciding what fan-out the box actually needs — the
+      last time this repo sized `parallel` to a workload that did not exist, the
+      workload was quality-loop and it got deleted.
+
+- [ ] **Experiment with `llamacpp_cache_reuse`.** Defaults to 0 (KV-shift reuse
+      disabled). Agent loops frequently change the MIDDLE of an otherwise
+      identical prompt (a tool result lands, an edit applies), which is precisely
+      the divergence case this handles. Entirely unmeasured — an experiment, not
+      a fix.
+
+- [ ] **Re-run the agentic sims against these findings.** `packages/inference-bench`
+      measured a workload we invented; llama-benchy measured the server. The
+      concurrency peaks disagree with the earlier `agentsim` numbers, and the
+      likely reason is prompt shape (pp4096 exact-tg here vs short prompts there).
+      Worth reconciling before trusting either for capacity planning.

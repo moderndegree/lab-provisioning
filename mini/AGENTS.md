@@ -150,20 +150,71 @@ Throughput was equal or slightly better after the move. Re-measured 2026-08-04 o
 ROCm 7.14: quality 86-95 tok/s at c=1 and 142 tok/s aggregate at c=4; throughput
 76 tok/s at c=1 and 202 tok/s aggregate at c=8.
 
+Benchmarked axes (2026-08-04, `llama-benchy-suite`, results in `/data/bench/llama-benchy`):
+
+- **Both instances peak WELL below their slot count on agent-shaped traffic**
+  (pp4096/tg256), and get worse past the peak rather than merely flattening:
+
+  | conc | quality (4 slots) | throughput (8 slots) |
+  |---|---|---|
+  | 1 | 88.1 t/s | 76.4 t/s |
+  | 2 | **91.2** | 84.8 |
+  | 4 | 62.1 | **114.5** |
+  | 8 | — | 80.8 |
+
+  Quality peaks at 2, throughput at 4. Since slots divide the context window,
+  `-np 2` on quality would give 262144 per chat AND better throughput — and at
+  c=2 MTP is costing 18%, so `-np 2` + `llamacpp_mtp: false` is the configuration
+  the numbers point at. Not applied: it trades away two slots, which is a capacity
+  decision, not a tuning one.
+
+- **Context depth is expensive COLD and cheap WARM — this is the big one.**
+  Decode degrades with depth (quality 91.7 -> 62.0 t/s from depth 0 to 65536;
+  throughput 79.0 -> 49.8). But TTFT is where it hurts, and prefix caching decides
+  which number you get:
+
+  | depth | cold prefill TTFT | warm (cached prefix) TTFT |
+  |---|---|---|
+  | 16384 | 17.5s | 2.8s |
+  | 32768 | 40.2s | 3.3s |
+  | 65536 | 102.2s | (not measured) |
+
+  ~12x on TTFT. Decode is unaffected by caching (72.9 vs 75.7 t/s) — this is
+  purely prefill. A multi-turn agent that keeps its prefix warm pays ~3s; one
+  whose prefix got evicted pays 40-100s. See `llamacpp_cache_ram` in
+  roles/llamacpp/defaults — the 8 GiB default holds only a handful of deep
+  entries and logged 41 evictions during a single benchmark pass.
+
+- **Thinking costs nothing in token RATE** (90.6 t/s on vs 86.8 off) — the cost is
+  that reasoning consumes the generation budget before any answer appears, which a
+  t/s figure cannot show. Budget tokens, not time.
+
 The things that bite:
 
-- **MTP is a per-workload trade, not a free win.** `--spec-type draft-mtp` with
-  `--spec-draft-n-max 1` buys interactive latency and costs aggregate throughput.
-  Acceptance is much better than earlier notes claimed — measured 2026-08-04 from
+- **MTP is a per-workload trade, and the workload is CONCURRENCY.** Settled by a
+  matched A/B on 2026-08-04 (`llama-benchy-suite mtp`, same model/ctx/slots, only
+  `--spec-type draft-mtp` differing, pp4096 tg512):
+
+  | concurrency | MTP on | MTP off | effect |
+  |---|---|---|---|
+  | 1 | 86.6 t/s | 71.4 t/s | **+21.3%** |
+  | 2 | 79.2 t/s | 96.8 t/s | **-18.2%** |
+  | 4 | 84.1 t/s | 86.5 t/s | -2.8% |
+
+  So MTP is a clear win single-stream and a clear loss at 2-way. The older
+  "~29% aggregate cost" claim was directionally right; these are the real numbers.
+
+  Acceptance is 85-97%, measured from
   `llamacpp:tokens_predicted_total / llamacpp:n_decode_total` at concurrency 1
-  (max 2.00): code 1.94, reasoning-with-thinking 1.94, prose 1.70, i.e. 85-97% of
-  drafts accepted, against 0.99 on the non-MTP instance. The old "50-58%" figure
-  is superseded. **The ~29% aggregate cost has NOT been re-measured since the
-  ROCm 7.14 rebuild** — treat it as unverified before using it to justify
-  `llamacpp_mtp: false`. Measure the ratio at concurrency 1 only: continuous
-  batching decodes every active slot in one step, which inflates it regardless of MTP.
-  The ceiling is structural — verifying n+1 tokens routes to up to `8*(n+1)`
-  experts instead of 8, so longer drafts cost what they save.
+  (max 2.00): code 1.94, reasoning 1.94, prose 1.70, against 0.99 on the non-MTP
+  instance. The old "50-58%" figure is superseded.
+
+  **High acceptance does not mean proportional speedup, and the gap is not a
+  contradiction.** 1.95 tokens per step at ~62% of the step rate is 1.21x, which
+  is exactly the +21% measured. Verifying n+1 tokens routes to up to `8*(n+1)`
+  experts instead of 8, so the step costs more. Measure the ratio at concurrency 1
+  only — continuous batching decodes every active slot in one step and inflates it
+  regardless of MTP.
   Confirm it is live by grepping the journal for `MTP draft context`; without the
   flag the loader silently logs `unused tensor blk.40.nextn.* -- ignoring`.
 - **`seccomp=unconfined` is not optional.** The ROCm/Vulkan userspace makes

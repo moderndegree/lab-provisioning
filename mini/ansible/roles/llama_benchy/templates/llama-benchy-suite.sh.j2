@@ -116,9 +116,17 @@ suite_prefix() {
   # every turn, so almost all of a turn's prefill is a cache hit. If this is
   # working, effective prefill cost per turn collapses; if it is not, every turn
   # pays full prefill and long sessions get quadratically expensive.
+  # --depth IS REQUIRED HERE. --enable-prefix-caching measures reuse of an
+  # EXISTING cached context, so with --depth 0 there is no prefix to reuse and
+  # the suite silently degrades into a plain concurrency run at that prompt size
+  # (every row comes back context_size=0). That is what the first version of this
+  # did, and the numbers looked plausible enough to nearly get reported.
+  #
+  # Shape: a large cached history (--depth) plus a small new turn (--pp), which
+  # is what an agent actually sends on turn N.
   for tv in $(targets); do
-    run prefix "$tv" --pp 8192 --tg 256 --depth 0 \
-      --enable-prefix-caching --concurrency $(conc_for "$tv")
+    run prefix "$tv" --pp 2048 --tg 256 --depth 16384 32768 \
+      --enable-prefix-caching --concurrency 1 2
   done
 }
 

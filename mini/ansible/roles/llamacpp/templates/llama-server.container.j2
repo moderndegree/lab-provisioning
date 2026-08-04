@@ -52,6 +52,12 @@ Exec=-m {{ item.model }} \
      -c {{ item.ctx }} \
      -np {{ item.parallel }} \
      {{ item.base_args | default(llamacpp_base_args) }} \
+{% if item.cache_ram | default(llamacpp_cache_ram) %}
+     --cache-ram {{ item.cache_ram | default(llamacpp_cache_ram) }} \
+{% endif %}
+{% if item.cache_reuse | default(llamacpp_cache_reuse) %}
+     --cache-reuse {{ item.cache_reuse | default(llamacpp_cache_reuse) }} \
+{% endif %}
 {% if item.mtp | default(false) | bool %}
      --spec-type draft-mtp --spec-draft-n-max {{ item.mtp_draft_max | default(1) }} \
 {% endif %}

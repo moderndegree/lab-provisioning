@@ -98,6 +98,40 @@ llamacpp_host: "0.0.0.0"
 # --metrics turns on the Prometheus endpoint at /metrics, which ser5's
 # observability role scrapes. Off by default in llama.cpp.
 llamacpp_base_args: "-ngl 999 -fa 1 --no-mmap --metrics"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Prompt-cache sizing  (measured 2026-08-04, packages/inference-bench)
+# ─────────────────────────────────────────────────────────────────────────────
+# EMPTY = keep llama-server's default of 8192 MiB. Set a value to raise it.
+#
+# This is the highest-value untuned knob on the box for multi-turn agent work.
+# A warm prefix is worth ~12x on time-to-first-token:
+#
+#   quality, depth 32768 : cold prefill 40.2s -> warm (cached prefix) 3.3s
+#   quality, depth 16384 : cold prefill 17.5s -> warm                 2.8s
+#   throughput, depth 32768: cold 37.1s -> warm 3.9s
+#
+# Decode speed is unchanged by caching (72.9 vs 75.7 t/s) — this is purely a
+# prefill/TTFT effect, which is exactly what an agent re-sending its history
+# every turn pays.
+#
+# The risk is eviction: a single deep-context entry is ~0.7-1.2 GiB, so the 8 GiB
+# default holds only a handful. `llama-quality` logged 41 "making room for prompt
+# cache entry, removing oldest entry" events during one benchmark pass — every one
+# of those is a session that will pay the COLD price on its next turn. With
+# several concurrent agent sessions the cache thrashes and TTFT reverts from ~3s
+# to 40-100s.
+#
+# Before raising it: this is unified memory shared with the GPU pool. The box sat
+# at ~72 GiB of ~122 GiB during benchmarking, so there is headroom, but confirm
+# with `free -g` rather than assuming. Raising it costs RAM, not GPU compute.
+llamacpp_cache_ram: ""
+
+# min chunk size for reusing cache via KV shifting after a mid-prompt divergence.
+# EMPTY = llama-server default of 0 (disabled). Relevant when a tool result or
+# edit changes the middle of an otherwise-identical prompt, which is common in
+# agent loops. Unmeasured here — treat enabling it as an experiment, not a fix.
+llamacpp_cache_reuse: ""
 llamacpp_restart_sec: 10
 
 # Health check is a READINESS probe. Model load is 4-12s warm and much longer
