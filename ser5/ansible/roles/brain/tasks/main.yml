@@ -50,6 +50,9 @@
         group: "{{ username }}"
         mode: "0644"
 
+    # force: false — these are seeded once and then belong to the vault; a
+    # converge must never overwrite a note template the owner has edited.
+    # Consequence: a template bug ships permanently, so fix it on the box too.
     - name: Seed decision template
       ansible.builtin.template:
         src: decision.md.j2
