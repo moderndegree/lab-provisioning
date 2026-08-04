@@ -82,6 +82,27 @@ session cannot exceed it. There is no residency or eviction to reason about any
 more: llama-server holds its weights for the process lifetime. (The previous
 "two warm slots" wording described Ollama, which is now stopped.)
 
+## Context budgets — why the orchestrator delegates reading
+
+Every agent gets **131072 tokens** (see below: that is per SLOT, not the model's
+native 262144). The orchestrator holds its window for the WHOLE session; every
+subagent's is discarded when it finishes. Nine agents therefore give you roughly
+nine independent working sets, but only if the orchestrator stops being the sole
+reader.
+
+Earlier experiments failed exactly here: subagents had no tools, so the
+orchestrator had to read everything and paste it into every package, exhausted its
+window mid-task, and compaction discarded the reasoning behind the plan.
+
+So `planner`, `architect`, `reviewer`, `security-auditor`, `doc-writer` and `deep`
+now hold `read`/`grep`/`glob`/`list`. Packages carry POINTERS — paths, symbols,
+ranges — and the agent fetches its own detail. Literal content is pasted only when
+it is not retrievable from the repo (the user's words, an error, a log, a vault
+note, or the diff under review).
+
+The orchestrator must not edit files, write implementations, run tests, or read a
+file in full to "understand the repo". Those are dispatches, not shortcuts.
+
 Roles live in agent prompts, not baked model variants. Reasoning mode is set
 per agent via `reasoningEffort` in `opencode.json` (`"none"` on the
 orchestrator and devops for deterministic tool dispatch; everything else

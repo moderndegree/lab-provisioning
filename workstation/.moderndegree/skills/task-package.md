@@ -3,9 +3,18 @@
 ## Role
 
 Bad answers usually come from thin handoffs. **You (orchestrator) own problem
-understanding and context packaging.** Subagents — especially no-tools ones —
-only see what you paste. This skill is **mandatory** before dispatching any
-subagent on non-trivial work.
+understanding and context packaging.** This skill is **mandatory** before
+dispatching any subagent on non-trivial work.
+
+**Packaging means POINTERS, not payloads.** Every subagent except `research` can
+`read`, `grep`, `glob` and `list`. Their context is disposable — 131072 tokens
+discarded when they finish — while yours has to survive the whole session. So a
+file you paste costs you permanently and saves them nothing. Give coordinates
+(paths, symbols, ranges), the goal, and done-when; let them fetch the detail.
+
+Paste literal content only where it is NOT retrievable from the repo: the user's
+own words, a runtime error, a log excerpt, a vault note, a decision you made — and
+the diff under review, which may not be committed yet.
 
 ## Decision tree (follow in order)
 
@@ -20,8 +29,11 @@ subagent on non-trivial work.
 4. **Prefer tools over user questions.** If the repo/logs/vault can answer it,
    load it. Ask the user only for **blocking** unknowns (intent, priority, risk,
    client consent, which environment). Label everything else as an assumption.
-5. **No thin handoffs.** If a no-tools subagent would need to invent files, APIs,
-   or requirements, gather more context first — do not dispatch yet.
+5. **No thin handoffs — but thin is about INTENT, not volume.** A package is thin
+   when the agent would have to invent requirements, guess the goal, or make a
+   decision that is not theirs. It is NOT thin merely because file contents were
+   not pasted; pointing at the right file is a complete handoff. Adding bulk to a
+   package that lacks a clear done-when does not fix it.
 6. On subagent `BLOCKED` / `FAIL` → enrich the package (exact gaps from handoff),
    re-gather if needed, re-dispatch. Do not retry the same thin prompt.
 

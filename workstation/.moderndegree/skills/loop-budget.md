@@ -11,6 +11,8 @@ Models and agents must not thrash. Hard budgets for every non-trivial task.
 | Cortex `vault_search` rounds per task | **2** | Use what you have; no search thrash |
 | Tool retries on identical failing command | **2** | Change approach or BLOCKED |
 | Subagents in parallel for same subtask | **1** | No duplicate planner/coder races |
+| Critics dispatched in parallel on one diff | **4** | `reviewer`, `security-auditor`, `tester`, `doc-writer` — this is the throughput endpoint's measured peak; a 5th slows all of them |
+| Orchestrator files read in full | **0** | Locate with grep/glob, delegate the reading. Your context is the only one that is not disposable |
 
 ## Reasoning / thinking
 
