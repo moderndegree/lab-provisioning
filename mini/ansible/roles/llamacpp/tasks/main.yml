@@ -106,13 +106,35 @@
 # ─── Image ───────────────────────────────────────────────────────────────────
 # Pulled explicitly so the first `systemctl start` is not a multi-GB download
 # under a start timeout. Podman would auto-pull, just far less predictably.
-- name: Pull the llama.cpp image
-  containers.podman.podman_image:
-    name: "{{ item }}"
-    state: present
+#
+# Deliberately ansible.builtin.command rather than containers.podman.podman_image:
+# that module would add a collection dependency to requirements.yml for a single
+# task, and `podman image exists` + `podman pull` is the pattern this repo
+# already used. The exists-check is what keeps it idempotent.
+- name: Check whether the llama.cpp image is already present
+  ansible.builtin.command:
+    cmd: "podman image exists {{ item }}"
   become_user: "{{ node_user }}"
   environment: "{{ llamacpp_user_env }}"
-  loop: "{{ llamacpp_instances | map(attribute='image') | map('default', llamacpp_image) | unique | list }}"
+  loop: "{{ llamacpp_images }}"
+  loop_control:
+    label: "{{ item }}"
+  register: llamacpp_image_check
+  changed_when: false
+  failed_when: false
+
+# A first pull is ~2 GB and podman writes nothing to the SSH channel until it
+# finishes, so give it room rather than letting the control connection look idle.
+- name: Pull the llama.cpp image
+  ansible.builtin.command:
+    cmd: "podman pull {{ item.item }}"
+  become_user: "{{ node_user }}"
+  environment: "{{ llamacpp_user_env }}"
+  loop: "{{ llamacpp_image_check.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item.rc != 0
+  changed_when: true
 
 # ─── Guard rails ─────────────────────────────────────────────────────────────
 # Each of these would otherwise surface as a unit that restart-loops with the

@@ -38,6 +38,11 @@ llamacpp_image: "docker.io/kyuz0/amd-strix-halo-toolboxes:vulkan-radv"
 # Group handle: `systemctl --user {start,stop,status} llama-servers.target`.
 llamacpp_target: "llama-servers.target"
 
+# Every distinct image across instances, so the pull tasks iterate images rather
+# than instances (two instances sharing one image must not pull it twice).
+llamacpp_images: >-
+  {{ llamacpp_instances | map(attribute='image', default=llamacpp_image) | unique | list }}
+
 # Where GGUFs live, bind-mounted read-only into every instance. Deliberately NOT
 # hardlinks into /data/ollama/blobs: that would hide the dependency and pin a
 # blob alive after an `ollama rm`.
