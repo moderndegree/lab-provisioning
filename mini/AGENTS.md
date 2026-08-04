@@ -283,7 +283,7 @@ matters for gated repos; unset writes no token file.
   throughput.
 - **Never install `linux-firmware-20251125`** — it breaks ROCm. The `base` role pins it
   out via `/etc/apt/preferences.d/no-bad-firmware`.
-- Kernel cmdline (`amd_iommu=off amdgpu.gttsize=131072 ttm.pages_limit=33554432`) is
+- Kernel cmdline (`iommu=pt amd_iommu=on amdgpu.gttsize=131072 ttm.pages_limit=33554432`) is
   managed in `base` via `/etc/default/grub`. A change notifies the `update-grub` handler
   and sets the `reboot_needed` fact; the final play in `ansible/site.yml` then reboots
   the host (when `auto_reboot: true`, the default).

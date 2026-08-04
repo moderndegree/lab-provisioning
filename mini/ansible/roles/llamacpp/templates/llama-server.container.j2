@@ -69,7 +69,15 @@ Exec=-m {{ item.model }} \
 # Readiness, not liveness. Model load is 4-12s from a warm page cache and far
 # longer cold, so StartPeriod has to cover the worst case or systemd would keep
 # restarting a server that was merely still loading.
-HealthCmd=/bin/sh -c "curl -sf http://127.0.0.1:{{ item.port }}/health || exit 1"
+# NO nested quotes and no explicit /bin/sh. Quadlet splits HealthCmd= on quotes
+# before podman ever sees it, so `/bin/sh -c "curl ... || exit 1"` arrived as an
+# unterminated string and the check failed EVERY time with
+#   /bin/sh: -c: line 1: unexpected EOF while looking for matching `"'
+# Health therefore sat at "starting" forever and each boot left a failed
+# podman-healthcheck unit behind. podman already runs a non-JSON HealthCmd via
+# the shell, and `curl -sf` exits non-zero on connection failure or HTTP error,
+# so the wrapper was redundant as well as broken.
+HealthCmd=curl -sf http://127.0.0.1:{{ item.port }}/health
 HealthInterval={{ llamacpp_health_interval }}
 HealthStartPeriod={{ llamacpp_health_start_period }}
 HealthTimeout=10s
