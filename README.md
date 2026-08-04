@@ -19,6 +19,7 @@ autoinstall + Ansible provisioning stack; lab software lives under
 | Directory | What |
 |-----------|------|
 | [`docs/operating-manual.md`](docs/operating-manual.md) | One-page entry point: which harness when, which model where, and how to drive it from the phone |
+| [`docs/provisioning-checklist.md`](docs/provisioning-checklist.md) | One-time manual steps for the llama.cpp serving change — Ansible cannot remove what it no longer manages |
 | [`packages/inference-bench/`](packages/inference-bench/README.md) | Benchmarks for mini's llama.cpp serving path — the numbers behind the `llamacpp` role's sizing |
 | [`workstation/`](workstation/README.md) | opencode config for the 9-agent coding team (copied/symlinked onto the dev box) |
 | [`docs/brain.md`](docs/brain.md) | Second brain vault on ser5 (`/data/brain`); UI/MCP in sibling **ai-workstation** |
