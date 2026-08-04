@@ -15,22 +15,44 @@ gpu_backend: "vulkan"
 # roles/ollama's systemd override template on BOTH paths (it renders a commented
 # revert hint, and Jinja still expands {{ }} inside a systemd '#' line), so this
 # must always be defined.
-# Strix Halo is NOT on AMD's official ROCm support matrix; HSA_OVERRIDE_GFX_VERSION
-# tricks ROCm into the closest supported target (RDNA3/gfx1100). Kernel 7.0 clears
-# the >=6.18.4 floor.
+# NO LONGER NEEDED as of ROCm 7.14 — kept only for the rollback path.
+# gfx1151 became an officially supported target in ROCm 7.14.0 (2026-07-15), and
+# 7.14 enumerates it natively: `rocminfo` reports "Name: gfx1151 / Marketing
+# Name: AMD RYZEN AI MAX+ 395 w/ Radeon 8060S" with no override set. This var is
+# only consumed when rocm_install_method is "apt" (the pre-7.14 path), where the
+# older stack did need to be tricked into the closest supported target.
 hsa_override_gfx_version: "11.5.1"
 
 
-# ─── AMD GPU installer (ROCm 7.2.4 production — pinned for gfx1151) ───────────
-# ROCm 7.2.x production is the community-proven stack for gfx1151 (Strix Halo).
-# Do NOT use 7.9–7.12 preview/nightlies: ROCm 7 nightlies cap memory allocation
-# at 64 GB (known bug) — useless on this 128 GB box.
+# ─── ROCm userspace (7.14 via TheRock tarball) ───────────────────────────────
+# WHY A TARBALL AND NOT apt. ROCm moved to TheRock at 7.14 and the apt repo
+# (repo.radeon.com/rocm/apt) is frozen at 7.2.4 — checking it and concluding
+# "we are current" is a trap. 7.14 ships as per-architecture tarballs instead,
+# and there is a build for exactly this GPU.
 #
-# NOTE: AMD has not published a 26.04 ("questing") ROCm repo. The amdgpu-install
-# deb is just the repo-config/installer; the ROCm *userspace* it pulls (installed
-# with --no-dkms, driven by the in-tree amdgpu) works on 26.04. We therefore point
-# at the `noble` (24.04) deb. Switch the codename below if/when AMD ships a 26.04 repo.
-rocm_version: "7.2.4"
+# WHAT 7.14 CHANGES for this box, all verified on mini:
+#   - gfx1151 is an OFFICIALLY SUPPORTED target (7.14.0, 2026-07-15), not a
+#     tricked-into-gfx1100 workaround. rocminfo names it natively.
+#   - Ubuntu 26.04 is supported, so the old "point at the noble deb because AMD
+#     has no 26.04 repo" workaround is gone.
+#   - The arch-specific tarball is 8.3 GiB installed against 22 GiB for the apt
+#     stack, because it carries one architecture instead of all of them.
+#
+# The 64 GB memory-cap bug that made ROCm 7 NIGHTLIES unusable does not apply:
+# 7.14.0 is a production release. Do not confuse the two.
+#
+# Nothing on the serving path actually consumes this — Ollama runs Vulkan
+# (OLLAMA_VULKAN=1) and roles/llamacpp carries Mesa/RADV inside its image. ROCm
+# is here as the gpu_backend: rocm fallback and for host-side tooling
+# (rocminfo, rocm-smi). That is why it is worth keeping small.
+rocm_version: "7.14.0"
+rocm_install_userspace: true
+rocm_install_method: "tarball"          # "tarball" (7.14+) or "apt" (<= 7.2.4)
+rocm_prefix: "/opt/rocm-{{ rocm_version }}"
+rocm_tarball_url: "https://repo.amd.com/rocm/tarball-multi-arch/therock-dist-linux-gfx{{ rocm_gfx_target }}-{{ rocm_version }}.tar.gz"
+rocm_gfx_target: "1151"
+
+# Legacy apt path — only consulted when rocm_install_method == "apt".
 amdgpu_installer_version: "7.2.4.70204-1"
 amdgpu_installer_deb: "amdgpu-install_{{ amdgpu_installer_version }}_all.deb"
 amdgpu_installer_url: "https://repo.radeon.com/amdgpu-install/7.2.4/ubuntu/noble/{{ amdgpu_installer_deb }}"

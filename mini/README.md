@@ -56,11 +56,11 @@ lab-provisioning/
       vault.yml                     (gitignored) ansible-vault encrypted secrets (NEVER commit plaintext)
     roles/
       base/                         kernel cmdline (GRUB), packages, UFW, data disk
-      amdgpu_rocm/                  ROCm stack + Vulkan primary/fallback wiring
+      amdgpu_rocm/                  ROCm 7.14 userspace (TheRock tarball) + Vulkan wiring
+      llamacpp/                     llama-server Podman quadlets + GPU/model prerequisites
       ollama/                       Ollama LLM server + systemd override
       tailscale/                    tailnet join
       containers/                   rootless Podman; user lingering; subuid/subgid; quadlet
-      toolboxes/                    Strix Halo AI toolboxes via distrobox (enable_toolboxes)
       cloudflared/                  Cloudflare Tunnel (Podman quadlet; token-gated start)
 ```
 
@@ -156,13 +156,21 @@ gpu_backend: "rocm"   # was: vulkan
 
 Mesa Vulkan drivers are always installed regardless of backend.
 
-**Note on gfx1151 (Strix Halo):** The Radeon 8060S (gfx1151) is NOT on AMD's official
-ROCm support matrix. The `HSA_OVERRIDE_GFX_VERSION=11.5.1` environment variable (set in
-both `/etc/profile.d/rocm.sh` and the Ollama systemd override) makes the HSA runtime
-recognise the GPU as the nearest supported RDNA3 target. ROCm is installed **userspace
-only** (`amdgpu-install --no-dkms`); the in-tree `amdgpu` driver that ships with kernel
-7.0 drives the GPU. This is a community-proven workaround - re-run the verify block
-(below) after any kernel or ROCm bump.
+**Note on gfx1151 (Strix Halo):** as of **ROCm 7.14.0 (2026-07-15)** the Radeon 8060S
+(gfx1151) is an **officially supported target**, along with Ubuntu 26.04. `rocminfo`
+names it natively — `HSA_OVERRIDE_GFX_VERSION` is no longer required and survives only
+for the pre-7.14 apt rollback path.
+
+ROCm is installed from AMD's **per-architecture TheRock tarball**, not apt. This matters:
+`repo.radeon.com/rocm/apt` is frozen at 7.2.4, so checking it and concluding "we are
+current" is a trap — 7.14 ships through a different channel. The gfx1151 build is 8.3 GiB
+installed against 22 GiB for the all-arch apt stack. Still userspace-only; the in-tree
+`amdgpu` driver from kernel 7.0 drives the GPU.
+
+Nothing on the serving path actually uses host ROCm — Ollama runs Vulkan and the
+llama.cpp quadlets carry Mesa/RADV in their image. It exists as the `gpu_backend: rocm`
+fallback and for host tooling (`rocminfo`, `rocm-smi`). Re-run the verify block after
+any kernel or ROCm bump.
 
 ---
 
@@ -237,128 +245,45 @@ are both ignored on `/v1` - native `/api/chat` honours `think:false`).
 
 ---
 
-## Strix Halo toolboxes (`enable_toolboxes: true`)
+## llama.cpp serving path (`enable_llamacpp: true`)
 
-Containerised AI stacks from [strix-halo-toolboxes.com](https://strix-halo-toolboxes.com/),
-run through `distrobox`. Each image ships its own gfx1151-patched GPU userspace, so you
-can run and benchmark llama.cpp backends, ComfyUI, vLLM, or a fine-tuning stack **without
-touching the single ROCm/Vulkan install** the `amdgpu_rocm` role puts on the host.
+Podman quadlets, one per entry in `llamacpp_instances`, generated into
+`llama-<name>.service`. Two by default:
 
-These are on-demand shells, not services. Nothing starts at boot and the Ollama service on
-`:11434` is unaffected — Ollama stays the committed serving path; toolboxes are for the
-workloads it cannot express.
-
-Created by default (`toolboxes_instances` in `ansible/roles/toolboxes/defaults/main.yml`):
-
-| Toolbox | Image tag | Why |
-|---------|-----------|-----|
-| `llama-vulkan-radv` | `vulkan-radv` | Upstream's most compatible backend; matches this box's committed `gpu_backend` |
-| `llama-rocm-7.2.4` | `rocm-7.2.4` | Matches the host's pinned ROCm — the performance comparison |
-| `vllm-therock` | `vllm-therock-gfx1151:latest` | Continuous batching — the only stack here that measures multi-user throughput |
-
-ComfyUI, LLM fine-tuning, DwarfStar, AMDVLK, ROCm 6.4.4, and the stable-ROCm vLLM build are
-listed and commented out in the same file. Uncomment and re-run `make provision` to add one.
-
-Use them via the generated launcher in `~/.local/bin`:
+| Instance | Port | Model | Sizing |
+|----------|------|-------|--------|
+| `llama-quality` | 8090 | `qwen3.6-35b-a3b-mtp` (q4_K_M) | 131072/slot x 4, MTP on |
+| `llama-throughput` | 8091 | `gpt-oss-20b` (MXFP4) | 131072/slot x 8, MTP off |
 
 ```bash
-# confirm the GPU is visible from inside the toolbox
-llama-vulkan-radv llama-cli --list-devices     # expect: gfx1151
-
-# download a GGUF into the shared model dir (visible from every toolbox)
-llama-vulkan-radv hf download unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF \
-  --local-dir /data/toolboxes/models/qwen3-coder-30B-A3B
-
-# serve it — ALWAYS pass -fa 1 and --no-mmap on Strix Halo
-llama-vulkan-radv llama-server \
-  -m /data/toolboxes/models/qwen3-coder-30B-A3B/<file>.gguf \
-  -c 8192 -ngl 999 -fa 1 --no-mmap --host 0.0.0.0 --port 8081
-
-# no arguments drops you into an interactive shell
-llama-rocm-7.2.4
+systemctl --user start|stop|status llama-servers.target   # all instances
+systemctl --user restart llama-quality                     # just one
+journalctl --user -u llama-quality -f
 ```
 
-### Concurrency benchmarking with vLLM
+`name` is the **role** and becomes the unit and container; `alias` is the **model
+identity** clients send as `model`. Swapping a model changes the alias and leaves
+the unit name alone. Adding a third instance is one entry with a free port — it
+joins the target automatically; removing an entry stops and prunes it.
 
-vLLM is the reason there is a serving stack here besides Ollama: it does continuous
-batching, so it can saturate Strix Halo's memory bandwidth with many simultaneous
-sequences. Single-stream t/s will look *worse* than llama.cpp — aggregate throughput is
-the number it exists to produce.
+The image is `kyuz0/amd-strix-halo-toolboxes:vulkan-radv`, which carries a
+gfx1151-patched Mesa/RADV userspace and a llama.cpp built against it — the whole
+reason for using it rather than a stock llama.cpp container. It is an ordinary
+OCI image, so it runs directly under Podman; distrobox is not involved.
 
-It consumes HuggingFace repos, not GGUFs. The launcher is `vllm-therock`, not `vllm`, so it
-does not shadow the real `vllm` binary.
-
-**Models** come from the `hf` CLI, installed on the host by this role via pipx. `HF_HOME` is
-set to `/data/toolboxes/models/huggingface` for host shells (`/etc/profile.d/huggingface.sh`)
-*and* for every toolbox (`--env` in the flag profiles), so there is one cache and one token
-on both sides of the container boundary:
+For interactive work against the same stack:
 
 ```bash
-hf download cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit     # ~20 GB, straight into the shared cache
-hf cache scan                                      # what is on disk and how big
-HF_HUB_ENABLE_HF_TRANSFER=1 hf download <repo>     # faster, less informative progress
+podman run --rm -it --device /dev/dri --device /dev/kfd \
+  --security-opt seccomp=unconfined -v /data/models:/data/models:ro \
+  docker.io/kyuz0/amd-strix-halo-toolboxes:vulkan-radv /bin/bash
 ```
 
-Gated repos (`meta-llama/*`, `google/gemma-*`) need the licence accepted on the model page
-plus a token — either set `vault_hf_token` (Placeholder Table below) or run `hf auth login`
-once on mini. Both write the same `$HF_HOME/token`.
-
-**Then serve and bench** (vLLM listens on `:8000`, in two shells):
-
-```bash
-sudo systemctl stop ollama                # not optional for a valid measurement
-
-vllm-therock rocm-smi --showproductname   # expect: Radeon 8060S Graphics
-vllm-therock start-vllm                   # TUI wizard: pick a model, it sets the flags
-
-# or drive it manually
-vllm-therock vllm serve cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit \
-  --max-model-len 8192 --max-num-seqs 32 --gpu-memory-utilization 0.75
-vllm-therock vllm bench serve --model cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit \
-  --base-url http://localhost:8000 --dataset-name random \
-  --max-concurrency 32 --num-prompts 256
-
-sudo systemctl start ollama               # put the appliance back
-```
-
-**Set `--gpu-memory-utilization` explicitly.** vLLM's default is 0.9 of what ROCm reports as
-device memory, and on this box that report is the GTT size from the kernel cmdline —
-`amdgpu.gttsize=131072`, i.e. 128 GiB on a machine with 122 GiB of real RAM. Taking the
-default asks vLLM to preallocate ~115 GiB of KV cache and leaves the OS to be OOM-killed.
-Start at 0.75 and walk it up while watching `amdgpu_top`.
-
-Sweep `--max-concurrency` (1, 4, 8, 16, 32) against a fixed `--max-num-seqs` to find where
-throughput stops scaling. Upstream's published numbers for this hardware are at
-[kyuz0.github.io/amd-strix-halo-vllm-toolboxes](https://kyuz0.github.io/amd-strix-halo-vllm-toolboxes/).
-
-Watch-outs specific to toolboxes:
-
-- **`-fa 1 --no-mmap` is mandatory.** Upstream reports crashes and severe slowdowns on
-  Strix Halo without flash attention and no-mmap.
-- **Toolboxes share the host network namespace.** A port bound inside one is a real mini
-  port. Never use 11434 — that is Ollama. The `tailscale0` UFW rule already covers any
-  port you pick, so a `llama-server` here is reachable from the tailnet with no new rules.
-- **They compete with Ollama for the same 128 GB.** Stop or unload warm models
-  (`ollama stop <model>`) before loading a large GGUF in a toolbox.
-- **`/etc/udev/rules.d/70-kfd.rules` is load-bearing** and sets mode 0666 on `/dev/kfd`
-  and the render nodes. Rootless Podman runs the toolbox under `--userns keep-id`, and a
-  host GID not mapped into that namespace cannot satisfy the kernel check, so `render`/
-  `video` membership does not reliably reach inside the container. This is upstream's
-  documented fix for headless hosts. It grants GPU compute to any local
-  user — acceptable on a single-user tailnet-only node, so set
-  `toolboxes_permissive_udev: false` if that ever stops being true.
-- **Never put a *named* group in `toolboxes_flags_*`.** Under rootless Podman
-  `--group-add render` resolves against the *container image's* `/etc/group`, so it grants
-  nothing — or stops the container starting at all if the image has no such group. No
-  `--group-add` is needed: distrobox already forwards the host's real gids via
-  `--annotation run.oci.keep_original_groups=1`.
-- **Images are refreshed on request, not on converge.** `make provision` pulls only images
-  it does not already have. `make toolbox-refresh` re-pulls; existing containers keep the
-  old image until you `distrobox rm <name>` on mini and re-provision.
-- **Upstream recommends `amd_iommu=off`** (5-12% faster). mini runs `iommu=pt amd_iommu=on`
-  on purpose so the amdxdna NPU driver can bind SVA. Accepted trade-off — see Watch-outs.
-
----
+GGUFs are staged into `/data/models` with the `hf` CLI (installed by this role);
+the role asserts every configured model exists and fails the play if one is
+missing. `roles/toolboxes` used to own the udev rule, model dir and HF CLI and
+was removed 2026-08 — it wrapped this same image in distrobox, which bought
+nothing a quadlet does not do better and cost the ability to stop the server.
 
 ## Watch-outs
 
@@ -390,7 +315,6 @@ Watch-outs specific to toolboxes:
 | `make vault-edit` | Decrypt, edit, and re-encrypt vault.yml |
 | `make vault-encrypt` | Encrypt plaintext vault.yml for the first time |
 | `make install-deps` | Install required Ansible collections (run once) |
-| `make toolbox-refresh` | Re-pull Strix Halo toolbox images to the latest builds |
 
 ---
 

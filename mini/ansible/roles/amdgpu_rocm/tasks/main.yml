@@ -19,29 +19,77 @@
 # Ryzen APUs are meant to use the inbox driver, so the kernel module is skipped.
 # ROCm is pinned to 7.2.4 production (see defaults/main.yml) — no nightlies.
 
+# ─── ROCm userspace ──────────────────────────────────────────────────────────
+# Installed regardless of gpu_backend, unlike the old apt path which only ran for
+# the rocm backend. Two reasons: it is the documented one-line fallback, and
+# rocminfo/rocm-smi are the host-side tools for answering "what does the GPU
+# think it is" — useful on a Vulkan box too. At 8.3 GiB for a single-arch build
+# that is cheap insurance; set rocm_install_userspace: false to skip it.
+- name: Download the ROCm tarball
+  ansible.builtin.get_url:
+    url: "{{ rocm_tarball_url }}"
+    dest: "/tmp/rocm-{{ rocm_version }}-gfx{{ rocm_gfx_target }}.tar.gz"
+    mode: "0644"
+  when:
+    - rocm_install_userspace | bool
+    - rocm_install_method == "tarball"
+
+- name: Create the ROCm prefix
+  ansible.builtin.file:
+    path: "{{ rocm_prefix }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when:
+    - rocm_install_userspace | bool
+    - rocm_install_method == "tarball"
+
+# creates: makes this idempotent — the tarball is only unpacked once per version.
+- name: Unpack ROCm
+  ansible.builtin.unarchive:
+    src: "/tmp/rocm-{{ rocm_version }}-gfx{{ rocm_gfx_target }}.tar.gz"
+    dest: "{{ rocm_prefix }}"
+    remote_src: true
+    creates: "{{ rocm_prefix }}/bin/rocminfo"
+  when:
+    - rocm_install_userspace | bool
+    - rocm_install_method == "tarball"
+
+# /opt/rocm is what everything references. Under the old apt stack this was an
+# update-alternatives symlink, so purging those packages deletes it — recreate it
+# unconditionally rather than assuming it survived.
+- name: Point /opt/rocm at the installed version
+  ansible.builtin.file:
+    src: "{{ rocm_prefix }}"
+    dest: /opt/rocm
+    state: link
+    force: true
+  when: rocm_install_userspace | bool
+
+# ─── Legacy apt path (rocm_install_method: apt) ──────────────────────────────
+# Kept only as a rollback to the pre-7.14 stack. It pins 7.2.4 from the noble
+# repo; see defaults/main.yml for why that is no longer the right default.
 - name: Download amdgpu-install deb
   ansible.builtin.get_url:
     url: "{{ amdgpu_installer_url }}"
     dest: "/tmp/{{ amdgpu_installer_deb }}"
     mode: "0644"
-  when: gpu_backend == "rocm"
-  # Verify the downloaded file against AMD's published SHA256 checksum before
-  # deploying in production. Add: checksum: "sha256:<AMD_PUBLISHED_HASH>"
+  when: rocm_install_method == "apt"
 
 - name: Install amdgpu-install deb
   ansible.builtin.apt:
     deb: "/tmp/{{ amdgpu_installer_deb }}"
     state: present
-  when: gpu_backend == "rocm"
+  when: rocm_install_method == "apt"
 
 - name: Run amdgpu-install for ROCm usecase (userspace only, no DKMS)
   ansible.builtin.command:
-    # --usecase=rocm installs the ROCm runtime, HIP, and supporting libs.
-    # --no-dkms skips the out-of-tree kernel module: the in-tree amdgpu (kernel 7.0)
-    # drives the GPU. DKMS does not build on kernel 7.0 and is unnecessary on this APU.
+    # --no-dkms skips the out-of-tree kernel module: the in-tree amdgpu (kernel
+    # 7.0) drives the GPU. DKMS does not build on kernel 7.0 and is unnecessary.
     cmd: amdgpu-install -y --usecase=rocm --no-dkms
     creates: /opt/rocm/bin/rocminfo
-  when: gpu_backend == "rocm"
+  when: rocm_install_method == "apt"
   notify: update initramfs
 
 # Both backends need /dev/kfd + /dev/dri access: ROCm via HIP, RADV via Vulkan.

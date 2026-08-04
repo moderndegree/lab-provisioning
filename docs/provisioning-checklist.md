@@ -24,7 +24,7 @@ alternative is a unit that restart-loops with the real cause buried in
 `journalctl --user`. Already present on the live box; a rebuild needs them again.
 
 ```sh
-ls -la /data/toolboxes/models/*.gguf
+ls -la /data/models/*.gguf
 #   qwen3.6-35b-a3b-mtp-q4_K_M.gguf   21.7 GB   <- required
 #   gpt-oss-20b-MXFP4.gguf            12.1 GB   <- required
 ```
@@ -38,18 +38,18 @@ import json, glob, shutil
 m = glob.glob('/data/ollama/manifests/**/qwen3.6/35b-a3b-mtp-q4_K_M', recursive=True)[0]
 d = [l for l in json.load(open(m))['layers'] if 'model' in l['mediaType']][0]['digest']
 shutil.copyfile('/data/ollama/blobs/' + d.replace('sha256:', 'sha256-'),
-                '/data/toolboxes/models/qwen3.6-35b-a3b-mtp-q4_K_M.gguf')
+                '/data/models/qwen3.6-35b-a3b-mtp-q4_K_M.gguf')
 EOF
-sudo chown blewis:blewis /data/toolboxes/models/qwen3.6-35b-a3b-mtp-q4_K_M.gguf
+sudo chown blewis:blewis /data/models/qwen3.6-35b-a3b-mtp-q4_K_M.gguf
 
 # gpt-oss — MXFP4 is its native format, so no requantisation loss
-HF_HOME=/data/toolboxes/models/huggingface \
+HF_HOME=/data/models/huggingface \
   hf download ggml-org/gpt-oss-20b-GGUF gpt-oss-20b-MXFP4.gguf \
-  --local-dir /data/toolboxes/models
+  --local-dir /data/models
 ```
 
-Do **not** hardlink these out of `/data/ollama/blobs`. The toolbox only
-bind-mounts `toolboxes_models_dir`, and a hardlink both hides the dependency and
+Do **not** hardlink these out of `/data/ollama/blobs`. The quadlets bind-mount
+`llamacpp_models_dir` read-only, and a hardlink both hides the dependency and
 pins the blob alive after an `ollama rm`.
 
 ## 2. mini — after `make provision`
@@ -82,13 +82,32 @@ Manual cleanup on mini:
 - [x] **vLLM-only models reclaimed** — the AWQ checkpoint (24 GB) and
       `openai/gpt-oss-20b` safetensors (13 GB) are gone from the HF cache, along
       with the unused q8 GGUF (37.8 GB), the vllm-therock image (35 GB) and the
-      rocm-7.2.4 toolbox (7 GB). ~180 GB total. vLLM is gone entirely — the
+      rocm-7.2.4 toolbox (7 GB), and the 22 GiB apt ROCm stack. ~200 GB total. vLLM is gone entirely — the
       toolbox, its device-name shim and its tuned-MoE wiring all went with it. It
       measured ~3.5x slower than llama.cpp twice, so re-testing means restoring
       the toolbox entry and re-downloading ~59 GB. Deliberate, not an accident.
 - [ ] **Copy the benchmarks over when you want to re-measure.** They live in the
       repo now, but nothing deploys them:
       `scp packages/inference-bench/*.py blewis@mini:/tmp/`
+
+## 2b. One-time migrations already done on the live box
+
+These are recorded so a **rebuild** reproduces them, and so nobody wonders where
+things went. All are already true on mini.
+
+- **`roles/toolboxes` is gone.** Its udev rule, model dir and HuggingFace CLI
+  moved into `roles/llamacpp`; distrobox is purged. Interactive llama.cpp work is
+  now `podman run --rm -it --device /dev/dri --device /dev/kfd --security-opt
+  seccomp=unconfined -v /data/models:/data/models:ro <image> /bin/bash`.
+- **Models moved** `/data/toolboxes/models` -> `/data/models`, since nothing
+  called a toolbox exists any more.
+- **ROCm 7.2.4 (apt) -> 7.14.0 (TheRock tarball).** The apt stack was purged
+  (22 GiB) and the gfx1151 tarball unpacked to `/opt/rocm-7.14.0` (8.3 GiB).
+  Purging the apt packages **deletes the `/opt/rocm` symlink** — it was
+  update-alternatives-managed — so the role recreates it unconditionally. If you
+  do this by hand, recreate the symlink or `rocminfo` vanishes.
+  `amdgpu-top` matches the same package glob as the ROCm packages; exclude it
+  from any purge or you lose your GPU monitor.
 
 ## 3. Using Ollama to try a model
 
