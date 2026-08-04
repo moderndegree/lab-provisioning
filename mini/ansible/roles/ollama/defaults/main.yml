@@ -105,7 +105,18 @@ ollama_vulkan_icd: "RADV"
 # disables thinking on /v1 (verified on Ollama 0.31.2). The /no_think soft
 # switch and a think:false body field are BOTH ignored by /v1 — do not rely on
 # them; native /api/chat honours think:false if you need it from scripts.
-ollama_manage_models: true
+# Model management talks to the DAEMON, not the disk: `ollama list` and
+# `ollama pull` both fail with "could not connect to ollama server" when the
+# service is stopped. Since roles/llamacpp took over serving, ollama_service_state
+# is "stopped" here — so this now defaults to following the service rather than
+# being hardcoded true, which would fail the converge outright.
+#
+# Consequence: with Ollama stopped, `make provision` neither pulls nor verifies
+# models. That is correct — the 301 GB already on disk is untouched, and pulling
+# a new one is a deliberate act you do by hand with the daemon up (see
+# docs/provisioning-checklist.md). Force it with -e ollama_manage_models=true
+# only while the service is running.
+ollama_manage_models: "{{ ollama_service_state == 'started' }}"
 
 ollama_base_models:
   - "qwen3-coder-next:latest"

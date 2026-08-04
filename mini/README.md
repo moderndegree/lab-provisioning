@@ -58,7 +58,6 @@ lab-provisioning/
       base/                         kernel cmdline (GRUB), packages, UFW, data disk
       amdgpu_rocm/                  ROCm stack + Vulkan primary/fallback wiring
       ollama/                       Ollama LLM server + systemd override
-      harness/                      (empty — opencode and Hermes both on ser5/workstation)
       tailscale/                    tailnet join
       containers/                   rootless Podman; user lingering; subuid/subgid; quadlet
       toolboxes/                    Strix Halo AI toolboxes via distrobox (enable_toolboxes)

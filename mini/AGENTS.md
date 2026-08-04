@@ -33,7 +33,6 @@ ansible/
     base/                kernel cmdline (GRUB), firmware pin, packages, UFW, data disk
     amdgpu_rocm/         ROCm 7.2.4 userspace (--no-dkms) + Vulkan primary/fallback wiring
     ollama/              Ollama server + systemd override
-    harness/             (empty — opencode and Hermes both on ser5/workstation)
     tailscale/           tailnet join
     containers/          rootless Podman; user lingering; subuid/subgid; quadlet support
     toolboxes/           Strix Halo AI toolboxes (distrobox; enable_toolboxes)
