@@ -78,26 +78,38 @@ auto_reboot: true
 # token is safe. Open WebUI now lives on ser5 (roles/openwebui there), not mini.
 # enable_cloudflared: true
 
-# ─── Strix Halo AI toolboxes (roles/toolboxes) ───
-# Containerised llama.cpp / ComfyUI / vLLM / fine-tuning stacks from
-# https://strix-halo-toolboxes.com/, run through distrobox. Nothing here starts
-# at boot and nothing touches the Ollama service on :11434 — they are on-demand
-# shells that carry their own gfx1151-patched GPU stack. Off by default because
-# turning it on pulls tens of GB of images on the next provision; which images
-# is `toolboxes_instances` in roles/toolboxes/defaults/main.yml.
-# enable_toolboxes: true
+# ─── llama.cpp serving path (roles/llamacpp) ───
+# Podman quadlets, one per entry in llamacpp_instances: llama-quality on :8090
+# (interactive, MTP) and llama-throughput on :8091 (batch). 87 tok/s
+# single-stream against vLLM's 25 on the same model and hardware — see that
+# role's defaults for why the gap is the checkpoint, not the runtime.
+#
+#   systemctl --user start|stop|status llama-servers.target
+#
+# Needs the GGUFs staged first (the role asserts they exist) — see
+# docs/provisioning-checklist.md. Holds ~73 GiB resident across both instances,
+# hence the two Ollama lines below.
+# enable_llamacpp: true
+
+# ─── Ollama service lifecycle (roles/ollama/defaults/main.yml) ───
+# Uncomment these two ONLY alongside enable_llamacpp above. Ollama stays
+# installed (it is still how models are pulled) but must not serve at the same
+# time as llama-server — they cannot both hold weights in 122 GiB. Leaving them
+# commented keeps the role's default of enabled/started, which is correct when
+# Ollama is the serving path.
+# ollama_service_enabled: false
+# ollama_service_state: stopped
 
 # ─── GPU backend (roles/amdgpu_rocm/defaults/main.yml) ───
 # Default is "vulkan" (committed path, +7-26% decode vs ROCm). Both stacks are
 # installed either way, so this one line is the entire revert.
 # gpu_backend: "rocm"
 
-# ─── Ollama serving policy (roles/ollama/defaults/main.yml) ───
-# Read the sizing rationale in that file before changing these — context and
-# parallelism MULTIPLY into the KV-cache budget, so raise one only by lowering
-# the other. Defaults are 131072 x 2 across a 2-model warm pair.
-# ollama_context_length: 131072
-# ollama_num_parallel: 2
-# ollama_base_models:
-#   - "qwen3-coder-next:latest"
-#   - "qwen3.6:35b-a3b-mtp-q4_K_M"
+# ─── Ollama policy (roles/ollama/defaults/main.yml) ───
+# Ollama is no longer the serving path, so its defaults are sized for hand
+# testing: 32768 context, 1 parallel, 1 loaded, keep_alive 5m — it must give GPU
+# memory back rather than pin it. Context and parallelism MULTIPLY into the KV
+# budget, so raise one only by lowering the other, and stop a llama-server
+# instance first.
+# ollama_context_length: 32768
+# ollama_num_parallel: 1

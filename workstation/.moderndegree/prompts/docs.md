@@ -14,5 +14,4 @@ always hand off to the quality gate:
 @@RESULT
 status: PASS | FAIL | BLOCKED
 summary: <one line>
-handoff: run quality-gate (qloop gate) on this draft before delivering to user
 @@END

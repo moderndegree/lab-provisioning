@@ -1,0 +1,234 @@
+---
+# llama.cpp serving path — one llama-server per entry in llamacpp_instances, each
+# a systemd *user* unit running inside a Strix Halo toolbox.
+#
+# WHY THIS EXISTS. vLLM is not competitive on this box for these models. Measured
+# 2026-08-02, Qwen3.6-35B-A3B, identical hardware, single-stream / aggregate@8:
+#
+#   vLLM toolbox 0.22 (tuned MoE)   24.8 /  85.7 tok/s
+#   vLLM Lemonade 0.20 (AMD build)  25.2 /  93.9 tok/s
+#   llama.cpp                       75.1 / 168.6 tok/s
+#   llama.cpp + MTP n=1             86.7 / 120.7 tok/s
+#
+# Two independent vLLM builds land within 2% of each other because every
+# vLLM-compatible quant of Qwen3.6 leaves the GatedDeltaNet projections, lm_head,
+# self_attn and shared experts in BF16 — ~3.6 GiB of the ~4.15 GiB read per
+# decoded token. GGUF q4_K_M quantizes all of it. That is a property of the
+# checkpoint, not the runtime, so no vLLM flag closes it.
+#
+# This does NOT replace roles/ollama. Ollama stays installed and still manages
+# model pulls; it is simply not started alongside this (see ollama_service_* in
+# ../ollama/defaults/main.yml). They are both llama.cpp underneath — the reasons
+# to run this instead are MTP (Ollama's fork does not expose --spec-type) and
+# real control over --parallel.
+enable_llamacpp: false
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Defaults shared by every instance (override per-instance where it matters)
+# ─────────────────────────────────────────────────────────────────────────────
+# The container image every instance runs. This is the same image roles/toolboxes
+# uses for the interactive llama-vulkan-radv shell, and it is the ONLY special
+# ingredient here: Fedora 43 carrying a gfx1151-patched Mesa/RADV userspace and a
+# llama.cpp built against it. It is an ordinary OCI image (empty entrypoint,
+# Cmd=/bin/bash) — distrobox was never required to run it, only to make an
+# interactive shell pleasant. Override per instance with `image:` to A/B a
+# different backend (e.g. the rocm-7.2.4 tag) without touching the others.
+llamacpp_image: "docker.io/kyuz0/amd-strix-halo-toolboxes:vulkan-radv"
+
+# Group handle: `systemctl --user {start,stop,status} llama-servers.target`.
+llamacpp_target: "llama-servers.target"
+
+# Where GGUFs live, bind-mounted read-only into every instance. Deliberately NOT
+# hardlinks into /data/ollama/blobs: that would hide the dependency and pin a
+# blob alive after an `ollama rm`.
+llamacpp_models_dir: "{{ data_mount }}/models"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GPU device permissions
+# ─────────────────────────────────────────────────────────────────────────────
+# Rootless Podman maps uids into a user namespace, and a host GID that is not
+# mapped there cannot satisfy the kernel's check on /dev/kfd (0660 root:render)
+# or /dev/dri/renderD128. The symptom is NOT a permission error — the GPU simply
+# fails to enumerate and llama.cpp falls back to CPU. This udev rule removes the
+# dependency on gid mapping entirely and is upstream's documented fix for
+# headless hosts.
+#
+# TRADE-OFF: 0666 grants GPU compute to every local user. mini is a headless
+# single-user node reachable only over the tailnet, so the exposed surface is the
+# same set of people who could already SSH in. Set false on any box with
+# untrusted local logins.
+llamacpp_permissive_udev: true
+llamacpp_udev_rule_path: "/etc/udev/rules.d/70-kfd.rules"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Model staging (HuggingFace CLI)
+# ─────────────────────────────────────────────────────────────────────────────
+# GGUFs are staged with `hf download`, so the CLI is the front door for every
+# model this box serves. Installed with pipx because Ubuntu 26.04 marks its
+# Python externally-managed (PEP 668) and a plain `pip install --user` is
+# refused. HF_HOME is exported to host shells so a download lands beside the
+# models rather than in ~/.cache.
+llamacpp_install_hf_cli: true
+llamacpp_hf_cli_spec: "huggingface_hub[cli,hf_transfer]"
+llamacpp_hf_home: "{{ llamacpp_models_dir }}/huggingface"
+
+# Optional. Only needed for GATED repos (meta-llama/*, google/gemma-*), where you
+# must also accept the licence on the model page. Empty writes no token file;
+# `hf auth login` on mini is a fine alternative to putting this in the vault.
+llamacpp_hf_token: "{{ vault_hf_token | default('') }}"
+
+# 0.0.0.0 so Open WebUI on ser5 reaches these over the tailnet. Not as open as it
+# looks: mini's UFW allows only 22/tcp from outside plus everything on
+# tailscale0, so these ports are unreachable from the 10.0.0.0/24 wifi LAN.
+# 11434 is Ollama's and 8000/8001 are the vLLM bench ports — do not reuse them.
+llamacpp_host: "0.0.0.0"
+
+# -fa and --no-mmap are upstream's hard requirements on Strix Halo (crashes or
+# severe slowdowns without them). -ngl 999 offloads every layer.
+#
+# Tool calling needs NO extra flags, unlike vLLM: --jinja defaults to enabled and
+# drives each model's own chat template, so Open WebUI's tool payloads work
+# as-is. vLLM by contrast rejects them outright without --enable-auto-tool-choice
+# and a hand-picked --tool-call-parser.
+# --metrics turns on the Prometheus endpoint at /metrics, which ser5's
+# observability role scrapes. Off by default in llama.cpp.
+llamacpp_base_args: "-ngl 999 -fa 1 --no-mmap --metrics"
+llamacpp_restart_sec: 10
+
+# Health check is a READINESS probe. Model load is 4-12s warm and much longer
+# cold, so the start period must cover the worst case — too short and systemd
+# restarts a server that was only still loading, forever.
+llamacpp_health_interval: "30s"
+llamacpp_health_start_period: "600s"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# THE KV CEILING — READ BEFORE RAISING ANY ctx
+# ─────────────────────────────────────────────────────────────────────────────
+# `ctx` is TOTAL context, DIVIDED across `parallel` slots — llama.cpp statically
+# partitions the KV cache, it does not pool it like vLLM's PagedAttention. So
+# per-slot context is ctx / parallel, and a single request larger than that share
+# fails outright with
+#   "request (N tokens) exceeds the available context size (M tokens)"
+# even on an otherwise idle server. SIZE FOR THE WORST-CASE SINGLE REQUEST.
+#
+# Slots are consumed by IN-FLIGHT REQUESTS, not by open conversations — Open
+# WebUI can hold any number of chats; `parallel` caps simultaneous generations.
+#
+# Measured on this box (single process):
+#
+#   ctx  262144, parallel 8  ->  32768/slot,  ~28 GiB resident   OK
+#   ctx  262144, parallel 2  -> 131072/slot,  ~27 GiB resident   OK
+#   ctx  524288, parallel 2  -> 262144/slot,  ~33 GiB resident   OK
+#   ctx 1048576, parallel 32 ->  32768/slot,  ~36 GiB resident   OK
+#   ctx 1048576, parallel 64 ->  16384/slot,  ~37 GiB resident   OK
+#   ctx 2097152, parallel 8  -> 262144/slot,  ~63 GiB            HANGS THE GPU
+#
+# The threshold is per-PROCESS, not per-box: qwen at 524288 and gptoss at 1048576
+# run side by side at ~70 GiB combined with no trouble. What wedges is one
+# process asking for too much at once.
+#
+# The failure is driven by TOTAL KV, not per-slot size — 262144/slot is fine at
+# 524288 total and wedges at 2097152. And it does not fail cleanly: the process
+# sticks in uninterruptible sleep (state Ds, wchan drm_suballoc_new), immune to
+# SIGKILL, holding the GPU device until reboot — and shutdown then hangs ~7
+# minutes because systemd cannot kill a D-state task. Somewhere between ~12 GiB
+# and ~50 GiB of KV the DRM suballocator gives up rather than erroring.
+#
+# Step up one increment at a time and confirm each load before committing here.
+# Warns per-instance above the largest value measured safe in a single process.
+llamacpp_ctx_warn: 1048576
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Instances
+# ─────────────────────────────────────────────────────────────────────────────
+# Each entry: name (unit suffix), model, alias (the id clients address — keep it
+# stable, renaming breaks whatever referenced the old one), port, ctx, parallel,
+# and optionally mtp / mtp_draft_max / toolbox / host / base_args / extra_args.
+#
+# Two instances must not share a model file: ExecStopPost matches on the model
+# path to reap the in-container process, so a shared path would kill both.
+#
+# MTP IS A PER-WORKLOAD TRADE, NOT A FREE WIN. Measured single-stream /
+# aggregate@8:  off 75.1/168.6, n=1 86.7/120.7, n=3 82.5/119.4. It buys ~15%
+# interactive latency and costs ~29% batched throughput. Acceptance is fine
+# (50-58%, mean 2.5 of 3 drafted accepted) — the ceiling is structural, not a
+# tuning failure: verifying n+1 tokens routes to up to 8*(n+1) experts instead of
+# 8, so a longer draft costs most of what it saves. Hence n=1 beating n=3.
+# Enable it on interactive instances, leave it off on throughput instances.
+#
+# Confirm MTP is live by grepping the journal for "MTP draft context"; without
+# the flag the loader silently logs "unused tensor blk.40.nextn.* -- ignoring".
+#
+# QUANT CHOICE (Qwen3.6-35B-A3B, measured with MTP at parallel 1):
+#   q4_K_M  21.7 GB  85.8 tok/s   <- current default, staged
+#   q8_0    37.8 GB  65.7 tok/s   (76% of q4, not the "about half" long assumed —
+#                                  that estimate predated MTP)
+# The q8 GGUF is NOT staged any more (reclaimed 2026-08). Nothing is lost: it was
+# a copy of an Ollama blob that is still on disk, so restoring it is one cp —
+#   cp /data/ollama/blobs/sha256-e143bcc4e3375b59b1cde199d897c54f2e4ca0c75eeee1c559d64b80b445570a \
+#      /data/toolboxes/models/qwen3.6-35b-a3b-mtp-q8_0.gguf
+# q8 costs ~24% latency for an as-yet-unmeasured quality gain; measure the gain on
+# real tasks rather than asserting it before making q8 the default.
+llamacpp_instances:
+  # NAMING: `name` is the ROLE and becomes the unit/container (llama-quality),
+  # `alias` is the MODEL IDENTITY and is what clients send as "model". They are
+  # split deliberately — swapping the model behind a role changes the alias while
+  # `systemctl --user restart llama-quality` keeps meaning the same thing, and
+  # dashboards/units do not churn. Renaming an alias DOES break clients that
+  # hardcoded it (Open WebUI addresses these by alias), so change it knowingly.
+  #
+  # To swap a model: change `model` + `alias`, re-run, done. To add a third
+  # instance: append an entry with a free port — it joins llama-servers.target
+  # automatically. To A/B a backend: set `image:` on one instance only.
+
+  # Interactive / quality. Full context per request, MTP on for latency.
+  #
+  # parallel 4 was measured against a 3-4 candidate fan-out (the quality-loop
+  # that drove this box, removed 2026-08). At parallel 2 the third candidate
+  # queued behind the first two; on an n=3 rounds=2 session:
+  #   parallel 2 -> 71.1s session, generate 30.6s, 100.5 tok/s aggregate
+  #   parallel 4 -> 58.6s session, generate 24.5s, 125.6 tok/s aggregate  (-18%)
+  #
+  # CAVEAT: nothing currently dispatches that fan-out. 4 remains a sane default
+  # for interactive chat plus a small parallel dispatch, but it is sized to a
+  # workload that no longer exists — re-measure with
+  # packages/inference-bench/fanoutsim.py against whatever replaces it.
+  #
+  # 524288/4 = 131072 per slot. Raising parallel without raising ctx truncates
+  # per-request context; see the ctx/parallel note above.
+  - name: "quality"
+    alias: "qwen3.6-35b-a3b-mtp"
+    model: "{{ llamacpp_models_dir }}/qwen3.6-35b-a3b-mtp-q4_K_M.gguf"
+    port: 8090
+    ctx: 524288
+    parallel: 4
+    mtp: true
+    mtp_draft_max: 1
+
+  # Batch / throughput. MXFP4 is gpt-oss's native format, so no requantisation
+  # loss — and it is only viable here because llama.cpp supports MXFP4 on gfx1151
+  # while vLLM has no kernel for it. MTP deliberately off: this instance exists
+  # for aggregate throughput, which is exactly what MTP costs (-29%).
+  #
+  # Concurrency curve at fixed ctx 1048576 — changing `parallel` alone
+  # repartitions the SAME KV allocation, so none of these carries extra
+  # allocation risk (aggregate / per-stream / TTFT):
+  #   parallel  8 -> 190.5 / 26.4 / 0.75s   (131072/slot)  <- chosen
+  #   parallel 16 -> 238.2 / 16.1 / 0.90s   ( 65536/slot)
+  #   parallel 32 -> 399.9 / 13.9 / 1.48s   ( 32768/slot)
+  #   parallel 64 -> 477.8 /  8.4 / 2.66s   ( 16384/slot)
+  #
+  # THOSE ARE LONG-GENERATION NUMBERS AND DO NOT TRANSFER. Re-measured with
+  # agent-shaped traffic (short multi-turn answers) at 32 concurrent clients,
+  # parallel 8 gave 98.5 tok/s aggregate and parallel 32 gave 83.4 — more slots
+  # made it WORSE. Real-traffic aggregate is ~85-100 tok/s either way, roughly
+  # half the 190.7 headline. 131072/slot is also the model's own ceiling
+  # (max_position_embeddings), so lowering parallel further only reserves KV the
+  # model cannot attend over.
+  - name: "throughput"
+    alias: "gpt-oss-20b"
+    model: "{{ llamacpp_models_dir }}/gpt-oss-20b-MXFP4.gguf"
+    port: 8091
+    ctx: 1048576
+    parallel: 8
+    mtp: false

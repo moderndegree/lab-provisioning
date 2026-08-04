@@ -82,7 +82,6 @@ tailnet_dns_search: "YOUR_TAILNET.ts.net"
 # Optional roles — disabled by default. Flip to true to activate.
 enable_observability: false   # Prometheus + Grafana quadlets (monitors mini)
 enable_backups: false         # restic snapshots + daily timer (needs vault_restic_password)
-enable_agentlab: false        # quality-loop experiment layer (packages/quality-loop)
 enable_brain: false           # Obsidian-compatible second brain under /data/brain
 enable_openwebui: false       # Open WebUI browser chat UI, reaching mini over the tailnet
 

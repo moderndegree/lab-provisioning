@@ -1,9 +1,15 @@
-# TODO — open items from the 2026-07-28 platform review
+# TODO — open punch list
 
-Working list from a critical pass over intent and implementation. Not a
-roadmap phase — this is the punch list for things flagged as risks or loose
-ends, separate from planned feature work. Check items off in place; delete
-the whole doc once it's empty rather than let it fossilize.
+Started from the 2026-07-28 platform review; carries the loose ends from the
+2026-08 infrastructure pass as well. There is no roadmap to slot these into —
+`docs/roadmap.md` was deleted because it gated everything on a milestone that no
+longer existed, and a new one gets written once the infrastructure settles.
+
+Check items off in place; delete the whole doc once it's empty rather than let it
+fossilize.
+
+**Highest value right now:** converge both boxes (see Post-provisioning) and
+answer the quality question (see Goal balance). Everything else is bookkeeping.
 
 ## Operational (do first — a real service is affected)
 
@@ -20,46 +26,65 @@ the whole doc once it's empty rather than let it fossilize.
 - [x] Re-run `make mini-provision` once to confirm `all.yml` (openwebui vars
       removed) converges cleanly with nothing orphaned. Done 2026-07-28.
 
-## Goal balance — the repo is carrying two priorities that compete for time
+## Goal balance — resolved by deletion, 2026-08
 
-Everything below exists because Phase 3/4-shaped work (second-brain wiring,
-business-layer tiers, Hermes surfaces) got built ahead of Phase 1's own
-acceptance criteria (a full baseline matrix + one-page quality summary from
-`runs.db`), even though the roadmap's own sequencing says measurement comes
-first.
+The 2026-07-28 review found consulting-shaped work running ahead of quality
+measurement, and froze the consulting phase behind a measurement milestone. Both
+the freeze and the milestone lived in `roadmap.md`.
 
-- [x] **Freeze Phase 4 (consulting productization)** — decided 2026-07-28,
-      recorded durably in `roadmap.md` (status note + a FROZEN marker on the
-      Phase 4 section itself) rather than living only here.
-- [x] **Finish Phase 1 before starting new subsystems** — same decision,
-      same place. `qloop stats` still can't produce the baseline matrix yet
-      (see Measurement gap below for the piece that moved); the constraint
-      itself is now recorded in `roadmap.md`, not just this list.
-- [x] Adopt a cheap self-check — habit adopted 2026-07-28, no tooling to
-      build.
+That whole structure is gone. quality-loop was deleted after its own recorded
+data showed the loops did not beat the baseline for their cost, and `roadmap.md`
+was deleted with it — it gated every future phase on a milestone that could no
+longer be met, which is worse than having no roadmap. A new one gets written once
+the infrastructure settles.
 
-## Measurement gap — the judge is a single point of failure with no alarm
+- [x] Freeze the consulting phase — moot; the phase structure no longer exists.
+- [x] Finish the measurement phase first — moot for the same reason.
+- [ ] **Decide what measures QUALITY now.** This is the real hole the deletions
+      left. `packages/inference-bench` measures throughput, not output quality,
+      so today nothing answers "is it getting better?" — which was goal #1 and
+      what the consulting pitch was meant to rest on. Options: ground-truth
+      verification wired into the agent flow (tests, schema checks,
+      converge-twice idempotency), a small hand-curated eval actually run on a
+      cadence, or an honest "nothing, and the quality claims get softened to
+      match".
 
-`gate.py`/`loops.py` parse a `VERDICT:`/`SCOPE:` line out of the same class of
-model being graded. The defensive parsing (fail-closed on unparsed SCOPE,
-alias handling for near-miss labels) is solid, but nothing tracks whether the
-judge is *actually following the format* over time — a future judge-model
-swap (the quarterly bake-off) could silently degrade gate accuracy with
-nothing to catch it.
+## Measurement gap — closed by deletion, and still open in substance
 
-- [x] Persist verdict/scope parse success (`parsed`, `scope_parsed` — already
-      computed in `_refine_round`'s critique step metadata) into `runs.db` as
-      a first-class column, not just trace metadata that gets discarded.
-      Done 2026-07-28: `results` table gained `judge_model`,
-      `critique_rounds`, `verdict_parsed`, `scope_parsed`
-      (`storage.py::RunStore.record`/`_migrate`, migrated in place for
-      existing `runs.db` files).
-- [x] Add a `qloop stats` view: judge parse rate over time, sliceable by
-      judge model. Done 2026-07-28: `RunStore.judge_stats()` +
-      `qloop stats --judge-parse`.
-- [ ] When Phase 5's independent-judge work (`nemotron-cascade-2` grading
-      `best_of_n`) lands, wire the same parse-rate tracking through it —
-      don't let a second judge path silently repeat this gap.
+The original entry was about `gate.py`/`loops.py` parsing a verdict out of the
+same class of model being graded, with nothing tracking whether the judge kept
+following the format. Parse-rate tracking was added 2026-07-28 and then
+superseded: quality-loop was removed entirely 2026-08. The 356 recorded runs
+survive as a frozen archive at `/data/agentlab/runs.db` on ser5; nothing writes
+to it now.
+
+The underlying gap did not close — it moved. See the quality question under
+"Goal balance" above.
+
+## Post-provisioning (this branch has never been converged)
+
+Everything on `inference-concurrency-tuning` was validated with `--syntax-check`
+and deployed to the boxes by hand in the form Ansible renders. That is not the
+same as a converge. Working through `docs/provisioning-checklist.md` is the
+acceptance test; these are the items that outlive it.
+
+- [ ] **`make mini-preview` and `make ser5-preview` before either apply.** The
+      branch rewrote `amdgpu_rocm` (apt -> tarball), folded `roles/toolboxes`
+      into `roles/llamacpp`, deleted a role, and moved the model directory. Read
+      the diff.
+- [ ] **Converge each box twice.** The second run should report no changes.
+      Most likely to churn: the ROCm `unarchive` (guarded by `creates:`), the
+      quadlet templates, and the legacy-unit retirement tasks — none of which
+      have ever run.
+- [ ] **Open the Grafana dashboards after ser5 converges.** 11 -> 13 is two
+      majors; "the service is up" is not the test. Rollback is
+      `grafana_version: "11.4.0"`, one line, data lives in a volume.
+- [ ] **Drop the retirement tasks once both boxes are past them.** Two blocks
+      exist purely to clean up state a converge cannot otherwise reach, and both
+      are dead weight afterwards: the legacy `llama-server*.service` retirement
+      in `roles/llamacpp`, and the `quality-gate` skill removal in
+      `roles/hermes`. Each says so in a comment.
+- [ ] **Delete `docs/provisioning-checklist.md`** when its boxes are all ticked.
 
 ## Scale-mismatch check-in (recurring, not a one-time fix)
 

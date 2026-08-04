@@ -9,7 +9,6 @@ Models and agents must not thrash. Hard budgets for every non-trivial task.
 | Re-dispatch **same** subagent after FAIL/BLOCKED | **2** | Escalate to user; do not call it a third time with the same package |
 | TASK PACKAGE enrich → re-dispatch cycles | **3** | Stop, return best effort + gaps, ask user |
 | Cortex `vault_search` rounds per task | **2** | Use what you have; no search thrash |
-| `qloop gate` per free-text deliverable | **1** | No re-gate the polished text |
 | Tool retries on identical failing command | **2** | Change approach or BLOCKED |
 | Subagents in parallel for same subtask | **1** | No duplicate planner/coder races |
 
@@ -18,8 +17,6 @@ Models and agents must not thrash. Hard budgets for every non-trivial task.
 - Orchestrator + devops: `reasoningEffort: "none"` (already in config) — stay terse.
 - Do **not** re-prompt a model solely to “think harder” without new context.
 - Prefer one short plan over multi-hop self-debate in the primary agent.
-- `qloop` strategies force `reasoning_effort=none` and hard refine/best-of-n caps
-  (see packages/quality-loop loops).
 
 ## Detect spin → stop
 
@@ -39,14 +36,6 @@ Stuck on: …
 Need from you: … (or confirm I should stop)
 ```
 
-## qloop
-
-- Interactive gate: max **2** refine rounds, n≤**3**, timeout **180s**  
-- Offline refine: max **3** rounds  
-- Stops early if critique repeats or revise is a no-op  
-
-Never nest: gate → re-gate → re-gate.
-
 ## Cortex
 
 - At most **2** search calls, then **1–3** `vault_get_note`  
@@ -55,5 +44,4 @@ Never nest: gate → re-gate → re-gate.
 ## Related
 
 - `task-package.md` — package once, enrich with budget  
-- `quality-gate.md` — one gate  
 - `second-brain.md` — capture after failure, not in a loop  

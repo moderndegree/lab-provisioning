@@ -24,7 +24,7 @@ else
   VAULT_ARG_RO := --vault-password-file $(VAULT_PASS_FILE)
 endif
 
-.PHONY: provision preview ping syntax-check lint vault-edit vault-encrypt install-deps init render help toolbox-refresh
+.PHONY: provision preview ping syntax-check lint vault-edit vault-encrypt install-deps init render help
 
 ## help: List available targets
 help:
@@ -68,16 +68,6 @@ provision:
 # a value that refuses to change.
 preview:
 	ansible-playbook -i $(INVENTORY) $(PLAYBOOK) $(VAULT_ARG) -e @$(VAULT_FILE) --check --diff
-
-## toolbox-refresh: Re-pull Strix Halo toolbox images to the latest builds
-# The toolboxes role only pulls images it does not already have, because these
-# are tens of GB and are rebuilt on every llama.cpp master commit — a pull on
-# every converge would make `make provision` unbounded. This is the deliberate
-# opt-in refresh. Existing containers keep running the old image until you
-# recreate them (`distrobox rm <name>` on mini, then `make provision`).
-toolbox-refresh:
-	ansible-playbook -i $(INVENTORY) $(PLAYBOOK) $(VAULT_ARG) -e @$(VAULT_FILE) \
-	  -e toolboxes_pull_always=true --tags toolboxes
 
 ## ping: Verify SSH connectivity to mini
 ping:

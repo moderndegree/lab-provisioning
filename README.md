@@ -12,19 +12,18 @@ autoinstall + Ansible provisioning stack; lab software lives under
 | Directory | Machine | Role |
 |-----------|---------|------|
 | [`mini/`](mini/README.md) | Minisforum MS-S1 Max (Ryzen AI Max+ 395, 128 GB) | Headless LLM inference node; Vulkan/ROCm + Ollama (`qwen3-coder-next:latest` + `qwen3.6:35b-a3b-mtp-q4_K_M`, 131072 window) |
-| [`ser5/`](ser5/README.md) | Beelink SER5 (Ryzen 7 5800H, 64 GB) | Always-on driver: agentlab (quality-loop / qloop), Hermes, observability, backups |
+| [`ser5/`](ser5/README.md) | Beelink SER5 (Ryzen 7 5800H, 64 GB) | Always-on driver: Hermes, Open WebUI, observability, backups |
 
 ## Software
 
 | Directory | What |
 |-----------|------|
 | [`docs/operating-manual.md`](docs/operating-manual.md) | One-page entry point: which harness when, which model where, and how to drive it from the phone |
-| [`packages/quality-loop/`](packages/quality-loop/README.md) | AI loop strategies (refine, best-of-N, ACE playbooks, STaR bootstrapping, evals) against mini's models — deployed to ser5 by the `agentlab` role |
+| [`docs/provisioning-checklist.md`](docs/provisioning-checklist.md) | One-time manual steps for the llama.cpp serving change — Ansible cannot remove what it no longer manages |
+| [`packages/inference-bench/`](packages/inference-bench/README.md) | Benchmarks for mini's llama.cpp serving path — the numbers behind the `llamacpp` role's sizing |
 | [`workstation/`](workstation/README.md) | opencode config for the 9-agent coding team (copied/symlinked onto the dev box) |
-| [`docs/ai-loops.md`](docs/ai-loops.md) | Architecture + runbook for running AI loop experiments on the lab |
 | [`docs/brain.md`](docs/brain.md) | Second brain vault on ser5 (`/data/brain`); UI/MCP in sibling **ai-workstation** |
-| [`docs/roadmap.md`](docs/roadmap.md) | Phased plan: quality measurement, throughput, the cortex second brain, consulting productization |
-| [`docs/todo.md`](docs/todo.md) | Open punch list from the last critical review — operational follow-ups, not roadmap work |
+| [`docs/todo.md`](docs/todo.md) | Open punch list — operational follow-ups and the open question of what measures quality |
 
 ---
 
@@ -52,15 +51,15 @@ lab-provisioning/
 ├── .gitignore
 ├── .yamllint.yml            shared yamllint config (found by both machine Makefiles)
 ├── docs/
-│   ├── operating-manual.md  one-page harness/model/phone operating guide
-│   ├── ai-loops.md          AI loop architecture + experiment runbook
-│   └── roadmap.md           phased lab/productization plan
+│   ├── operating-manual.md  routing tiers, models, harnesses, phone workflow
+│   ├── brain.md             second-brain vault layout and repo boundary
+│   ├── provisioning-checklist.md  one-time manual steps Ansible cannot do
+│   └── todo.md              open punch list
 ├── packages/
-│   └── quality-loop/        quality authority library + CLI qloop (pure-stdlib Python)
-│       ├── pyproject.toml
-│       ├── src/quality_loop/     client, loops, gate, playbook, evals, star, storage, cli
-│       ├── suites/          starter eval suites (JSONL)
-│       └── tests/
+│   └── inference-bench/     serving benchmarks behind the llamacpp sizing
+│       ├── lbench.py        raw decode throughput at a given concurrency
+│       ├── agentsim.py      workers + orchestrator, tool calls, multi-turn
+│       └── fanoutsim.py     small fan-out: N workers then a judge pass
 ├── workstation/             opencode runtime config for the dev box
 ├── mini/                    MS-S1 Max — headless inference node
 │   ├── README.md
@@ -89,7 +88,7 @@ lab-provisioning/
         ├── group_vars/
         │   ├── all.example.yml    placeholder params (tracked)
         │   └── vault.yml.example  placeholder secrets (tracked; encrypt after init)
-        └── roles/{base,desktop,storage,devtools,virtualization,containers,tailscale,hermes,agentlab,brain,openwebui,observability,backups}/
+        └── roles/{base,desktop,storage,devtools,virtualization,containers,tailscale,hermes,brain,openwebui,observability,backups}/
     └── autoinstall/
         ├── user-data.example  ${PLACEHOLDER} template
         └── meta-data

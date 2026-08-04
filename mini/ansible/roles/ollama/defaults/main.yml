@@ -10,6 +10,25 @@
 # silently shadow every future update to this file.
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Service lifecycle
+# ─────────────────────────────────────────────────────────────────────────────
+# Ollama stays INSTALLED — it is still how models are pulled and managed, and
+# `ollama pull` populates /data/ollama regardless of whether the daemon serves.
+# What changed on 2026-08-02 is that it is no longer the serving path:
+# roles/llamacpp runs llama-server on :8090 and measured ~87 tok/s single-stream
+# against Ollama's 70-80, because it can use the GGUF's MTP head (Ollama's fork
+# does not expose --spec-type) and because -np is tunable per workload.
+#
+# They cannot both be up: llama-server holds ~22 GiB resident and the two-warm-
+# model policy below wants most of the rest. These were hardcoded to
+# enabled/started until llamacpp existed; they are variables now so the box can
+# converge to "Ollama installed, not serving" without deleting the role. Flip
+# both back (and set enable_llamacpp: false) to make Ollama the serving path
+# again — that is the entire revert.
+ollama_service_enabled: true
+ollama_service_state: started
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Service environment (rendered into the systemd override)
 # ─────────────────────────────────────────────────────────────────────────────
 # Bind address. 0.0.0.0 makes the API reachable over the tailnet; UFW restricts
@@ -19,42 +38,33 @@
 ollama_host: "0.0.0.0"
 
 # GLOBAL context window — applies to every model Ollama loads. Per-request
-# num_ctx is not reachable through the /v1 endpoint opencode/loopkit use, and a
-# Modelfile num_ctx *below* a model's native window is ignored, so this env var
-# is the only real control point.
+# num_ctx is not reachable through the /v1 endpoint, and a Modelfile num_ctx
+# *below* a model's native window is ignored, so this env var is the only real
+# control point.
 #
-# 131072, down from the models' native 262144. The sizing:
-#   1. Capacity. Weights are 51 GB (qwen3-coder-next) + 22 GB (qwen3.6 35B-A3B)
-#      = 73 GB of the ~110 GB GPU pool. KV cost is context × parallel, so 128k
-#      at 2-way parallel is the SAME ~256k-token KV budget as 64k at 4-way —
-#      about ~22 GB with q8_0 KV, landing at ~95 GB total with real headroom.
-#      Trading concurrency for window is free here; raising both is not.
-#      256k × 2 would need ~44 GB of KV and does not fit this pair.
-#   2. Prefill is the wall, not capacity. At ~205 t/s a packed 128k prompt costs
-#      ~10 minutes before the first token (256k costs ~21 min). That is the
-#      worst case, not the normal case — agentic coding turns are a small
-#      fraction of the window.
-# The window is capacity, not a target — pass what the task needs.
-# NOTE: the ~22 GB KV figure is arithmetic, not measured. qwen3-coder-next's
-# hybrid Gated-DeltaNet layers do not grow KV like full attention, so the real
-# footprint is likely lower. Measure with `ollama ps` and amdgpu_top while both
-# models are warm before raising ollama_num_parallel.
-ollama_context_length: 131072
+# RETUNED 2026-08 for Ollama's new role. It is no longer the serving path
+# (roles/llamacpp is) — it exists to pull models and let you try one by hand.
+# The values below are sized for that: llama-server holds ~73 GiB resident, so a
+# test model has to fit in what is left, and it must give the memory back.
+# 32768 is ample for "does this model work / is it any good"; the old 131072 was
+# capacity for a warm serving pair that no longer runs here. Raise it
+# deliberately for a long-context test, and stop a llama-server instance first.
+ollama_context_length: 32768
 
-# Two concurrent requests PER LOADED MODEL, then queue. With
-# ollama_max_loaded_models: 2 that is up to 4 in flight across the warm pair.
-# This is the other half of the 128k trade above: these two multiply into the KV
-# budget, so raise one only by lowering the other.
-ollama_num_parallel: 2
+# One in flight is enough for hand testing; context x parallel is the KV budget.
+ollama_num_parallel: 1
 
 ollama_flash_attention: 1
 ollama_kv_cache_type: "q8_0"
 
-# -1 pins the warm pair resident across handoffs (no idle eviction).
-ollama_keep_alive: "-1"
+# NOT -1 any more. Pinning a test model resident forever is the single worst
+# thing Ollama can do now: it would sit on GPU memory llama-server needs until
+# something is manually stopped. 5m releases it shortly after you stop poking it.
+ollama_keep_alive: "5m"
 
-# Exactly the warm pair — a third resident model would blow the KV budget above.
-ollama_max_loaded_models: 2
+# One at a time: this is a testing surface, and a second resident model would
+# compete with llama-server rather than with a warm pair that no longer exists.
+ollama_max_loaded_models: 1
 
 # Vulkan ICD selector for the committed Vulkan path (RADV = Mesa's AMD driver).
 # Only consumed when gpu_backend == "vulkan" (see roles/amdgpu_rocm/defaults).
@@ -95,7 +105,18 @@ ollama_vulkan_icd: "RADV"
 # disables thinking on /v1 (verified on Ollama 0.31.2). The /no_think soft
 # switch and a think:false body field are BOTH ignored by /v1 — do not rely on
 # them; native /api/chat honours think:false if you need it from scripts.
-ollama_manage_models: true
+# Model management talks to the DAEMON, not the disk: `ollama list` and
+# `ollama pull` both fail with "could not connect to ollama server" when the
+# service is stopped. Since roles/llamacpp took over serving, ollama_service_state
+# is "stopped" here — so this now defaults to following the service rather than
+# being hardcoded true, which would fail the converge outright.
+#
+# Consequence: with Ollama stopped, `make provision` neither pulls nor verifies
+# models. That is correct — the 301 GB already on disk is untouched, and pulling
+# a new one is a deliberate act you do by hand with the daemon up (see
+# docs/provisioning-checklist.md). Force it with -e ollama_manage_models=true
+# only while the service is running.
+ollama_manage_models: "{{ ollama_service_state == 'started' }}"
 
 ollama_base_models:
   - "qwen3-coder-next:latest"
@@ -103,7 +124,7 @@ ollama_base_models:
 
 # ─── Heavy tier — pulled and kept on disk, NEVER resident ────────────────────
 # Loading any of these evicts one of the warm pair (max_loaded_models: 2), so
-# they are for scheduled/off-hours work only — an `agentlab-run@heavy-*` job on
+# they are for scheduled/off-hours work only — a systemd timer job on
 # ser5, or an explicit opt-in opencode agent. Queue at night, read the eval
 # scores in the morning. See docs/operating-manual.md.
 #   gpt-oss:120b        117B-A5.1B MoE, ~30 t/s — best general reasoning that

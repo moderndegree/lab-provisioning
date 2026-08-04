@@ -1,0 +1,20 @@
+# Managed by Ansible (mini/ansible/roles/llamacpp) — do not edit by hand.
+#
+# A handle for every llama.cpp instance at once:
+#   systemctl --user start  {{ llamacpp_target }}
+#   systemctl --user stop   {{ llamacpp_target }}
+#   systemctl --user status {{ llamacpp_target }}
+#
+# Each generated llama-<name>.service lists this target in WantedBy=, so adding an
+# instance to llamacpp_instances joins it here automatically — nothing to update
+# in this file.
+#
+# Stopping the target stops the members because each unit is PartOf= it; a plain
+# WantedBy= would start them together but leave them running on stop.
+[Unit]
+Description=All llama.cpp servers on mini
+# Not itself started at boot — the individual services are WantedBy=default.target
+# so they come up independently. This target exists to move them as a group.
+
+[Install]
+WantedBy=default.target

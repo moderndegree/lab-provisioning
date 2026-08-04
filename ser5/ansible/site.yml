@@ -12,7 +12,6 @@
 #   tailscale      → join tailnet with authkey from vault
 #   cloudflared    → Cloudflare Zero Trust tunnel (enable_cloudflared: true to activate)
 #   hermes         → Hermes gateway quadlet (enable_hermes: true to activate)
-#   agentlab       → quality-loop experiment layer (enable_agentlab: true to activate)
 #   brain          → Obsidian-compatible second-brain vault under /data/brain
 #   openwebui      → Open WebUI quadlet, reaches mini over the tailnet (enable_openwebui: true to activate)
 #   observability  → Prometheus + Grafana quadlets (enable_observability: true to activate)
@@ -34,8 +33,6 @@
       when: enable_cloudflared | bool
     - role: hermes
       when: enable_hermes | bool
-    - role: agentlab
-      when: enable_agentlab | bool
     - role: brain
       when: enable_brain | bool
     - role: openwebui

@@ -1,12 +1,12 @@
 ---
 # ─── Prometheus ───────────────────────────────────────────────────────────────
-prometheus_version: "v2.55.1"
+prometheus_version: "v3.13.2"
 prometheus_port: 9090
 prometheus_data_dir: "{{ data_mount }}/services/prometheus/data"
 prometheus_config_dir: "{{ data_mount }}/services/prometheus"
 
 # ─── Grafana ──────────────────────────────────────────────────────────────────
-grafana_version: "11.4.0"
+grafana_version: "13.1.1"
 grafana_port: 3000
 grafana_data_dir: "{{ data_mount }}/services/grafana/data"
 grafana_provisioning_dir: "{{ data_mount }}/services/grafana/provisioning"
@@ -15,4 +15,3 @@ grafana_provisioning_dir: "{{ data_mount }}/services/grafana/provisioning"
 # Tailscale MagicDNS hostname for the mini inference node.
 mini_host: "mini"
 mini_node_exporter_port: 9100
-mini_ollama_port: 11434
