@@ -27,7 +27,6 @@ alternative is a unit that restart-loops with the real cause buried in
 ls -la /data/toolboxes/models/*.gguf
 #   qwen3.6-35b-a3b-mtp-q4_K_M.gguf   21.7 GB   <- required
 #   gpt-oss-20b-MXFP4.gguf            12.1 GB   <- required
-#   qwen3.6-35b-a3b-mtp-q8_0.gguf     37.8 GB   <- optional (quant comparison)
 ```
 
 If missing:
@@ -74,16 +73,15 @@ systemctl is-active ollama     # inactive
 
 Manual cleanup on mini:
 
-- [ ] **Lemonade — 34 GB reclaimable.** Installed during the vLLM investigation,
-      now a dead end (its FP8 models cannot load on gfx1151 at all). Not managed
-      by Ansible, so `make provision` will never remove it:
-      ```sh
-      sudo systemctl disable --now lemond
-      sudo apt-get purge -y lemonade-server
-      sudo rm -rf /var/lib/lemonade          # 34 GB
-      sudo add-apt-repository -r ppa:lemonade-team/stable
-      ```
-- [ ] **Regenerate the tuned fused-MoE config if you use the vLLM bench rig.**
+- [x] **Lemonade removed** (package, PPA, and its 34 GB cache) — done 2026-08 on
+      the live box. A rebuilt box never installs it, so nothing to redo.
+- [x] **vLLM-only models reclaimed** — the AWQ checkpoint (24 GB) and
+      `openai/gpt-oss-20b` safetensors (13 GB) are gone from the HF cache, along
+      with the unused q8 GGUF (37.8 GB). 104 GB total. Benchmarking vLLM again
+      means re-downloading the AWQ checkpoint; it measured ~3.5x slower than
+      llama.cpp, so that is a deliberate cost, not an accident.
+- [ ] **Regenerate the tuned fused-MoE config AND re-download the AWQ checkpoint
+      if you ever bench vLLM again.**
       The JSON is a GPU-time artifact and is deliberately not committed, so a
       rebuilt box gets `sitecustomize.py` but runs vLLM untuned (losing the
       measured +13% c=1 / +54% c=8). See `roles/toolboxes/defaults/main.yml`.

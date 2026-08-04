@@ -110,11 +110,14 @@ llamacpp_ctx_warn: 1048576
 # Confirm MTP is live by grepping the journal for "MTP draft context"; without
 # the flag the loader silently logs "unused tensor blk.40.nextn.* -- ignoring".
 #
-# QUANT CHOICE (Qwen3.6-35B-A3B, both staged, measured with MTP at parallel 1):
-#   q4_K_M  21.7 GB  85.8 tok/s   <- current default
-#   q8_0    37.8 GB  65.7 tok/s   (76% of q4, NOT the "about half" that
-#                                  docs/operating-manual.md claims — that
-#                                  estimate predates MTP)
+# QUANT CHOICE (Qwen3.6-35B-A3B, measured with MTP at parallel 1):
+#   q4_K_M  21.7 GB  85.8 tok/s   <- current default, staged
+#   q8_0    37.8 GB  65.7 tok/s   (76% of q4, not the "about half" long assumed —
+#                                  that estimate predated MTP)
+# The q8 GGUF is NOT staged any more (reclaimed 2026-08). Nothing is lost: it was
+# a copy of an Ollama blob that is still on disk, so restoring it is one cp —
+#   cp /data/ollama/blobs/sha256-e143bcc4e3375b59b1cde199d897c54f2e4ca0c75eeee1c559d64b80b445570a \
+#      /data/toolboxes/models/qwen3.6-35b-a3b-mtp-q8_0.gguf
 # q8 costs ~24% latency for an as-yet-unmeasured quality gain; measure the gain on
 # real tasks rather than asserting it before making q8 the default.
 llamacpp_instances:
