@@ -62,26 +62,6 @@
     group: "{{ node_user }}"
     mode: "0755"
 
-# ─── vLLM tuned fused-MoE configs ────────────────────────────────────────────
-# See the long comment in defaults/main.yml. Only the shim is managed here; the
-# tuned *.json files are GPU-time artefacts, so they are deliberately left as
-# unmanaged content in this directory rather than committed and pushed.
-- name: Create the vLLM tuned-config directory
-  ansible.builtin.file:
-    path: "{{ toolboxes_vllm_tuned_dir }}"
-    state: directory
-    owner: "{{ node_user }}"
-    group: "{{ node_user }}"
-    mode: "0755"
-
-- name: Install the vLLM device-name shim
-  ansible.builtin.template:
-    src: sitecustomize.py.j2
-    dest: "{{ toolboxes_vllm_tuned_dir }}/sitecustomize.py"
-    owner: "{{ node_user }}"
-    group: "{{ node_user }}"
-    mode: "0644"
-
 # ─── HuggingFace cache and CLI ───────────────────────────────────────────────
 - name: Create the shared HuggingFace cache directory
   ansible.builtin.file:

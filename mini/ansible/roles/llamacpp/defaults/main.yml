@@ -56,7 +56,9 @@ llamacpp_host: "0.0.0.0"
 # drives each model's own chat template, so Open WebUI's tool payloads work
 # as-is. vLLM by contrast rejects them outright without --enable-auto-tool-choice
 # and a hand-picked --tool-call-parser.
-llamacpp_base_args: "-ngl 999 -fa 1 --no-mmap"
+# --metrics turns on the Prometheus endpoint at /metrics, which ser5's
+# observability role scrapes. Off by default in llama.cpp.
+llamacpp_base_args: "-ngl 999 -fa 1 --no-mmap --metrics"
 llamacpp_restart_sec: 10
 
 # Health check is a READINESS probe. Model load is 4-12s warm and much longer

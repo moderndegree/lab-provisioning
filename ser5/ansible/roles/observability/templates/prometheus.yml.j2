@@ -15,14 +15,23 @@ scrape_configs:
         labels:
           instance: mini
 
-  # mini Ollama inference metrics (token throughput, active requests, queue depth)
-  # Ollama exposes Prometheus metrics at /metrics on the same port as the API
-  # ONLY when started with OLLAMA_METRICS=true (not enabled by default).
-  # Uncomment below and set OLLAMA_METRICS=true on mini to enable.
-  # - job_name: mini-ollama
-  #   static_configs:
-  #     - targets:
-  #         - "{{ mini_host }}:{{ mini_ollama_port }}"
+  # mini llama.cpp inference metrics (tokens/s, active requests, queue depth,
+  # KV cache usage). llama-server exposes /metrics only with --metrics, which
+  # mini's llamacpp_base_args sets. One job per instance so the `instance` label
+  # distinguishes them — they serve different models with different sizing.
+  #
+  # This replaced a commented-out Ollama scrape job in 2026-08: Ollama no longer
+  # serves on this box, so those metrics would never have arrived.
+  - job_name: mini-llamacpp
+    static_configs:
+      - targets:
+          - "{{ mini_host }}:8090"
+        labels:
+          instance: mini-quality
+      - targets:
+          - "{{ mini_host }}:8091"
+        labels:
+          instance: mini-throughput
   #       labels:
   #         instance: mini
   #     metrics_path: /metrics

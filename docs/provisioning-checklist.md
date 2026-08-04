@@ -81,15 +81,11 @@ Manual cleanup on mini:
       the live box. A rebuilt box never installs it, so nothing to redo.
 - [x] **vLLM-only models reclaimed** — the AWQ checkpoint (24 GB) and
       `openai/gpt-oss-20b` safetensors (13 GB) are gone from the HF cache, along
-      with the unused q8 GGUF (37.8 GB). 104 GB total. Benchmarking vLLM again
-      means re-downloading the AWQ checkpoint; it measured ~3.5x slower than
-      llama.cpp, so that is a deliberate cost, not an accident.
-- [ ] **Regenerate the tuned fused-MoE config AND re-download the AWQ checkpoint
-      if you ever bench vLLM again.**
-      The JSON is a GPU-time artifact and is deliberately not committed, so a
-      rebuilt box gets `sitecustomize.py` but runs vLLM untuned (losing the
-      measured +13% c=1 / +54% c=8). See `roles/toolboxes/defaults/main.yml`.
-      Skip unless you are actually benchmarking vLLM — it is not the serving path.
+      with the unused q8 GGUF (37.8 GB), the vllm-therock image (35 GB) and the
+      rocm-7.2.4 toolbox (7 GB). ~180 GB total. vLLM is gone entirely — the
+      toolbox, its device-name shim and its tuned-MoE wiring all went with it. It
+      measured ~3.5x slower than llama.cpp twice, so re-testing means restoring
+      the toolbox entry and re-downloading ~59 GB. Deliberate, not an accident.
 - [ ] **Copy the benchmarks over when you want to re-measure.** They live in the
       repo now, but nothing deploys them:
       `scp packages/inference-bench/*.py blewis@mini:/tmp/`

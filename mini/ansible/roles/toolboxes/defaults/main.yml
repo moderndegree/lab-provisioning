@@ -8,24 +8,24 @@
 # it had the day you copied it and silently shadows every future `git pull`.
 #
 # WHAT THESE ARE: pre-built container images from kyuz0 that carry a complete,
-# gfx1151-patched inference/training stack (llama.cpp, ComfyUI, vLLM, ROCm
+# gfx1151-patched inference/training stack (llama.cpp, ComfyUI, ROCm
 # fine-tuning, DwarfStar). They are run through distrobox — a container that
 # shares the host's $HOME, /dev and user, so it behaves like a shell on mini
 # rather than like an isolated service. That is the whole point: the host keeps
 # exactly one ROCm/Vulkan userspace (roles/amdgpu_rocm) and everything
 # experimental lives inside images that can be deleted without consequence.
 #
-# WHAT THEY ARE NOT: a replacement for the Ollama service. Ollama on :11434 is
-# still the appliance's committed serving path (see roles/ollama). Toolboxes are
-# for benchmarking backends, running raw GGUFs, image/video generation, and
-# fine-tuning — workloads Ollama cannot express.
+# WHAT THEY ARE NOT: the serving path. roles/llamacpp serves, as Podman quadlets
+# built from the SAME image — it does not go through distrobox, so nothing here
+# is enabled at boot and these containers stay disposable. `distrobox rm` any of
+# them without consequence. They exist for hands-on work: benchmarking backends,
+# running raw GGUFs, image/video generation, fine-tuning.
 #
-# ONE EXCEPTION to "nothing here is enabled at boot": roles/llamacpp runs
-# llama-server as a systemd user unit inside the llama-vulkan-radv toolbox, and
-# that IS enabled at boot. It measured ~3x faster than vLLM on this box, so it
-# became the serving path rather than a bench. Everything else here is still
-# on-demand. Consequence: llama-vulkan-radv is no longer disposable — deleting
-# or recreating it takes the serving path down with it.
+# vLLM used to live here as a concurrency bench. It was removed 2026-08 after
+# measuring ~3.5x slower than llama.cpp single-stream and losing on aggregate
+# too, twice, including against AMD's own gfx1151 build — see
+# roles/llamacpp/defaults/main.yml for the numbers and why the gap is the
+# checkpoint rather than the runtime.
 
 # Master switch, consulted by site.yml. Defaults off so a fresh clone does not
 # silently pull tens of GB of images on its first provision; mini's own
@@ -82,40 +82,6 @@ toolboxes_models_dir: "{{ data_mount }}/toolboxes/models"
 toolboxes_bin_dir: "{{ node_home }}/.local/bin"
 toolboxes_create_wrappers: true
 
-# Tuned Triton fused-MoE configs + the device-name shim that lets vLLM find
-# them. Lives under toolboxes_models_dir because that is the only path
-# bind-mounted into the containers, so it survives `distrobox rm` and
-# `make toolbox-refresh` — the configs cost ~10 minutes of GPU time each to
-# regenerate and must not live inside a disposable image.
-#
-# WHY A SHIM IS NEEDED. The vllm-therock image prepends a patch to
-# vllm/platforms/rocm.py ending in an unconditional
-# `sys.modules["amdsmi"] = MagicMock()`, so RocmPlatform.get_device_name()
-# returns a MagicMock rather than a string. vLLM builds every fused-MoE tuning
-# lookup from that name:
-#   E=256,N=512,device_name=<MagicMock ... id='128122929281888'>,dtype=int4_w4a16.json
-# The repr embeds the object's address, so the filename changes on every start
-# and no tuned config can ever match — vLLM silently logs "Using default MoE
-# config. Performance might be sub-optimal!" and runs untuned block sizes.
-#
-# Putting the real amdsmi on PYTHONPATH does NOT fix it. The only importable
-# copy is the host's ROCm 7.2.4 build reached through /run/host, and loading its
-# libamd_smi into a ROCm 7.14 process breaks HIP init outright ("RuntimeError:
-# 0 active drivers"). The image's mock is unconditional and would win anyway.
-# So sitecustomize.py pins the name instead; `site` imports it in every
-# interpreter, including the spawned EngineCore subprocesses that a wrapper
-# around `vllm serve` would miss.
-#
-# MEASURED on Qwen3.6-35B-A3B-AWQ-4bit (E=256, N=512, int4_w4a16):
-#   MoE kernel   239 us -> 154 us  (-35%)
-#   decode c=1   21.9  -> 24.8 t/s (+13%)
-#   decode c=8   54.3  -> 83.7 t/s (+54% aggregate)
-# Regenerate after a model or vLLM change with:
-#   vllm-therock env RAY_OVERRIDE_RESOURCES='{"GPU":1}' python3 benchmark_moe.py \
-#     --model <repo> --tp-size 1 --batch-size 1 8 16 --dtype int4_w4a16 --tune
-# then rename the emitted file to the device_name this shim pins.
-toolboxes_vllm_tuned_dir: "{{ toolboxes_models_dir }}/vllm-tuned"
-toolboxes_vllm_pin_device_name: "AMD Radeon 8060S Graphics"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HuggingFace cache and CLI
@@ -127,14 +93,12 @@ toolboxes_vllm_pin_device_name: "AMD Radeon 8060S Graphics"
 # while working fine on the host. Exported to host shells via /etc/profile.d and
 # into each container via --env in the flag profiles below.
 #
-# vLLM's own compiled-kernel cache (~/.cache/vllm) is deliberately NOT moved:
-# it is small, and leaving it in the shared $HOME means it survives recreating
-# the toolbox.
 toolboxes_hf_home: "{{ toolboxes_models_dir }}/huggingface"
 
-# vLLM takes HuggingFace repo ids, not GGUFs, so `hf download` is the front door
-# for every model it serves. The toolbox images ship their own copy; this is the
-# host-side one, so you can stage a 60 GB download without entering a container.
+# GGUFs for roles/llamacpp are staged with `hf download`, so the CLI is the front
+# door for every model this box serves. The toolbox images ship their own copy;
+# this is the host-side one, so you can stage a download without entering a
+# container.
 # Installed with pipx because Ubuntu 26.04 marks its Python externally-managed
 # (PEP 668) and a plain `pip install --user` is refused.
 toolboxes_install_hf_cli: true
@@ -184,25 +148,6 @@ toolboxes_flags_rocm: >-
   --security-opt seccomp=unconfined
   --env HF_HOME={{ toolboxes_hf_home }}
 
-# Same devices as the ROCm profile; kept separate so vLLM-only tuning (env vars,
-# ulimits, RDMA devices for clustering) has somewhere to go that does not
-# perturb the llama.cpp benchmark toolboxes.
-#
-# PYTHONPATH and VLLM_TUNED_CONFIG_FOLDER are the fused-MoE tuning wiring
-# described above: the first makes `site` load sitecustomize.py (which pins the
-# GPU name so a tuned config filename is deterministic), the second tells vLLM
-# where to look. They must point at the same directory. Dropping either one is
-# silent — vLLM falls back to default block sizes and only says so in an
-# easily-missed startup warning, so check for "Using configuration from ..."
-# in the serve log after changing this.
-toolboxes_flags_vllm: >-
-  --device /dev/dri
-  --device /dev/kfd
-  --security-opt seccomp=unconfined
-  --env HF_HOME={{ toolboxes_hf_home }}
-  --env PYTHONPATH={{ toolboxes_vllm_tuned_dir }}
-  --env VLLM_TUNED_CONFIG_FOLDER={{ toolboxes_vllm_tuned_dir }}
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Which toolboxes to create
 # ─────────────────────────────────────────────────────────────────────────────
@@ -214,27 +159,17 @@ toolboxes_flags_vllm: >-
 # pinned ROCm and is the performance comparison. Uncomment the rest as needed —
 # adding an entry and re-running `make provision` is the entire workflow.
 toolboxes_instances:
+  # ONE interactive shell. vulkan-radv is mini's committed backend and upstream's
+  # "works with every model" recommendation, and it is the same image
+  # roles/llamacpp serves from — so this costs no extra disk. It exists for
+  # poking at llama.cpp by hand (llama-bench, --list-devices, raw GGUF runs).
+  #
+  # A second backend used to live here for A/B-ing. That is redundant now:
+  # roles/llamacpp takes a per-instance `image:`, so comparing rocm against
+  # vulkan is a one-line change to an instance rather than a whole toolbox.
   - name: "llama-vulkan-radv"
     image: "docker.io/kyuz0/amd-strix-halo-toolboxes:vulkan-radv"
     flags: "{{ toolboxes_flags_vulkan }}"
-
-  - name: "llama-rocm-7.2.4"
-    image: "docker.io/kyuz0/amd-strix-halo-toolboxes:rocm-7.2.4"
-    flags: "{{ toolboxes_flags_rocm }}"
-
-  # vLLM (TheRock gfx1151 build) — continuous batching, which is the reason it
-  # is here: llama.cpp and Ollama both serve concurrency poorly on this box,
-  # and vLLM is the tool for measuring aggregate multi-user throughput rather
-  # than single-stream t/s. It overlaps Ollama's job, so treat it as a bench
-  # rig: stop ollama.service before a run or the two fight over the same 128 GB
-  # of unified memory and the numbers are meaningless. Serves on :8000.
-  # `:dev` is the bleeding-edge tag; `:latest` is upstream's last verified build.
-  # Named for the build, not "vllm", so the launcher does not shadow the real
-  # vllm binary — `vllm serve X` on the host would otherwise silently become
-  # `distrobox enter --name vllm -- serve X`.
-  - name: "vllm-therock"
-    image: "docker.io/kyuz0/vllm-therock-gfx1151:latest"
-    flags: "{{ toolboxes_flags_vllm }}"
 
   # ─── Other llama.cpp backends ───
   # AMDVLK is the fastest Vulkan driver but caps a single buffer allocation at
@@ -256,12 +191,6 @@ toolboxes_instances:
   # - name: "comfyui"
   #   image: "docker.io/kyuz0/amd-strix-halo-comfyui:latest"
   #   flags: "{{ toolboxes_flags_rocm }}"
-  #
-  # vLLM on the stable Ubuntu/ROCm base instead of TheRock. Same interface;
-  # keep it around as the fallback if a TheRock build regresses.
-  # - name: "vllm-rocm"
-  #   image: "docker.io/kyuz0/vllm-rocm-gfx1151:latest"
-  #   flags: "{{ toolboxes_flags_vllm }}"
   #
   # QLoRA / full fine-tuning (Gemma 3, Qwen 3, generic).
   # - name: "llm-finetuning"

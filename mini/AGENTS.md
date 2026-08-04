@@ -111,54 +111,35 @@ scheduled/off-hours jobs. Roles live in opencode/loopkit prompts, not baked Mode
 
 ## Toolboxes (`roles/toolboxes`, `enable_toolboxes`)
 
-Distrobox wrappers around the pre-built images from
-[strix-halo-toolboxes.com](https://strix-halo-toolboxes.com/) — llama.cpp
-(Vulkan RADV/AMDVLK, ROCm 6.4.4/7.2.4), ComfyUI, vLLM, QLoRA fine-tuning, and
-DwarfStar. They are **on-demand shells, not services**: nothing here is enabled at boot,
-nothing is bound to a port by Ansible, and the Ollama service on `:11434` is
-untouched. `roles/llamacpp` uses the same *image* but runs it as a Podman quadlet
-rather than through distrobox, so the toolbox containers stay disposable — you
-can `distrobox rm llama-vulkan-radv` without touching the serving path. Their reason to exist
-is that each image carries its own
-gfx1151-patched GPU userspace, so backends can be A/B-benchmarked without
-touching the one ROCm/Vulkan stack `amdgpu_rocm` installs on the host.
+One distrobox shell around the pre-built `vulkan-radv` image from
+[strix-halo-toolboxes.com](https://strix-halo-toolboxes.com/), for poking at
+llama.cpp by hand (`llama-bench`, `--list-devices`, raw GGUF runs). It is
+**on-demand, not a service**: nothing here is enabled at boot and nothing is
+bound to a port by Ansible.
 
-Which images get created is `toolboxes_instances` in
-`roles/toolboxes/defaults/main.yml`; the default set is the two llama.cpp
-backends worth comparing plus `vllm-therock`, with the rest commented out and
-ready to uncomment. Each toolbox gets a host launcher at `~/.local/bin/<name>`
-and a shared model directory bind-mounted at the same path inside every
-container — hence `vllm-therock` rather than `vllm`, which would shadow the real
-binary.
+`roles/llamacpp` serves from the *same image* as Podman quadlets rather than
+through distrobox, so this container stays disposable — `distrobox rm
+llama-vulkan-radv` does not touch the serving path. It also costs no extra disk,
+being the image the quadlets already pull.
 
-`vllm-therock` is a **bench rig only**, and as of 2026-08-02 it lost the one
-argument for its existence. It was kept for continuous batching on the theory
-that llama.cpp batches poorly here. Measured on Qwen3.6-35B-A3B, single-stream /
-aggregate at concurrency 8:
+A second llama.cpp backend used to live here for A/B-ing, and `vllm-therock` for
+concurrency benchmarking. Both were removed 2026-08:
 
-| runtime | c=1 | c=8 |
-|---------|-----|-----|
-| vLLM 0.22 toolbox, tuned MoE config | 24.8 | 85.7 |
-| vLLM 0.20 via Lemonade (AMD's gfx1151 build) | 25.2 | 93.9 |
-| llama.cpp `-np 8` | 75.1 | **168.6** |
-| llama.cpp `-np 8` + MTP `n=1` | **86.7** | 120.7 |
+- **Backend A/B is redundant.** `llamacpp_instances` takes a per-instance
+  `image:`, so comparing ROCm against Vulkan is a one-line change to an instance
+  rather than a second toolbox.
+- **vLLM lost, twice.** Measured on Qwen3.6-35B-A3B, single-stream / aggregate@8:
+  vLLM 0.22 (tuned MoE) 24.8/85.7, vLLM 0.20 via Lemonade — AMD's own gfx1151
+  build — 25.2/93.9, llama.cpp 75.1/**168.6**, llama.cpp + MTP **86.7**/120.7.
+  llama.cpp wins **both** ends.
 
-llama.cpp wins **both** ends, so `roles/llamacpp` is the serving path and vLLM is
-for A/B curiosity. Two independent vLLM builds landing within 2% of each other is
-the tell: every vLLM-compatible quant of this model (AWQ, compressed-tensors,
-FP8) leaves the GatedDeltaNet projections, `lm_head`, `self_attn` and shared
-experts in BF16 — about 3.6 GiB of the ~4.15 GiB read per decoded token. GGUF
-q4_K_M quantizes all of it. That is a checkpoint property, not a runtime one, so
-no vLLM flag closes it. Do not re-litigate this without new numbers.
-
-vLLM also needs `--enable-auto-tool-choice --tool-call-parser qwen3_xml` before
-any client that sends a `tools` array works at all, and the parser must be
-`qwen3_xml`/`qwen3_coder` rather than the usually-recommended `hermes` — this
-model's template emits the XML form, and a mismatched parser fails silently by
-never detecting a tool call. llama-server needs none of that (`--jinja` is on by
-default). It serves on `:8000`. Any throughput measured while `ollama.service` is
-up is noise: two warm models at 131072 context plus a vLLM KV cache do not fit in
-122 GiB.
+Two independent vLLM builds landing within 2% of each other is the tell: every
+vLLM-compatible quant of this model (AWQ, compressed-tensors, FP8) leaves the
+GatedDeltaNet projections, `lm_head`, `self_attn` and shared experts in BF16 —
+about 3.6 GiB of the ~4.15 GiB read per decoded token. GGUF q4_K_M quantizes all
+of it. **That is a checkpoint property, not a runtime one, so no vLLM flag closes
+it. Do not re-litigate without new numbers** — and note that re-testing now costs
+a 35 GB image plus a 24 GB checkpoint re-download, both deliberately reclaimed.
 
 ## llama.cpp serving path (`roles/llamacpp`, `enable_llamacpp`)
 

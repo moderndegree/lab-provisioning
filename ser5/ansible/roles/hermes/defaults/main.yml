@@ -18,7 +18,7 @@ hermes_ollama_base_url: "http://mini:11434"
 
 # Version reference (installer always fetches latest; update when Hermes gains
 # a --version flag and pinning becomes possible).
-hermes_version: "0.16.0"
+hermes_version: "0.19.0"
 
 # ─── OpenAI-compatible proxy (tailnet surface) ────────────────────────────────
 # `hermes proxy` exposes an OpenAI-compatible /v1 API (default 127.0.0.1:8645)
