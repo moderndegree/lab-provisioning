@@ -70,8 +70,12 @@ What actually serves (measured 2026-08-04, ROCm 7.14):
   statically at startup (`-c` total / `-np` slots). A single chat can never exceed
   its endpoint's figure no matter how idle the box is; there is no per-request
   `num_ctx`.
-- Prefill is ~205 t/s, so a packed 262144 prompt costs ~20 minutes before the
-  first token. The window is capacity, not a target.
+- Prefill DEGRADES with depth: 1025 t/s at depth 0, 652 at 65536, 486 t/s
+  measured on a real 137622-token request. A packed 262144 prompt therefore
+  costs roughly 9-12 minutes before the first token. (The old "~205 t/s" figure
+  in these docs was from the Ollama serving path and understates llama-server by
+  about 2x.) The window is capacity, not a target — and prefix caching is what
+  makes deep context usable, since a warm prefix skips this entirely.
 - Do NOT raise total context blind: `-c 2097152` hung the amdgpu allocator hard
   enough to need a reboot. `llamacpp_ctx_warn` guards it.
 - Thinking is disabled per request with `chat_template_kwargs: {enable_thinking:

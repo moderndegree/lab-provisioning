@@ -226,7 +226,9 @@ reports `qwen35moe.context_length = 262144`) and 131072 on throughput — and th
 is no per-request `num_ctx`. Raising ctx/slot means lowering
 slot count or raising total — and total has a hard ceiling: `-c 2097152` hung the
 amdgpu DRM allocator unkillably and needed a reboot. `llamacpp_ctx_warn` guards
-against it. A packed 262144 prompt also costs ~20 minutes of prefill at ~205 t/s,
+against it. Prefill slows as context deepens — measured 1025 t/s at depth 0,
+652 at 65536, and 486 t/s on a real 137622-token request — so a packed 262144
+prompt costs roughly 9-12 minutes before the first token,
 so the window is capacity, not a target.
 
 MTP acceptance on `:8090`, measured at concurrency 1 from

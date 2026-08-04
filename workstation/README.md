@@ -42,8 +42,11 @@ parameters per token, so MoE wins; a dense model is a mistake here.
 Context is **131,072 per slot**, partitioned statically at startup (`-c` total /
 `-np` slots) — a single session cannot exceed it however idle the box is, and
 there is no per-request `num_ctx`. KV cost is ctx × slots, so raise one only by
-lowering the other. Prefill runs ~205 t/s, so a packed 131k prompt costs ~10
-minutes before the first token: the window is capacity, not a target.
+lowering the other. Prefill degrades with depth — 1025 t/s at depth 0, 652 at
+65536, 486 t/s measured on a real 137622-token request — so a packed 262144
+prompt costs roughly 9-12 minutes before the first token: the window is capacity,
+not a target. Prefix caching is what makes deep context practical, since a warm
+prefix skips prefill entirely (~12x on TTFT).
 
 (This section used to describe two *warm Ollama models* with residency and
 eviction. Ollama is stopped as of 2026-08; llama-server holds its weights for
