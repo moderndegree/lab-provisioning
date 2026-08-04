@@ -9,9 +9,9 @@
       },
       "models": {
         "qwen3.6-35b-a3b-mtp": {
-          "name": "Qwen3.6 35B-A3B MTP (quality — 88 t/s solo, MTP +21%)",
+          "name": "Qwen3.6 35B-A3B MTP (quality — 262144 ctx, 2 slots, MTP +21% solo)",
           "limit": {
-            "context": 131072,
+            "context": 262144,
             "output": 8192
           }
         }

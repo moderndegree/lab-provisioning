@@ -100,7 +100,7 @@ model can be swapped without renaming the unit:
 
 | Unit | Port | Model | Slots | Ctx/slot | MTP |
 |---|---|---|---|---|---|
-| `llama-quality` | 8090 | `qwen3.6-35b-a3b-mtp-q4_K_M` | 4 | 131072 | on |
+| `llama-quality` | 8090 | `qwen3.6-35b-a3b-mtp-q4_K_M` | 2 | **262144** | on |
 | `llama-throughput` | 8091 | `gpt-oss-20b-MXFP4` | 8 | 131072 | off |
 
 Both are MoE with ~3B active parameters, because Strix Halo decode speed tracks active
@@ -108,7 +108,8 @@ parameters read per token, not headline size. A dense model of the same size is 
 mistake here: the old dense `qwen3.6:27b-mtp-q4_K_M` measured ~11-15 t/s.
 
 Context is per SLOT and partitioned statically at startup (`-c` total / `-np` slots),
-so a single chat can never exceed 131072 no matter how idle the box is. Raising
+so a single chat can never exceed its slot's window no matter how idle the box
+is — 262144 on quality, 131072 on throughput. Raising
 ctx/slot means lowering slot count or raising total, and total has a hard ceiling —
 see the context warning below.
 
@@ -231,7 +232,7 @@ The things that bite:
   worst-case single request: `ctx 32768` with `parallel 8` gives each caller only
   4096 tokens, which an ordinary Open WebUI chat overruns — that exact mistake
   produced `request (5945 tokens) exceeds the available context size (4096
-  tokens)` in Open WebUI. Both instances now run 131072/slot.
+  tokens)` in Open WebUI. quality runs 262144/slot (2 slots), throughput 131072/slot (8).
 - **DO NOT raise context blind — it can hang the box.** `-c 2097152` (262144/slot)
   does not fail cleanly: it wedges the amdgpu DRM suballocator with the process
   stuck in uninterruptible sleep (`state Ds`, `wchan drm_suballoc_new`),

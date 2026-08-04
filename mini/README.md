@@ -210,7 +210,7 @@ the workstation opencode config.
 
 | Unit | Port | Model | Shape | Slots | Ctx/slot | MTP | Measured |
 |---|---|---|---|---|---|---|---|
-| `llama-quality` | 8090 | `qwen3.6-35b-a3b-mtp-q4_K_M` | 35B-A3B MoE (3B active), 22 GB | 4 | 131072 | on | 86-95 tok/s c=1; 142 agg c=4 |
+| `llama-quality` | 8090 | `qwen3.6-35b-a3b-mtp-q4_K_M` | 35B-A3B MoE (3B active), 22 GB | 2 | **262144** | on | 86-95 tok/s c=1; 91 agg c=2 |
 | `llama-throughput` | 8091 | `gpt-oss-20b-MXFP4` | 20B MoE, 12 GB | 8 | 131072 | off | 76 tok/s c=1; 202 agg c=8 |
 
 This is a bandwidth box, not a compute box: Strix Halo has ~215 GB/s theoretical
@@ -220,11 +220,13 @@ dense `qwen3.6:27b-mtp-q4_K_M` reads 17 GB/token and only manages ~11-15 tok/s.
 MoE wins enormously here; a dense model is a mistake.
 
 **Context is per SLOT and partitioned statically at startup** (`-c` total divided
-by `-np` slots), so a single chat can never exceed 131072 no matter how idle the
-box is, and there is no per-request `num_ctx`. Raising ctx/slot means lowering
+by `-np` slots), so a single chat can never exceed its slot's window no matter how
+idle the box is — **262144 on quality** (the model's full native window; the GGUF
+reports `qwen35moe.context_length = 262144`) and 131072 on throughput — and there
+is no per-request `num_ctx`. Raising ctx/slot means lowering
 slot count or raising total — and total has a hard ceiling: `-c 2097152` hung the
 amdgpu DRM allocator unkillably and needed a reboot. `llamacpp_ctx_warn` guards
-against it. A packed 131072 prompt also costs ~10 minutes of prefill at ~205 t/s,
+against it. A packed 262144 prompt also costs ~20 minutes of prefill at ~205 t/s,
 so the window is capacity, not a target.
 
 MTP acceptance on `:8090`, measured at concurrency 1 from
@@ -249,7 +251,7 @@ Podman quadlets, one per entry in `llamacpp_instances`, generated into
 
 | Instance | Port | Model | Sizing |
 |----------|------|-------|--------|
-| `llama-quality` | 8090 | `qwen3.6-35b-a3b-mtp` (q4_K_M) | 131072/slot x 4, MTP on |
+| `llama-quality` | 8090 | `qwen3.6-35b-a3b-mtp` (q4_K_M) | 262144/slot x 2, MTP on |
 | `llama-throughput` | 8091 | `gpt-oss-20b` (MXFP4) | 131072/slot x 8, MTP off |
 
 ```bash

@@ -66,7 +66,8 @@ openwebui_ollama_base_url: "http://mini:11434"
 # Measured 2026-08-03, after the ROCm 7.14 / quadlet rebuild:
 #   :8090  qwen3.6-35b-a3b-mtp  quality  — 86 tok/s single-stream, 142 tok/s at
 #          4-way; MTP accepts ~95% of drafts (1.95 tokens per decode step vs 0.99
-#          on :8091). 131072 ctx per chat = 524288 total / 4 slots.
+#          on :8091). 262144 ctx per chat = 524288 total / 2 slots — the model's
+#          full native window.
 #   :8091  gpt-oss-20b          quantity — 76 tok/s single-stream, 202 tok/s at
 #          8-way. 131072 ctx per chat = 1048576 total / 8 slots.
 #

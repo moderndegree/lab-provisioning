@@ -77,15 +77,16 @@ orchestrator supervising a fan-out costs only +3-4%.
 Steady state is therefore ~2 streams on `:8090` (orchestrator + one worker) and
 up to 4 on `:8091` — which is exactly where both endpoints measure fastest.
 
-Both give 131072 context per slot, partitioned statically at startup — a single
-session cannot exceed it. There is no residency or eviction to reason about any
+Context per slot differs: **262144 on quality** (2 slots — the model's full native
+window) and 131072 on throughput (8 slots). Both are partitioned statically at
+startup, so a single session cannot exceed its endpoint's figure. There is no residency or eviction to reason about any
 more: llama-server holds its weights for the process lifetime. (The previous
 "two warm slots" wording described Ollama, which is now stopped.)
 
 ## Context budgets — why the orchestrator delegates reading
 
-Every agent gets **131072 tokens** (see below: that is per SLOT, not the model's
-native 262144). The orchestrator holds its window for the WHOLE session; every
+Agents on quality get **262144 tokens**; agents on throughput get **131072**.
+That is per SLOT, fixed at server start. The orchestrator holds its window for the WHOLE session; every
 subagent's is discarded when it finishes. Nine agents therefore give you roughly
 nine independent working sets, but only if the orchestrator stops being the sole
 reader.

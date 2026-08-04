@@ -233,14 +233,28 @@ llamacpp_instances:
   # workload that no longer exists — re-measure with
   # packages/inference-bench/fanoutsim.py against whatever replaces it.
   #
-  # 524288/4 = 131072 per slot. Raising parallel without raising ctx truncates
-  # per-request context; see the ctx/parallel note above.
+  # 524288/2 = 262144 per slot — the model's FULL native window
+  # (qwen35moe.context_length = 262144 in the GGUF). At parallel: 4 this served
+  # 131072, i.e. half the model, for slots that measured actively harmful.
+  #
+  # Total KV is unchanged: ctx x parallel is the budget, and 524288 either way.
+  # This repartitions it rather than spending more.
+  #
+  # Three findings agree on 2 (measured 2026-08-04, packages/inference-bench):
+  #   - aggregate throughput PEAKS at 2 concurrent (91.2 t/s) and drops to 62.1
+  #     at 4 — the extra slots were slower, not just no faster
+  #   - 2 slots = 262144 per chat, the full model window
+  #   - the opencode split puts ~2 streams here (orchestrator + one subagent),
+  #     with the 4-way critic fan-out on :8091
+  #
+  # Consequence to accept: a THIRD simultaneous request to :8090 now queues.
+  # That is deliberate — at 4-way this endpoint was slower for everyone.
   - name: "quality"
     alias: "qwen3.6-35b-a3b-mtp"
     model: "{{ llamacpp_models_dir }}/qwen3.6-35b-a3b-mtp-q4_K_M.gguf"
     port: 8090
     ctx: 524288
-    parallel: 4
+    parallel: 2
     mtp: true
     mtp_draft_max: 1
 

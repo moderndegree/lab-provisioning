@@ -41,7 +41,7 @@ Strix Halo is memory-bandwidth-bound, not compute-bound. Decode speed tracks act
 | `:8090` quality | `qwen3.6-35b-a3b-mtp-q4_K_M` | 22 GB, MoE 35B-A3B, 3B active | 86-95 tok/s c=1; 142 agg c=4 | Everything client-confidential; the default. MTP on. |
 | `:8091` throughput | `gpt-oss-20b-MXFP4` | 12 GB, MoE 20B | 76 tok/s c=1; 202 agg c=8 | Bulk fan-out, worker agents, high concurrency. |
 
-Both give 131072 context per slot. Swap a model by editing `llamacpp_instances`
+Context per slot: **262144 on `:8090`** (2 slots, the model's full native window) and 131072 on `:8091` (8 slots). Swap a model by editing `llamacpp_instances`
 in mini's `roles/llamacpp` — the units are named by role, not by model.
 
 The table that used to live here listed `qwen3-coder-next`, `gpt-oss:120b`, the
@@ -66,10 +66,11 @@ What actually serves (measured 2026-08-04, ROCm 7.14):
   single-stream, 142 tok/s aggregate at 4-way.
 - `:8091` throughput — `gpt-oss-20b-MXFP4`, 8 slots, no MTP. 76 tok/s
   single-stream, 202 tok/s aggregate at 8-way.
-- **131072 context per slot on both**, partitioned statically at startup
-  (`-c` total / `-np` slots). A single chat can never exceed that no matter how
-  idle the box is; there is no per-request `num_ctx`.
-- Prefill is ~205 t/s, so a packed 131072 prompt costs ~10 minutes before the
+- **262144 context per slot on `:8090`, 131072 on `:8091`**, partitioned
+  statically at startup (`-c` total / `-np` slots). A single chat can never exceed
+  its endpoint's figure no matter how idle the box is; there is no per-request
+  `num_ctx`.
+- Prefill is ~205 t/s, so a packed 262144 prompt costs ~20 minutes before the
   first token. The window is capacity, not a target.
 - Do NOT raise total context blind: `-c 2097152` hung the amdgpu allocator hard
   enough to need a reboot. `llamacpp_ctx_warn` guards it.
@@ -185,7 +186,7 @@ Start it: run AI Workstation with `CORTEX_VAULT_DIR=/data/brain`, or open `/data
 | Symptom | Likely cause | Check | Fix |
 |---|---|---|---|
 | First request is suddenly slow | Instance restarted and is reloading weights | `systemctl --user status llama-quality llama-throughput` on mini | Wait out the load; llama-server holds weights for the process lifetime, so this is a restart, not eviction. |
-| Nothing streams for minutes | Prefill wall, or thinking | Prompt size versus the 131072/slot window; check whether `reasoning_content` is filling instead of `content` | Cut context, or disable thinking with `chat_template_kwargs: {enable_thinking: false}`. |
+| Nothing streams for minutes | Prefill wall, or thinking | Prompt size versus the slot window (262144 on :8090, 131072 on :8091); check whether `reasoning_content` is filling instead of `content` | Cut context, or disable thinking with `chat_template_kwargs: {enable_thinking: false}`. |
 | A model is missing from the list | That instance is down, or Ollama got started and is contending | `curl mini:8090/v1/models`, `curl mini:8091/v1/models`, `systemctl is-active ollama` on mini | Restart the instance; stop Ollama — it and llama-server cannot both hold weights in 122 GiB. |
 | Jobs queue behind each other | More concurrent requests than slots (4 on `:8090`, 8 on `:8091`) | `llamacpp:requests_deferred` and `llamacpp:requests_processing` in Prometheus | Let it queue, or send bulk fan-out to `:8091`. Raising slots lowers ctx/slot. |
 | Throughput is far below the table | Estimate treated as fact | Re-measure with `packages/inference-bench` | Keep `(est.)` labels until measured; adopt only measured wins. |
