@@ -140,6 +140,12 @@
     state: mounted
   when: has_data_disk | bool
 
+# NOT ollama/ — roles/ollama creates and owns that one. Listing it here too made
+# every converge report `changed` forever: base set it to {{ node_user }}, then
+# roles/ollama set it back to the `ollama` service user, flipping ownership twice
+# per run. A task that can never converge is worse than noise — it trains you to
+# skim the diff, which is how the Prometheus/Grafana quadlet shadowing went
+# unnoticed for six weeks.
 - name: Create standard data subdirectories
   ansible.builtin.file:
     path: "{{ data_mount }}/{{ item }}"
@@ -148,7 +154,6 @@
     group: "{{ node_user }}"
     mode: "0755"
   loop:
-    - ollama
     - worktrees
 
 # ─── amdgpu_top ──────────────────────────────────────────────────────────────

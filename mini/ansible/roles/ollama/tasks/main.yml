@@ -37,8 +37,10 @@
     owner: ollama
     group: ollama
     mode: "0755"
-  # The `ollama` user is created by the install script above.
-  # The directory itself was created by the base role.
+  # The `ollama` user is created by the install script above, which is why this
+  # role owns the directory outright (state: directory) rather than base creating
+  # it first — base runs before the user exists, and having both manage it made
+  # ownership flip on every converge.
 
 # ─── Systemd service override ─────────────────────────────────────────────────
 - name: Create ollama systemd override directory
