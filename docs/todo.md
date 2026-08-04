@@ -1,9 +1,15 @@
-# TODO — open items from the 2026-07-28 platform review
+# TODO — open punch list
 
-Working list from a critical pass over intent and implementation. Not a
-roadmap phase — this is the punch list for things flagged as risks or loose
-ends, separate from planned feature work. Check items off in place; delete
-the whole doc once it's empty rather than let it fossilize.
+Started from the 2026-07-28 platform review; carries the loose ends from the
+2026-08 infrastructure pass as well. There is no roadmap to slot these into —
+`docs/roadmap.md` was deleted because it gated everything on a milestone that no
+longer existed, and a new one gets written once the infrastructure settles.
+
+Check items off in place; delete the whole doc once it's empty rather than let it
+fossilize.
+
+**Highest value right now:** converge both boxes (see Post-provisioning) and
+answer the quality question (see Goal balance). Everything else is bookkeeping.
 
 ## Operational (do first — a real service is affected)
 
@@ -43,20 +49,42 @@ the infrastructure settles.
       cadence, or an honest "nothing, and the quality claims get softened to
       match".
 
-## Measurement gap — the judge is a single point of failure with no alarm
+## Measurement gap — closed by deletion, and still open in substance
 
-`gate.py`/`loops.py` parse a `VERDICT:`/`SCOPE:` line out of the same class of
-model being graded. The defensive parsing (fail-closed on unparsed SCOPE,
-alias handling for near-miss labels) is solid, but nothing tracks whether the
-judge is *actually following the format* over time — a future judge-model
-swap (the quarterly bake-off) could silently degrade gate accuracy with
-nothing to catch it.
+The original entry was about `gate.py`/`loops.py` parsing a verdict out of the
+same class of model being graded, with nothing tracking whether the judge kept
+following the format. Parse-rate tracking was added 2026-07-28 and then
+superseded: quality-loop was removed entirely 2026-08. The 356 recorded runs
+survive as a frozen archive at `/data/agentlab/runs.db` on ser5; nothing writes
+to it now.
 
-- [x] Judge parse-rate tracking (verdict/scope columns in `runs.db`, `qloop stats
-      --judge-parse`). Done 2026-07-28, then **superseded**: quality-loop was
-      removed entirely 2026-08. The 356 recorded runs survive as a frozen
-      archive at `/data/agentlab/runs.db` on ser5; nothing writes to it now.
-      Serving-side measurement moved to `packages/inference-bench`.
+The underlying gap did not close — it moved. See the quality question under
+"Goal balance" above.
+
+## Post-provisioning (this branch has never been converged)
+
+Everything on `inference-concurrency-tuning` was validated with `--syntax-check`
+and deployed to the boxes by hand in the form Ansible renders. That is not the
+same as a converge. Working through `docs/provisioning-checklist.md` is the
+acceptance test; these are the items that outlive it.
+
+- [ ] **`make mini-preview` and `make ser5-preview` before either apply.** The
+      branch rewrote `amdgpu_rocm` (apt -> tarball), folded `roles/toolboxes`
+      into `roles/llamacpp`, deleted a role, and moved the model directory. Read
+      the diff.
+- [ ] **Converge each box twice.** The second run should report no changes.
+      Most likely to churn: the ROCm `unarchive` (guarded by `creates:`), the
+      quadlet templates, and the legacy-unit retirement tasks — none of which
+      have ever run.
+- [ ] **Open the Grafana dashboards after ser5 converges.** 11 -> 13 is two
+      majors; "the service is up" is not the test. Rollback is
+      `grafana_version: "11.4.0"`, one line, data lives in a volume.
+- [ ] **Drop the retirement tasks once both boxes are past them.** Two blocks
+      exist purely to clean up state a converge cannot otherwise reach, and both
+      are dead weight afterwards: the legacy `llama-server*.service` retirement
+      in `roles/llamacpp`, and the `quality-gate` skill removal in
+      `roles/hermes`. Each says so in a comment.
+- [ ] **Delete `docs/provisioning-checklist.md`** when its boxes are all ticked.
 
 ## Scale-mismatch check-in (recurring, not a one-time fix)
 

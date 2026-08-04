@@ -54,40 +54,62 @@ pins the blob alive after an `ollama rm`.
 
 ## 2. mini — after `make provision`
 
+Run `make mini-preview` (check + diff) first. This branch rewrote `amdgpu_rocm`
+from apt to a tarball, folded `roles/toolboxes` into `roles/llamacpp`, and moved
+the model directory — **none of it has been through a real converge**, so the
+diff is worth reading before the apply.
+
 ```sh
-# both instances up, at the expected slot geometry
-systemctl --user is-active llama-quality llama-throughput
+# ── serving path ───────────────────────────────────────────────────────────
+systemctl --user is-active llama-quality llama-throughput          # active active
 journalctl --user -u llama-quality    -n 200 | grep -oE 'n_slots = [0-9]+, n_ctx_slot = [0-9]+'
 journalctl --user -u llama-throughput -n 200 | grep -oE 'n_slots = [0-9]+, n_ctx_slot = [0-9]+'
 #   quality    -> n_slots = 4, n_ctx_slot = 131072
 #   throughput -> n_slots = 8, n_ctx_slot = 131072
 
-# MTP actually engaged (silent if it is not — the loader just logs
-# "unused tensor blk.40.nextn.* -- ignoring" and carries on)
-journalctl --user -u llama-quality -n 300 | grep -c 'MTP draft context'   # expect >= 1
+# MTP is silent when it does NOT engage — the loader just logs
+# "unused tensor blk.40.nextn.* -- ignoring" and carries on at ~15% less speed.
+journalctl --user -u llama-quality -n 300 | grep -c 'MTP draft context'    # >= 1
 
-# group control — this is the point of the quadlet migration
-systemctl --user stop  llama-servers.target   # both down, ports released, 0 survivors
+# group control (the reason for the quadlet migration)
+systemctl --user stop  llama-servers.target   # both down, ports released
 systemctl --user start llama-servers.target
 
-# Ollama should be installed and NOT running
-systemctl is-enabled ollama    # disabled
-systemctl is-active ollama     # inactive
+# metrics endpoint — ser5's Prometheus scrapes these
+curl -sf http://127.0.0.1:8090/metrics | grep -c '^llamacpp:'   # > 0
+
+# ── GPU stack ──────────────────────────────────────────────────────────────
+readlink /opt/rocm                     # /opt/rocm-7.14.0
+sudo /opt/rocm/bin/rocminfo | grep -m1 gfx1151     # named natively, no override
+amdgpu_top --version                   # survived the apt purge
+
+# ── what should NOT be there ───────────────────────────────────────────────
+which distrobox                        # not installed
+systemctl is-active ollama             # inactive
+ls /data/toolboxes 2>/dev/null         # gone; models live in /data/models
 ```
 
-Manual cleanup on mini:
+**Throughput sanity.** A GPU that silently fell back to CPU still serves — it
+just does ~2 tok/s instead of ~87. That is the failure mode to check for, and a
+`curl` to `/v1/models` will not reveal it:
 
-- [x] **Lemonade removed** (package, PPA, and its 34 GB cache) — done 2026-08 on
-      the live box. A rebuilt box never installs it, so nothing to redo.
-- [x] **vLLM-only models reclaimed** — the AWQ checkpoint (24 GB) and
-      `openai/gpt-oss-20b` safetensors (13 GB) are gone from the HF cache, along
-      with the unused q8 GGUF (37.8 GB), the vllm-therock image (35 GB) and the
-      rocm-7.2.4 toolbox (7 GB), and the 22 GiB apt ROCm stack. ~200 GB total. vLLM is gone entirely — the
-      toolbox, its device-name shim and its tuned-MoE wiring all went with it. It
-      measured ~3.5x slower than llama.cpp twice, so re-testing means restoring
-      the toolbox entry and re-downloading ~59 GB. Deliberate, not an accident.
+```sh
+scp packages/inference-bench/lbench.py blewis@mini:/tmp/
+ssh blewis@mini "python3 /tmp/lbench.py --base http://127.0.0.1:8090/v1 \
+  --model qwen3.6-35b-a3b-mtp --concurrency 1 --max-tokens 192"
+# expect ~85-88 tok/s per-stream
+```
+
+**Then converge a second time.** Idempotency is unproven on this branch; the
+second run should report no changes. Things most likely to churn: the ROCm
+`unarchive` (guarded by `creates:`), the quadlet templates, and the legacy-unit
+retirement tasks.
+
+- [ ] **The ROCm tarball is ~1.71 GB.** It is already cached at
+      `/tmp/rocm-7.14.0-gfx1151.tar.gz` on mini, so the first converge should not
+      re-download it. A rebuilt box will.
 - [ ] **Copy the benchmarks over when you want to re-measure.** They live in the
-      repo now, but nothing deploys them:
+      repo but nothing deploys them:
       `scp packages/inference-bench/*.py blewis@mini:/tmp/`
 
 ## 2b. One-time migrations already done on the live box
@@ -129,18 +151,49 @@ systemctl --user start llama-throughput
 
 ## 4. ser5 — after `make provision`
 
-The Hermes quality-gate skill removal **is** automated (`roles/hermes` has an
-explicit `state: absent` task) — without it Hermes would keep discovering a skill
-pointing at a script that no longer exists. Verify, then clean the rest by hand:
+**This converge carries two major-version container bumps**, which is the largest
+untested risk on the branch:
+
+| | was | now |
+|---|---|---|
+| Prometheus | v2.55.1 | **v3.13.2** (major) |
+| Grafana | 11.4.0 | **13.1.1** (two majors) |
+
+Prometheus was checked before bumping — only `--config.file` and
+`--storage.tsdb.retention.time` are passed, both still valid in v3, the config is
+plain `static_configs`, and the TSDB reads forward. **Grafana 11 → 13 was not
+verifiable ahead of time**: dashboards usually migrate, but two majors is where
+panel schemas and datasource plugins change. Check your dashboards specifically,
+not just that the service is up.
 
 ```sh
+systemctl --user is-active prometheus grafana openwebui hermes
+podman ps --format '{{.Names}} | {{.Image}} | {{.Status}}'
+
+# Prometheus 3 came up AND is scraping mini's new llama.cpp targets
+curl -s 'http://127.0.0.1:9090/api/v1/targets' \
+  | python3 -c 'import json,sys; [print(" ", t["labels"].get("instance"), t["health"]) \
+      for t in json.load(sys.stdin)["data"]["activeTargets"]]'
+#   expect mini-quality and mini-throughput both "up"
+
+# Grafana 13 — log in and open each dashboard. "Service is up" is not the test.
+curl -sf http://127.0.0.1:3000/api/health
+
+# the retired quality-gate skill is removed by the role, not by hand
 ls -d /data/services/hermes/skills/quality-gate 2>/dev/null || echo "removed OK"
+
+# Open WebUI still sees both mini endpoints
+podman exec openwebui curl -sf http://mini:8090/v1/models >/dev/null && echo "8090 OK"
+podman exec openwebui curl -sf http://mini:8091/v1/models >/dev/null && echo "8091 OK"
 ```
 
-Manual cleanup on ser5 — all verified present, none of it Ansible-managed:
+If Grafana 13 breaks a dashboard, the rollback is one line —
+`grafana_version: "11.4.0"` in `roles/observability/defaults/main.yml` — and the
+data is in a volume, so nothing is lost by reverting.
 
-- [ ] **Dangling `qloop` symlinks.** They point into a venv that is no longer
-      provisioned, so they resolve to nothing:
+**Manual cleanup — verified present, none of it Ansible-managed:**
+
+- [ ] **Dangling `qloop` symlinks.** They point into a venv that no longer exists:
       ```sh
       sudo rm -f /usr/local/bin/qloop /usr/local/bin/loopkit
       ```
@@ -150,26 +203,27 @@ Manual cleanup on ser5 — all verified present, none of it Ansible-managed:
       rm -f ~/.config/systemd/user/agentlab-run@.service
       systemctl --user daemon-reload
       ```
-- [ ] **Decide on `/data/agentlab` — do this deliberately, not by reflex.**
-      It is intentionally left on disk and still in restic. It holds `runs.db`:
-      **356 recorded evaluation runs that cannot be regenerated**, since the
-      harness that produced them is deleted. The rest is disposable.
+- [ ] **Decide on `/data/agentlab` — deliberately, not by reflex.** Left on disk
+      and still in restic on purpose. It holds `runs.db`: **356 recorded
+      evaluation runs that cannot be regenerated**, since the harness is deleted.
+      The rest is disposable.
       ```sh
       du -sh /data/agentlab/*
       #   runs.db   140K   <- the irreplaceable part
-      #   venv       14M   <- dead, safe to delete
+      #   venv       14M   <- dead
       #   src/traces/suites/playbooks/jobs/datasets   ~1.3M
       ```
-      Recommended: keep `runs.db`, drop the rest, and remove the restic line in
-      `ser5/ansible/roles/backups/defaults/main.yml` once you have.
+      If you want the record but not the corpse:
       ```sh
-      # if you want the record but not the corpse:
       mkdir -p /data/archive && cp /data/agentlab/runs.db /data/archive/qloop-runs-2026-08.db
       rm -rf /data/agentlab
       ```
-- [ ] **Open WebUI needs nothing.** Its endpoints already point at `:8090`/`:8091`
-      in `webui.db`. The Ansible vars are seeds for a fresh data dir only — the
-      DB wins on a configured instance, so converging will not change or break it.
+      Then drop the `/data/agentlab` line from
+      `roles/backups/defaults/main.yml`.
+- [ ] **Open WebUI needs no action.** Its endpoints already point at
+      `:8090`/`:8091` in `webui.db`. The Ansible vars are seeds for a fresh data
+      dir only — the DB wins on a configured instance, so converging will neither
+      change nor break it.
 
 ## 5. Known gaps
 
@@ -184,4 +238,21 @@ Manual cleanup on ser5 — all verified present, none of it Ansible-managed:
   `packages/inference-bench/fanoutsim.py` against whatever replaces it.
 - **Run-to-run benchmark variance is high** (the same configuration returned 63.0
   and 99.9 tok/s on separate runs, unexplained). Treat sub-10% differences as
-  noise.
+  noise and re-run before acting on one.
+- **Grafana 11 -> 13 is two majors and was not verifiable ahead of time.** Open
+  the dashboards, not just the health endpoint. Rollback is one line.
+- **Nothing measures output quality any more.** `inference-bench` measures
+  throughput. quality-loop was deleted on its own evidence and nothing replaced
+  the thing it was meant to provide — see `todo.md`. Worth answering before any
+  claim about quality gets made externally.
+
+## 6. When this file goes away
+
+Delete it once both boxes have converged, the second converge came back clean,
+and the unchecked boxes above are resolved. Its whole job is to carry the
+one-time steps across the gap between "the branch is correct" and "the boxes
+match it" — after that it is just another stale document.
+
+The parts worth keeping live elsewhere already: mini's gotchas in
+`mini/AGENTS.md`, the sizing rationale in `roles/llamacpp/defaults/main.yml`, the
+benchmark caveats in `packages/inference-bench/README.md`.
