@@ -9,7 +9,7 @@ symlink into, your development machine.
 
 | Path | Goes where on the workstation | Purpose |
 |---|---|---|
-| [opencode.json](opencode.json) | project root **or** `~/.config/opencode/` | Providers + model limits + the 9-agent team (plus `heavy` and `research` escalations) |
+| [opencode.json](opencode.json) | project root **or** `~/.config/opencode/` | Two llama-server providers + model limits + the 9-agent team (plus `deep` and `research` escalations) |
 | [AGENTS.md](AGENTS.md) | project root | Injected at session start; the `@@RESULT` contract |
 | [.moderndegree/prompts/](.moderndegree/prompts/) | project root | Per-agent system prompts referenced by `opencode.json` |
 | [docs/business-layer.md](docs/business-layer.md) | reference | Tier L/G/X/Z routing, sovereignty, OpenSpec gates |
@@ -19,13 +19,22 @@ symlink into, your development machine.
 
 ## The split that drives everything
 
-Two `llama-server` endpoints on mini serve all nine agents, and roles live in the
-agent prompts rather than baked model variants:
+Two `llama-server` endpoints on mini, and the agents are split across them by
+CONCURRENCY rather than by difficulty. Roles live in the agent prompts rather
+than baked model variants.
 
-- **`http://mini:8090/v1`** — `qwen3.6-35b-a3b-mtp-q4_K_M` (MoE 35B-A3B, 3B
-  active), 4 slots, MTP on, 86-95 tok/s single-stream. All nine agents.
-- **`http://mini:8091/v1`** — `gpt-oss-20b-MXFP4` (MoE 20B), 8 slots, 202 tok/s
-  aggregate. Bulk fan-out and worker-shaped subtasks.
+- **`quality` — `http://mini:8090/v1`** — `qwen3.6-35b-a3b-mtp` (MoE 35B-A3B,
+  3B active), 4 slots, MTP on, 88 t/s solo. Critical-path work that runs largely
+  alone: `build`, `planner`, `architect`, `coder`, `devops`, `deep`.
+- **`throughput` — `http://mini:8091/v1`** — `gpt-oss-20b` (MoE 20B), 8 slots,
+  33 t/s per stream at 4-way (114 aggregate). The parallel fan-out:
+  `reviewer`, `security-auditor`, `tester`, `doc-writer`.
+
+Why this split: `:8090` peaks at 2 concurrent streams and is SLOWER at 4, while
+MTP is worth +21% at one stream but -18% at two. `:8091` peaks at 4 and is
+slower at 8. So there are exactly four fan-out agents, and steady state is ~2
+streams on `:8090` plus up to 4 on `:8091` — where both endpoints measure
+fastest. Numbers in `../mini/AGENTS.md`.
 
 mini is memory-bandwidth-bound, not compute-bound. Decode speed tracks active
 parameters per token, so MoE wins; a dense model is a mistake here.

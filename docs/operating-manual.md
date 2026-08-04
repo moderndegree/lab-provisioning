@@ -98,7 +98,7 @@ Why this: the workstation is the cockpit, not the model host; 32 GB RAM and a 16
 
 ### opencode
 
-What it is: the sovereign coding harness on the workstation, pointed at `http://mini:8090/v1`. The default 9-agent team is `build` orchestrator, planner, architect, reviewer, security-auditor, coder, tester, devops, and doc-writer — all on mini. The `research` escalation (xAI, Tier X, never client-confidential) needs `opencode auth login`, so the sovereign path is the failure-safe default. The old `heavy` escalation (`gpt-oss:120b`) was an Ollama-era route and no longer resolves — Ollama is stopped and llama-server serves only the two models above.
+What it is: the sovereign coding harness on the workstation, pointed at BOTH of mini's llama-server endpoints. The 9-agent team is split by concurrency: `build`, `planner`, `architect`, `coder` and `devops` on `:8090` (quality, MTP, critical path), and `reviewer`, `security-auditor`, `tester` and `doc-writer` on `:8091` (throughput, the parallel fan-out). That split is sized to measurement — `:8090` peaks at 2 concurrent streams, `:8091` at 4 — see `../mini/AGENTS.md`. The `deep` escalation is hard reasoning on `:8090` with thinking left on; it replaces the old `heavy` agent, which pointed at `gpt-oss:120b` via Ollama and no longer resolves. The `research` escalation (xAI, Tier X, never client-confidential) needs `opencode auth login`, so the sovereign path is the failure-safe default.
 
 Reach for it when: the task is client-confidential, the repo is local, and the answer must stay Tier L. Config lives in `../workstation/opencode.json`; delivery contract is in [`../workstation/AGENTS.md`](../workstation/AGENTS.md).
 
