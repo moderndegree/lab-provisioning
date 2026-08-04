@@ -24,6 +24,7 @@ benchmarking across the tailnet measures the wifi, not the GPU).
 | `lbench.py` | raw decode throughput at a given concurrency | comparing runtimes/quants |
 | `agentsim.py` | multi-agent session: workers + orchestrator, tool calls, multi-turn | checking cross-model contention |
 | `fanoutsim.py` | small fan-out: N concurrent workers then a judge pass | sizing `parallel` for real agent work |
+| `benchy_report.py` | summarises llama-benchy JSON into comparison tables | after `llama-benchy-suite` runs on mini |
 
 ```sh
 python3 lbench.py   --base http://127.0.0.1:8090/v1 --model qwen3.6-35b-a3b-mtp \

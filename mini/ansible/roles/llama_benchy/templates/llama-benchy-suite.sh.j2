@@ -63,10 +63,16 @@ run() {
   echo "  ${tag}  [${name}]  ${model}  :${port}"
   echo "=============================================================="
 
+  # --emit-progress matters for unattended runs: llama-benchy buffers stdout when
+  # it is piped rather than on a TTY, so `tail -f` on the tee'd log shows NOTHING
+  # until the invocation finishes. A depth sweep can run 10+ minutes, and an empty
+  # log is indistinguishable from a hang. This writes progress to its own file,
+  # which is the only way to tell "still working" from "wedged" mid-run.
   local -a cmd=( llama-benchy
     --base-url "http://127.0.0.1:${port}/v1"
     --model "$model" --tokenizer "$tok"
-    --runs "$RUNS" --format json --save-result "${out}.json" )
+    --runs "$RUNS" --format json --save-result "${out}.json"
+    --emit-progress "${out}.progress" )
   [[ -n "$body" ]] && cmd+=( --extra-body "$body" )
   cmd+=( "$@" )
 
