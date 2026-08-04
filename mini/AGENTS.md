@@ -37,7 +37,7 @@ ansible/
     tailscale/           tailnet join
     containers/          rootless Podman; user lingering; subuid/subgid; quadlet support
     toolboxes/           Strix Halo AI toolboxes (distrobox; enable_toolboxes)
-    llamacpp/            llama-server as a user unit in a toolbox (enable_llamacpp)
+    llamacpp/            llama-server Podman quadlets, one per instance (enable_llamacpp)
     cloudflared/         Cloudflare Tunnel (Podman quadlet; remote-managed token)
 ```
 
@@ -115,11 +115,11 @@ scheduled/off-hours jobs. Roles live in opencode/loopkit prompts, not baked Mode
 Distrobox wrappers around the pre-built images from
 [strix-halo-toolboxes.com](https://strix-halo-toolboxes.com/) — llama.cpp
 (Vulkan RADV/AMDVLK, ROCm 6.4.4/7.2.4), ComfyUI, vLLM, QLoRA fine-tuning, and
-DwarfStar. They are **on-demand shells, not services** — with one exception:
-`roles/llamacpp` runs llama-server as a boot-enabled user unit inside
-`llama-vulkan-radv` (see below), which makes that one toolbox load-bearing rather
-than disposable. Everything else is enabled by nothing and bound to no port by
-Ansible, and the Ollama service on `:11434` is untouched. Their reason to exist
+DwarfStar. They are **on-demand shells, not services**: nothing here is enabled at boot,
+nothing is bound to a port by Ansible, and the Ollama service on `:11434` is
+untouched. `roles/llamacpp` uses the same *image* but runs it as a Podman quadlet
+rather than through distrobox, so the toolbox containers stay disposable — you
+can `distrobox rm llama-vulkan-radv` without touching the serving path. Their reason to exist
 is that each image carries its own
 gfx1151-patched GPU userspace, so backends can be A/B-benchmarked without
 touching the one ROCm/Vulkan stack `amdgpu_rocm` installs on the host.
@@ -163,10 +163,35 @@ up is noise: two warm models at 131072 context plus a vLLM KV cache do not fit i
 
 ## llama.cpp serving path (`roles/llamacpp`, `enable_llamacpp`)
 
-`llama-server` on `:8090`, a systemd **user** unit running inside the
-`llama-vulkan-radv` toolbox, enabled at boot. This is what Open WebUI on ser5
-points at. Full rationale and measurements are in
-`roles/llamacpp/defaults/main.yml`; the three things that bite:
+Podman **quadlets**, one per entry in `llamacpp_instances`, enabled at boot. This
+is what Open WebUI on ser5 points at. Full rationale and measurements are in
+`roles/llamacpp/defaults/main.yml`.
+
+```
+systemctl --user start|stop|status llama-servers.target   # all instances
+systemctl --user restart llama-quality                     # just one
+```
+
+**Names are roles, aliases are models** — `name: quality` becomes
+`llama-quality.service`/`llama-quality`, while `alias:` is what clients send as
+`model`. Swapping the model behind a role changes the alias and leaves the unit
+name alone; renaming an *alias* breaks clients that hardcoded it (Open WebUI
+addresses these by alias). Adding a third instance is an entry with a free port —
+it joins the target automatically.
+
+Quadlets replaced `distrobox enter` units in 2026-08. distrobox was never
+required: the toolbox image is an ordinary OCI image (empty entrypoint,
+`Cmd=/bin/bash`) and only the *image* is special — it carries the gfx1151-patched
+Mesa/RADV userspace and a llama.cpp built against it. What distrobox cost was
+control: it is a `podman exec` client, so the unit's cgroup held only that client
+while llama-server lived in the container's cgroup, and `systemctl --user stop`
+returned success while the server kept running and holding its port. A quadlet
+runs llama-server as the container's main process, so stop/restart just work —
+verified: stopping the target leaves 0 survivors and releases both ports.
+Throughput was equal or slightly better after the move (87.1 vs 85.9 tok/s at
+c=1; ~202 vs 190.7 aggregate at c=8).
+
+The things that bite:
 
 - **MTP is a per-workload trade, not a free win.** `--spec-type draft-mtp` with
   `--spec-draft-n-max 1` buys ~15% interactive latency and costs ~29% aggregate
@@ -175,11 +200,10 @@ points at. Full rationale and measurements are in
   up to `8*(n+1)` experts instead of 8, so longer drafts cost what they save.
   Confirm it is live by grepping the journal for `MTP draft context`; without the
   flag the loader silently logs `unused tensor blk.40.nextn.* -- ignoring`.
-- **`ExecStopPost` is load-bearing.** `distrobox enter` is a `podman exec` client,
-  so the unit's cgroup holds only that client. Without the host-side `pkill`,
-  `systemctl --user stop` reports success while llama-server keeps running and
-  holding `:8090`, and the next converge fails on a port collision with an
-  invisible survivor. It works because distrobox shares the host PID namespace.
+- **`seccomp=unconfined` is not optional.** The ROCm/Vulkan userspace makes
+  ioctls the default Podman profile blocks, and the symptom is not a permission
+  error — the GPU simply fails to enumerate and llama.cpp falls back to CPU.
+  Same reason `roles/toolboxes` sets it.
 - **Ollama and llama-server cannot both be up.** llama-server holds ~22 GiB
   resident. `ollama.service` stays installed for model management but is not
   started alongside it.
@@ -187,9 +211,10 @@ points at. Full rationale and measurements are in
   the KV cache (no PagedAttention-style pooling). Per-slot is `-c / -np`, and a
   single request over that share fails outright with `request (N tokens) exceeds
   the available context size (M tokens)` even on an idle server. Size it for the
-  worst-case single request: `-c 32768 -np 8` gives each caller only 4096 tokens,
-  which an ordinary Open WebUI chat overruns. Current `-c 262144 -np 8` =
-  32768/slot, measured at ~28 GiB resident.
+  worst-case single request: `ctx 32768` with `parallel 8` gives each caller only
+  4096 tokens, which an ordinary Open WebUI chat overruns — that exact mistake
+  produced `request (5945 tokens) exceeds the available context size (4096
+  tokens)` in Open WebUI. Both instances now run 131072/slot.
 - **DO NOT raise context blind — it can hang the box.** `-c 2097152` (262144/slot)
   does not fail cleanly: it wedges the amdgpu DRM suballocator with the process
   stuck in uninterruptible sleep (`state Ds`, `wchan drm_suballoc_new`),

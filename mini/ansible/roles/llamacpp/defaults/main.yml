@@ -26,10 +26,17 @@ enable_llamacpp: false
 # ─────────────────────────────────────────────────────────────────────────────
 # Defaults shared by every instance (override per-instance where it matters)
 # ─────────────────────────────────────────────────────────────────────────────
-# vulkan-radv is mini's committed backend and upstream's "works with every model"
-# recommendation; llama-rocm-7.2.4 is the A/B alternative. The toolbox must exist
-# (roles/toolboxes) before this runs.
-llamacpp_toolbox: "llama-vulkan-radv"
+# The container image every instance runs. This is the same image roles/toolboxes
+# uses for the interactive llama-vulkan-radv shell, and it is the ONLY special
+# ingredient here: Fedora 43 carrying a gfx1151-patched Mesa/RADV userspace and a
+# llama.cpp built against it. It is an ordinary OCI image (empty entrypoint,
+# Cmd=/bin/bash) — distrobox was never required to run it, only to make an
+# interactive shell pleasant. Override per instance with `image:` to A/B a
+# different backend (e.g. the rocm-7.2.4 tag) without touching the others.
+llamacpp_image: "docker.io/kyuz0/amd-strix-halo-toolboxes:vulkan-radv"
+
+# Group handle: `systemctl --user {start,stop,status} llama-servers.target`.
+llamacpp_target: "llama-servers.target"
 
 # Models live in the shared toolbox model dir — the only path bind-mounted into
 # the containers. Deliberately NOT hardlinks into /data/ollama/blobs: that would
@@ -51,6 +58,12 @@ llamacpp_host: "0.0.0.0"
 # and a hand-picked --tool-call-parser.
 llamacpp_base_args: "-ngl 999 -fa 1 --no-mmap"
 llamacpp_restart_sec: 10
+
+# Health check is a READINESS probe. Model load is 4-12s warm and much longer
+# cold, so the start period must cover the worst case — too short and systemd
+# restarts a server that was only still loading, forever.
+llamacpp_health_interval: "30s"
+llamacpp_health_start_period: "600s"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # THE KV CEILING — READ BEFORE RAISING ANY ctx
@@ -121,72 +134,64 @@ llamacpp_ctx_warn: 1048576
 # q8 costs ~24% latency for an as-yet-unmeasured quality gain; measure the gain on
 # real tasks rather than asserting it before making q8 the default.
 llamacpp_instances:
-  # Quality / interactive. MTP on for latency.
+  # NAMING: `name` is the ROLE and becomes the unit/container (llama-quality),
+  # `alias` is the MODEL IDENTITY and is what clients send as "model". They are
+  # split deliberately — swapping the model behind a role changes the alias while
+  # `systemctl --user restart llama-quality` keeps meaning the same thing, and
+  # dashboards/units do not churn. Renaming an alias DOES break clients that
+  # hardcoded it (Open WebUI addresses these by alias), so change it knowingly.
   #
-  # parallel 4 was measured against a 3-4 candidate fan-out (the quality-loop that
-  # drove this box, removed 2026-08). At parallel 2 the third candidate queued
-  # behind the first two; on an n=3 rounds=2 session:
+  # To swap a model: change `model` + `alias`, re-run, done. To add a third
+  # instance: append an entry with a free port — it joins llama-servers.target
+  # automatically. To A/B a backend: set `image:` on one instance only.
+
+  # Interactive / quality. Full context per request, MTP on for latency.
+  #
+  # parallel 4 was measured against a 3-4 candidate fan-out (the quality-loop
+  # that drove this box, removed 2026-08). At parallel 2 the third candidate
+  # queued behind the first two; on an n=3 rounds=2 session:
   #   parallel 2 -> 71.1s session, generate 30.6s, 100.5 tok/s aggregate
   #   parallel 4 -> 58.6s session, generate 24.5s, 125.6 tok/s aggregate  (-18%)
-  # n=4 rounds=2 lands at 71.5s with all four resident.
   #
-  # CAVEAT: nothing currently dispatches that fan-out. 4 remains a sane default —
-  # it covers interactive chat plus a small parallel dispatch without starving
-  # per-slot context — but it is sized to a workload that no longer exists.
-  # Re-measure with packages/inference-bench/fanoutsim.py against whatever
-  # actually drives this before calling it tuned.
+  # CAVEAT: nothing currently dispatches that fan-out. 4 remains a sane default
+  # for interactive chat plus a small parallel dispatch, but it is sized to a
+  # workload that no longer exists — re-measure with
+  # packages/inference-bench/fanoutsim.py against whatever replaces it.
   #
   # 524288/4 = 131072 per slot. Raising parallel without raising ctx truncates
-  # per-request context below what a long chat needs; see the ctx/parallel note
-  # above.
-  - name: "qwen"
-    model: "{{ llamacpp_models_dir }}/qwen3.6-35b-a3b-mtp-q4_K_M.gguf"
+  # per-request context; see the ctx/parallel note above.
+  - name: "quality"
     alias: "qwen3.6-35b-a3b-mtp"
+    model: "{{ llamacpp_models_dir }}/qwen3.6-35b-a3b-mtp-q4_K_M.gguf"
     port: 8090
     ctx: 524288
     parallel: 4
     mtp: true
     mtp_draft_max: 1
 
-  # Quantity / throughput. MXFP4 is gpt-oss's native format, so no requantization
-  # loss — and note it is only viable here because llama.cpp supports MXFP4 on
-  # gfx1151 while vLLM does not (no kernel; it was one of the vLLM dead ends).
-  # MTP deliberately off: this instance exists for aggregate throughput, which is
-  # exactly what MTP costs. Model max context is 131072, so per-slot cannot
-  # usefully exceed that.
+  # Batch / throughput. MXFP4 is gpt-oss's native format, so no requantisation
+  # loss — and it is only viable here because llama.cpp supports MXFP4 on gfx1151
+  # while vLLM has no kernel for it. MTP deliberately off: this instance exists
+  # for aggregate throughput, which is exactly what MTP costs (-29%).
   #
-  # Concurrency curve measured at fixed ctx 1048576 — changing `parallel` alone
-  # repartitions the SAME KV allocation, so these are all the same ~36 GiB and
-  # none carries extra allocation risk (aggregate / per-stream / TTFT):
+  # Concurrency curve at fixed ctx 1048576 — changing `parallel` alone
+  # repartitions the SAME KV allocation, so none of these carries extra
+  # allocation risk (aggregate / per-stream / TTFT):
   #   parallel  8 -> 190.5 / 26.4 / 0.75s   (131072/slot)  <- chosen
   #   parallel 16 -> 238.2 / 16.1 / 0.90s   ( 65536/slot)
   #   parallel 32 -> 399.9 / 13.9 / 1.48s   ( 32768/slot)
   #   parallel 64 -> 477.8 /  8.4 / 2.66s   ( 16384/slot)
   #
-  # THOSE NUMBERS ARE FOR LONG SUSTAINED GENERATIONS AND DO NOT TRANSFER.
-  # Re-measured with agent-shaped traffic (short multi-turn answers, tool calls),
-  # 32 concurrent clients:
-  #   parallel  8 -> 98.5 tok/s aggregate, 13.0 per-stream
-  #   parallel 32 -> 83.4 tok/s aggregate,  3.1 per-stream
-  # More slots made it WORSE. With ~100-token answers the per-request overhead
-  # dominates and 32 simultaneous prefills compete without ever reaching the
-  # batching efficiency long generations get. Aggregate for real traffic is
-  # ~85-100 tok/s regardless — roughly half the 190.7 headline, which is the
-  # number to plan capacity against.
-  #
-  # 32 is the throughput knee and 64 the raw maximum for long generations, but
-  # both squeeze per-slot context. Running 8 deliberately: 131072/slot is the
-  # model's own ceiling
-  # (max_position_embeddings), so this is the most context a request can actually
-  # use — going lower on `parallel` would only reserve KV the model cannot attend
-  # over. This instance feeds agent work where a truncated context is a wrong
-  # answer rather than a slow one, and 190 tok/s aggregate is still above Qwen's
-  # best (168.6). Raise `parallel` if the workload turns out to be many short
-  # requests rather than few long ones — it costs nothing to change, since the
-  # total KV allocation is identical at every setting above.
-  - name: "gptoss"
-    model: "{{ llamacpp_models_dir }}/gpt-oss-20b-MXFP4.gguf"
+  # THOSE ARE LONG-GENERATION NUMBERS AND DO NOT TRANSFER. Re-measured with
+  # agent-shaped traffic (short multi-turn answers) at 32 concurrent clients,
+  # parallel 8 gave 98.5 tok/s aggregate and parallel 32 gave 83.4 — more slots
+  # made it WORSE. Real-traffic aggregate is ~85-100 tok/s either way, roughly
+  # half the 190.7 headline. 131072/slot is also the model's own ceiling
+  # (max_position_embeddings), so lowering parallel further only reserves KV the
+  # model cannot attend over.
+  - name: "throughput"
     alias: "gpt-oss-20b"
+    model: "{{ llamacpp_models_dir }}/gpt-oss-20b-MXFP4.gguf"
     port: 8091
     ctx: 1048576
     parallel: 8

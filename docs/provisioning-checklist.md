@@ -56,15 +56,19 @@ pins the blob alive after an `ollama rm`.
 
 ```sh
 # both instances up, at the expected slot geometry
-systemctl --user is-active llama-server-qwen llama-server-gptoss
-journalctl --user -u llama-server-qwen  -n 200 | grep -oE 'n_slots = [0-9]+, n_ctx_slot = [0-9]+'
-journalctl --user -u llama-server-gptoss -n 200 | grep -oE 'n_slots = [0-9]+, n_ctx_slot = [0-9]+'
-#   qwen   -> n_slots = 4, n_ctx_slot = 131072
-#   gptoss -> n_slots = 8, n_ctx_slot = 131072
+systemctl --user is-active llama-quality llama-throughput
+journalctl --user -u llama-quality    -n 200 | grep -oE 'n_slots = [0-9]+, n_ctx_slot = [0-9]+'
+journalctl --user -u llama-throughput -n 200 | grep -oE 'n_slots = [0-9]+, n_ctx_slot = [0-9]+'
+#   quality    -> n_slots = 4, n_ctx_slot = 131072
+#   throughput -> n_slots = 8, n_ctx_slot = 131072
 
 # MTP actually engaged (silent if it is not — the loader just logs
 # "unused tensor blk.40.nextn.* -- ignoring" and carries on)
-journalctl --user -u llama-server-qwen -n 300 | grep -c 'MTP draft context'   # expect >= 1
+journalctl --user -u llama-quality -n 300 | grep -c 'MTP draft context'   # expect >= 1
+
+# group control — this is the point of the quadlet migration
+systemctl --user stop  llama-servers.target   # both down, ports released, 0 survivors
+systemctl --user start llama-servers.target
 
 # Ollama should be installed and NOT running
 systemctl is-enabled ollama    # disabled
@@ -101,11 +105,11 @@ It still cannot run at full size alongside llama-server — 73 GiB is already
 resident. Free room first:
 
 ```sh
-systemctl --user stop llama-server-gptoss   # frees ~36 GiB
+systemctl --user stop llama-throughput      # frees ~36 GiB
 sudo systemctl start ollama
 ollama run some-new-model:tag               # unloads itself after 5m idle
 sudo systemctl stop ollama
-systemctl --user start llama-server-gptoss
+systemctl --user start llama-throughput
 ```
 
 ## 4. ser5 — after `make provision`

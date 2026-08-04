@@ -1,0 +1,81 @@
+# Managed by Ansible (mini/ansible/roles/llamacpp) — do not edit by hand.
+#
+# Podman quadlet for the "{{ item.name }}" llama.cpp server: {{ item.alias }} on :{{ item.port }}.
+# systemd generates llama-{{ item.name }}.service from this at daemon-reload.
+#
+# WHY A QUADLET AND NOT `distrobox enter`. distrobox is a podman-exec client, so
+# the unit's cgroup held only that client while llama-server lived in the
+# container's cgroup. systemd could not stop it: `systemctl --user stop` returned
+# success while the server kept running and holding its port, and the next start
+# collided with an invisible survivor. Here llama-server IS the container's main
+# process, so stop/restart work normally and no host-side pkill is needed.
+#
+# The toolbox image is still the right image — it carries the gfx1151-patched
+# Mesa/RADV userspace and a llama.cpp built against it. It is an ordinary OCI
+# image (empty entrypoint, Cmd=/bin/bash); distrobox was only ever ergonomics.
+[Unit]
+Description=llama.cpp [{{ item.name }}] {{ item.alias }} on :{{ item.port }}
+After=network-online.target
+Wants=network-online.target
+# PartOf makes `systemctl --user stop {{ llamacpp_target }}` actually stop this
+# instance. WantedBy alone would start them as a group but leave them running.
+PartOf={{ llamacpp_target }}
+
+[Container]
+ContainerName=llama-{{ item.name }}
+Image={{ item.image | default(llamacpp_image) }}
+# llama-server directly as PID 1 of the container — this is what makes systemd
+# able to stop it.
+Entrypoint=/usr/bin/llama-server
+
+# Host networking: ports bound here are real ports on mini, matching how the
+# toolbox behaved and keeping mini's UFW (tailnet-only) the single control point.
+# Switch to PublishPort= if you ever want these namespaced.
+Network=host
+
+# GPU passthrough. seccomp=unconfined is required by the ROCm/Vulkan userspace —
+# it makes ioctls the default profile blocks, and the symptom is not a permission
+# error but the GPU silently failing to enumerate. The 0666 modes from
+# roles/toolboxes' 70-kfd.rules are what let this work regardless of how uids map
+# into the container.
+AddDevice=/dev/dri
+AddDevice=/dev/kfd
+PodmanArgs=--security-opt seccomp=unconfined
+
+# Models read-only: nothing here should ever write to the shared model dir.
+Volume={{ llamacpp_models_dir }}:{{ llamacpp_models_dir }}:ro
+
+Exec=-m {{ item.model }} \
+     --alias {{ item.alias }} \
+     --host {{ item.host | default(llamacpp_host) }} \
+     --port {{ item.port }} \
+     -c {{ item.ctx }} \
+     -np {{ item.parallel }} \
+     {{ item.base_args | default(llamacpp_base_args) }} \
+{% if item.mtp | default(false) | bool %}
+     --spec-type draft-mtp --spec-draft-n-max {{ item.mtp_draft_max | default(1) }} \
+{% endif %}
+{% if item.extra_args | default('') %}
+     {{ item.extra_args }} \
+{% endif %}
+     --no-webui
+
+# Readiness, not liveness. Model load is 4-12s from a warm page cache and far
+# longer cold, so StartPeriod has to cover the worst case or systemd would keep
+# restarting a server that was merely still loading.
+HealthCmd=/bin/sh -c "curl -sf http://127.0.0.1:{{ item.port }}/health || exit 1"
+HealthInterval={{ llamacpp_health_interval }}
+HealthStartPeriod={{ llamacpp_health_start_period }}
+HealthTimeout=10s
+HealthRetries=3
+
+[Service]
+Restart=on-failure
+RestartSec={{ llamacpp_restart_sec }}
+# Loading tens of GiB off a cold page cache blows the default 90s.
+TimeoutStartSec=600
+
+[Install]
+# Both a normal boot start and membership of the group target, so
+# `systemctl --user {start,stop} {{ llamacpp_target }}` moves every instance at once.
+WantedBy=default.target {{ llamacpp_target }}

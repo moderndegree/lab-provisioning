@@ -1,15 +1,12 @@
 ---
-# llama.cpp serving path. See defaults/main.yml for why this exists, the measured
-# quant/MTP trade-offs, and the KV ceiling that will hang the GPU if exceeded.
+# llama.cpp serving path — one Podman quadlet per entry in llamacpp_instances.
+# See defaults/main.yml for the measurements behind every sizing choice, and the
+# KV ceiling that will hang the GPU if exceeded.
 #
-# Runs AFTER roles/toolboxes: the binary lives inside that toolbox image, and
-# roles/containers has already enabled systemd user lingering — load-bearing
-# here, because without it /run/user/<uid> only exists during an interactive
+# Runs AFTER roles/containers (which provisions ~/.config/containers/systemd and
+# enables user lingering) and roles/toolboxes (which pulls the image). Lingering
+# is load-bearing: without it /run/user/<uid> only exists during an interactive
 # login and these user units would not survive the Ansible SSH session ending.
-#
-# One systemd user unit per entry in llamacpp_instances. llama-server serves
-# exactly one model per process, so a second model is a second unit on its own
-# port, not a flag on the first.
 
 - name: Look up the node user's uid for XDG_RUNTIME_DIR
   ansible.builtin.getent:
@@ -25,7 +22,7 @@
       XDG_RUNTIME_DIR: "/run/user/{{ ansible_facts['getent_passwd'][node_user][1] }}"
 
 # ─── Guard rails ─────────────────────────────────────────────────────────────
-# Both of these would otherwise surface as a unit that restarts forever with the
+# Each of these would otherwise surface as a unit that restart-loops with the
 # real cause buried in `journalctl --user`.
 - name: Stat each configured model file
   ansible.builtin.stat:
@@ -41,15 +38,13 @@
     fail_msg: >-
       Model not found at {{ item.item.model }} for instance
       '{{ item.item.name }}'. Stage the GGUF into {{ llamacpp_models_dir }}
-      first — e.g. `hf download <repo> <file> --local-dir
-      {{ llamacpp_models_dir }}`, or copy it out of Ollama's blob store if the
-      same quant is already pulled there.
+      first — see docs/provisioning-checklist.md.
   loop: "{{ llamacpp_model_stat.results }}"
   loop_control:
     label: "{{ item.item.name }}"
 
-# Two servers on one port is a silent, confusing failure: the second unit dies
-# on bind and systemd restarts it forever while the first keeps answering.
+# Two servers on one port is a silent, confusing failure: the second dies on bind
+# and restarts forever while the first keeps answering.
 - name: Require instance ports to be unique
   ansible.builtin.assert:
     that:
@@ -57,11 +52,18 @@
         == llamacpp_instances | length
     fail_msg: "llamacpp_instances contains duplicate ports."
 
-# The KV ceiling is a real hazard, not a style rule — exceeding it wedges the
-# amdgpu DRM allocator in unkillable D state and costs a reboot. See the CEILING
-# block in defaults/main.yml.
-# Per-instance, not summed: the hang is a single-process allocation failure, and
-# two instances well under the threshold coexist fine (measured ~70 GiB combined).
+# Names become unit and container names, so collisions are worse than confusing.
+- name: Require instance names to be unique
+  ansible.builtin.assert:
+    that:
+      - llamacpp_instances | map(attribute='name') | list | unique | length
+        == llamacpp_instances | length
+    fail_msg: "llamacpp_instances contains duplicate names."
+
+# The KV ceiling is a hazard, not a style rule — exceeding it wedges the amdgpu
+# DRM allocator in unkillable D state and costs a reboot. Per-instance, because
+# the failure is a single-process allocation: two instances well under the
+# threshold coexist fine (measured ~70 GiB combined).
 - name: Warn when an instance ctx is above the measured-safe ceiling
   ansible.builtin.debug:
     msg: >-
@@ -74,29 +76,123 @@
     label: "{{ item.name }}"
   when: item.ctx > llamacpp_ctx_warn
 
-# ─── Units ───────────────────────────────────────────────────────────────────
-- name: Ensure the systemd user unit directory exists
+# ─── Retire the pre-quadlet units ────────────────────────────────────────────
+# These ran llama-server through `distrobox enter`, which left the real process
+# outside the unit's cgroup. Leaving one enabled would race the quadlet for the
+# same port on next boot. Safe to drop from this role once every host has
+# converged past it.
+- name: Find retired distrobox-based llama-server units
+  ansible.builtin.find:
+    paths: "{{ node_home }}/.config/systemd/user"
+    patterns: "llama-server.service,llama-server-*.service"
+  register: llamacpp_legacy_units
+
+- name: Stop and disable retired llama-server units
+  ansible.builtin.systemd_service:
+    name: "{{ item.path | basename }}"
+    scope: user
+    state: stopped
+    enabled: false
+  become_user: "{{ node_user }}"
+  environment: "{{ llamacpp_user_env }}"
+  loop: "{{ llamacpp_legacy_units.files }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+  failed_when: false
+
+- name: Remove retired llama-server unit files
   ansible.builtin.file:
-    path: "{{ node_home }}/.config/systemd/user"
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ llamacpp_legacy_units.files }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+
+# The old units could not stop their own server (that is why they are retired),
+# so a survivor may still hold the port. Reap it before starting the quadlets.
+- name: Reap any llama-server left behind by a retired unit
+  ansible.builtin.command:
+    cmd: "pkill -f '^llama-server -m {{ item.model }}'"
+  become_user: "{{ node_user }}"
+  loop: "{{ llamacpp_instances }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: llamacpp_reap
+  changed_when: llamacpp_reap.rc == 0
+  failed_when: false
+  when: llamacpp_legacy_units.files | length > 0
+
+# ─── Quadlets ────────────────────────────────────────────────────────────────
+- name: Ensure the quadlet and systemd user directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
     state: directory
     owner: "{{ node_user }}"
     group: "{{ node_user }}"
     mode: "0755"
+  loop:
+    - "{{ node_home }}/.config/containers/systemd"
+    - "{{ node_home }}/.config/systemd/user"
 
-- name: Install a llama-server user unit per instance
+- name: Install the llama-servers group target
   ansible.builtin.template:
-    src: llama-server.service.j2
-    dest: "{{ node_home }}/.config/systemd/user/llama-server-{{ item.name }}.service"
+    src: llama-servers.target.j2
+    dest: "{{ node_home }}/.config/systemd/user/{{ llamacpp_target }}"
+    owner: "{{ node_user }}"
+    group: "{{ node_user }}"
+    mode: "0644"
+  register: llamacpp_target_unit
+
+- name: Install a quadlet per instance
+  ansible.builtin.template:
+    src: llama-server.container.j2
+    dest: "{{ node_home }}/.config/containers/systemd/llama-{{ item.name }}.container"
     owner: "{{ node_user }}"
     group: "{{ node_user }}"
     mode: "0644"
   loop: "{{ llamacpp_instances }}"
   loop_control:
     label: "{{ item.name }}"
-  register: llamacpp_units
+  register: llamacpp_quadlets
 
-# daemon-reload must happen before enable --now, otherwise a freshly written unit
-# is invisible to systemd and the enable fails.
+# Remove quadlets for instances that are no longer configured, so deleting an
+# entry from llamacpp_instances actually retires its server rather than leaving
+# it running forever.
+- name: Find installed llama quadlets
+  ansible.builtin.find:
+    paths: "{{ node_home }}/.config/containers/systemd"
+    patterns: "llama-*.container"
+  register: llamacpp_installed_quadlets
+
+- name: Stop services for removed instances
+  ansible.builtin.systemd_service:
+    name: "{{ item.path | basename | regex_replace('\\.container$', '.service') }}"
+    scope: user
+    state: stopped
+  become_user: "{{ node_user }}"
+  environment: "{{ llamacpp_user_env }}"
+  loop: "{{ llamacpp_installed_quadlets.files }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+  when: >-
+    (item.path | basename | regex_replace('^llama-', '') | regex_replace('\\.container$', ''))
+    not in (llamacpp_instances | map(attribute='name') | list)
+  failed_when: false
+
+- name: Remove quadlets for removed instances
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ llamacpp_installed_quadlets.files }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+  when: >-
+    (item.path | basename | regex_replace('^llama-', '') | regex_replace('\\.container$', ''))
+    not in (llamacpp_instances | map(attribute='name') | list)
+  register: llamacpp_pruned
+
+# Quadlets are compiled into .service units by a generator that only runs on
+# daemon-reload, so a freshly written .container is invisible until this.
 - name: Reload the systemd user manager
   ansible.builtin.systemd_service:
     daemon_reload: true
@@ -105,25 +201,31 @@
   environment: "{{ llamacpp_user_env }}"
   changed_when: false
 
-# Restart only the instances whose unit actually changed: each restart reloads
-# tens of GiB of weights, so a blanket restart on every converge is expensive.
-- name: Restart changed instances
+- name: Enable the llama-servers group target
   ansible.builtin.systemd_service:
-    name: "llama-server-{{ item.item.name }}.service"
+    name: "{{ llamacpp_target }}"
+    scope: user
+    enabled: true
+  become_user: "{{ node_user }}"
+  environment: "{{ llamacpp_user_env }}"
+
+# Restart only what changed: each restart reloads tens of GiB of weights.
+- name: Restart instances whose quadlet changed
+  ansible.builtin.systemd_service:
+    name: "llama-{{ item.item.name }}.service"
     scope: user
     state: restarted
   become_user: "{{ node_user }}"
   environment: "{{ llamacpp_user_env }}"
-  loop: "{{ llamacpp_units.results }}"
+  loop: "{{ llamacpp_quadlets.results }}"
   loop_control:
     label: "{{ item.item.name }}"
   when: item.changed
 
-- name: Enable and start every instance
+- name: Start every configured instance
   ansible.builtin.systemd_service:
-    name: "llama-server-{{ item.name }}.service"
+    name: "llama-{{ item.name }}.service"
     scope: user
-    enabled: true
     state: started
   become_user: "{{ node_user }}"
   environment: "{{ llamacpp_user_env }}"
