@@ -197,7 +197,6 @@ These flags in `ansible/group_vars/all.yml` now match the live box:
 |------|------|--------|
 | `enable_observability: true` | `observability` | Prometheus + Grafana quadlets targeting mini's metrics (mini must be reachable) |
 | `enable_hermes: true` | `hermes` | Hermes gateway, proxy, dashboard, messaging adapters, optional Grok Build skill + xAI env (see below) |
-| `enable_agentlab: true` | `agentlab` | quality-loop experiment layer under `{{ data_mount }}/agentlab` (mini must be reachable) — see [`../docs/ai-loops.md`](../docs/ai-loops.md) |
 | `enable_brain: true` | `brain` | Obsidian-compatible second brain under `{{ data_mount }}/brain` — see [`../docs/brain.md`](../docs/brain.md) |
 | `enable_openwebui: true` | `openwebui` | Open WebUI browser chat UI, reaching mini's Ollama over the tailnet — see below |
 | `enable_backups: true` | `backups` | restic snapshots + daily timer (needs a real `vault_restic_password`) — see below |
@@ -239,7 +238,7 @@ mini's warm pair is `qwen3-coder-next:latest` for depth plus
 
 | Surface | Unit / command | Reachability | Use |
 |---------|----------------|--------------|-----|
-| Messaging gateway | `hermes-gateway.service` → `hermes gateway start --all` | Outbound to Telegram/Discord; no inbound UFW rule | Chat-driven personal/lab tasks and free push notifications |
+| Messaging gateway | `hermes-gateway.service` → `hermes gateway start --all` | Outbound to Discord (Telegram: manual setup, not Ansible-managed); no inbound UFW rule | Chat-driven personal/lab tasks and free push notifications |
 | OpenAI-compatible proxy | `hermes-proxy.service` on `:8645` | UFW-scoped to `tailscale0` | Other tailnet machines use Hermes routing via `/v1` |
 | Dashboard | `hermes-dashboard.service` on `:9119` | UFW-scoped to `tailscale0` | Browser UI; sovereign phone surface for client-confidential work |
 
@@ -250,18 +249,23 @@ enable_hermes: true
 enable_hermes_proxy: true
 enable_hermes_dashboard: true
 enable_hermes_messaging: true
-hermes_messaging_platforms: ["telegram", "discord"]
+enable_hermes_discord: true
 ```
 
-Vault bot tokens are written to `HERMES_HOME/.env` only when non-empty and not
-`PLACEHOLDER*`:
+Discord's bot token is written to `HERMES_HOME/.env` only when
+`enable_hermes_messaging` and `enable_hermes_discord` are both true and
+`vault_hermes_discord_bot_token` (Discord Developer Portal → Bot tab) is
+non-empty and not `PLACEHOLDER*`.
 
-- `vault_hermes_telegram_bot_token` — Telegram @BotFather
-- `vault_hermes_discord_bot_token` — Discord Developer Portal → Bot tab
+Telegram is **not** Ansible/vault-managed — there's no `enable_hermes_telegram`
+flag or vaulted token. Set it up manually on the box if/when wanted:
+`TELEGRAM_BOT_TOKEN` into `HERMES_HOME/.env` yourself, same as the pairing
+step below.
 
 ### Messaging gateway setup and pairing runbook
 
-After provisioning and vaulting real bot tokens:
+After provisioning and vaulting a real Discord bot token (and, if used,
+setting up Telegram manually):
 
 ```bash
 export HERMES_HOME=/data/services/hermes
@@ -392,7 +396,7 @@ mini — mini's hard rule is inference only.
 With `enable_backups: true` and a real `vault_restic_password` (add it via
 `make vault-edit`; generate with `openssl rand -base64 24` and keep a copy **off**
 this machine), the `backups` role snapshots `{{ user_home }}`,
-`{{ data_mount }}/agentlab`, `{{ data_mount }}/services`, and `/etc` to an
+`{{ data_mount }}/agentlab` (frozen archive of the removed quality-loop), `{{ data_mount }}/services`, and `/etc` to an
 encrypted restic repo at `{{ data_mount }}/backups`, daily at 03:30 via a
 systemd timer (`restic-backup.timer`). Retention: 7 daily / 4 weekly / 6 monthly,
 pruned after each run, with a 1% read-data integrity check.

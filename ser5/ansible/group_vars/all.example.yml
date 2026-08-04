@@ -82,7 +82,6 @@ tailnet_dns_search: "YOUR_TAILNET.ts.net"
 # Optional roles — disabled by default. Flip to true to activate.
 enable_observability: false   # Prometheus + Grafana quadlets (monitors mini)
 enable_backups: false         # restic snapshots + daily timer (needs vault_restic_password)
-enable_agentlab: false        # quality-loop experiment layer (packages/quality-loop)
 enable_brain: false           # Obsidian-compatible second brain under /data/brain
 enable_openwebui: false       # Open WebUI browser chat UI, reaching mini over the tailnet
 
@@ -106,12 +105,9 @@ enable_hermes_proxy: false
 # Web dashboard on 0.0.0.0 so it starts with the rest of the Hermes services.
 enable_hermes_dashboard: false
 hermes_dashboard_host: "0.0.0.0"
-# Hermes gateway starts every configured platform adapter; these are the paired
-# messaging platforms enabled on ser5.
+# Telegram is not Ansible-managed — set up manually on the box if/when wanted.
 enable_hermes_messaging: false
-hermes_messaging_platforms:
-  - "telegram"
-  - "discord"
+enable_hermes_discord: true
 # Grok Build skill + optional xAI API key (default model stays Ollama / Tier L).
 enable_hermes_grok_skill: false
 enable_hermes_xai_api_key: false

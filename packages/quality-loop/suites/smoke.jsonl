@@ -1,6 +1,0 @@
-# Tiny mixed suite for smoke-testing strategies end to end. Not a benchmark.
-{"id": "arith-1", "prompt": "A bakery sells muffins in boxes of 6. Ana needs 75 muffins for an event. How many boxes must she buy?", "expected": "13", "match": "numeric"}
-{"id": "arith-2", "prompt": "A train leaves at 09:40 and arrives at 14:05 the same day. How many minutes is the journey?", "expected": "265", "match": "numeric"}
-{"id": "logic-1", "prompt": "Mary's father has five daughters: Nana, Nene, Nini, Nono, and one more. What is the fifth daughter's name?", "expected": "Mary", "match": "contains"}
-{"id": "code-1", "prompt": "What does this Python expression evaluate to: len(set('mississippi'))?", "expected": "4", "match": "numeric"}
-{"id": "fact-1", "prompt": "Which planet in our solar system has the shortest day (fastest rotation)?", "expected": "Jupiter", "match": "contains"}

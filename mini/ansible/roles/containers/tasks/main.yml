@@ -11,6 +11,25 @@
       - podman
     state: present
 
+# Rootless Podman builds a user namespace out of the subordinate uid/gid ranges
+# in /etc/subuid and /etc/subgid. Users created by adduser get a range for free;
+# a user created by cloud-init's `users:` module often does not, and the failure
+# mode is a bare "cannot find UID/GID for user" on the first rootless container
+# rather than anything pointing at these files. 65536 IDs from 100000 is the
+# distro-standard first allocation.
+- name: Check whether {{ node_user }} has subordinate uid/gid ranges
+  ansible.builtin.shell:
+    cmd: "grep -q '^{{ node_user }}:' /etc/subuid && grep -q '^{{ node_user }}:' /etc/subgid"
+  register: subid_check
+  changed_when: false
+  failed_when: false
+
+- name: Allocate subordinate uid/gid ranges for rootless Podman
+  ansible.builtin.command:
+    cmd: "usermod --add-subuids 100000-165535 --add-subgids 100000-165535 {{ node_user }}"
+  when: subid_check.rc != 0
+  changed_when: true
+
 - name: Enable user lingering for {{ node_user }}
   ansible.builtin.command: loginctl enable-linger {{ node_user }}
   register: linger_cmd

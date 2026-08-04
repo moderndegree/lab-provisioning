@@ -60,12 +60,15 @@
     - daemon-reload
     - restart ollama
 
-# ─── Ensure service is running ────────────────────────────────────────────────
-- name: Ensure ollama service is enabled and started
+# ─── Ensure service is in the configured state ───────────────────────────────
+# Not hardcoded to enabled/started any more: roles/llamacpp serves on :8090 and
+# holds ~22 GiB resident, which cannot coexist with two warm Ollama models at
+# 131072 context in 122 GiB. See ollama_service_* in defaults/main.yml.
+- name: Ensure ollama service is in the configured state
   ansible.builtin.systemd:
     name: ollama
-    enabled: true
-    state: started
+    enabled: "{{ ollama_service_enabled }}"
+    state: "{{ ollama_service_state }}"
     daemon_reload: true
 
 # ─── Models (two-base-model policy) ───────────────────────────────────────────

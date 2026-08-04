@@ -1,5 +1,4 @@
 # Podman bridge network for Open WebUI (Ansible-managed, do not edit by hand).
-# DNSSearch enables Tailscale MagicDNS resolution (e.g., "mini" → mini.{{ tailnet_dns_search }})
-# from inside the container's netns — same trick as roles/observability/templates/obs.network.j2.
+# DNS search domain (Tailscale MagicDNS resolution, e.g. "mini" → mini.{{ tailnet_dns_search }})
+# is a per-container key (DNSSearch=), not a network one — set on openwebui.container.j2 instead.
 [Network]
-DNSSearch={{ tailnet_dns_search }}

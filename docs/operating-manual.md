@@ -6,17 +6,17 @@ This lab is three things: the dev environment for a solo AI consulting practice,
 
 | Ask this first | Route | Tool | Tier | Why this, on this hardware |
 |---|---|---|---|---|
-| Is it client-confidential? | mini over the tailnet | opencode pointed at `http://mini:11434/v1` | L | Data stays on hardware the owner controls; mini is the sovereign inference appliance. |
+| Is it client-confidential? | mini over the tailnet | opencode pointed at `http://mini:8090/v1` | L | Data stays on hardware the owner controls; mini is the sovereign inference appliance. |
 | Am I at the desk on my own repos? | Windows workstation | GitHub Copilot CLI | G | Pro+ buys frontier models at a flat rate; the gaming PC is the primary cockpit. |
 | Should it run for hours without me? | ser5, or GitHub cloud | Grok Build CLI on ser5, or assign a GitHub issue to Copilot cloud agent | X or G | ser5 survives disconnects via systemd; cloud sessions need no lab uptime. |
 | Am I away from a computer? | ser5 | Hermes from the phone | L for dashboard, personal-only for chat gateways | Tailscale gives private reach; Hermes is already running and phone-shaped. |
-| Am I choosing between models or measuring quality? | ser5 driving mini | qloop (quality-loop) | L | Measurements belong off mini; mini should only answer tokens. |
+| Am I choosing between models or measuring quality? | ser5 driving mini | `packages/inference-bench` scripts | L | Measurements belong off mini; mini should only answer tokens. |
 
 ## Routing tiers
 
 | Tier | Name | Endpoint | Use it for | Never use it for | Rationale |
 |---|---|---|---|---|---|
-| L | Sovereign | Ollama on mini over the tailnet | Client-confidential work, lab operations, private evals | Public chat gateways | Default tier. Data never leaves controlled hardware. |
+| L | Sovereign | llama-server on mini over the tailnet (`:8090` quality, `:8091` throughput) | Client-confidential work, lab operations, private evals | Public chat gateways | Default tier. Data never leaves controlled hardware. |
 | G | Governed | GitHub Copilot Pro+ with data retention disabled | Owner repos, infra, client work with written consent | Client-confidential work without consent | Frontier quality, flat-rate economics, strong ergonomics. |
 | X | Personal | xAI SuperGrok / Grok Build | Own repos, research, long autonomous runs | Client-confidential material | Useful autonomy; not a confidentiality boundary. |
 | Z | Throwaway | OpenCode Zen free models | OSS scaffolding only | Client deliverables | Fine for disposable glue; not where quality or privacy lives. |
@@ -25,8 +25,8 @@ This lab is three things: the dev environment for a solo AI consulting practice,
 
 | Device | Role | Runs | Does not run | Why this, on this hardware |
 |---|---|---|---|---|
-| mini | Inference appliance | Headless Ubuntu 26.04, Ollama on `:11434`, Vulkan/RADV backend, tailnet-only | Loops, experiments, dashboards, queues, client apps | Strix Halo has 128 GB unified LPDDR5X and ~110 GB usable GPU pool; protect it from anything that can crash or OOM. |
-| ser5 | Always-on driver | Hermes, quality-loop/agentlab, second brain (`/data/brain`), Grok Build CLI, Prometheus+Grafana, Open WebUI (opt-in), restic backups | Local models | Ryzen 7 5800H + 64 GB DDR4 is enough for orchestration; `/data` holds durable state. |
+| mini | Inference appliance | Headless Ubuntu 26.04, llama-server on `:8090`/`:8091`, Vulkan/RADV backend, tailnet-only; Ollama installed but stopped, started by hand only to try a model | Loops, experiments, dashboards, queues, client apps | Strix Halo has 128 GB unified LPDDR5X and ~110 GB usable GPU pool; protect it from anything that can crash or OOM. |
+| ser5 | Always-on driver | Hermes, second brain (`/data/brain`), Grok Build CLI, Prometheus+Grafana, Open WebUI (opt-in), restic backups | Local models | Ryzen 7 5800H + 64 GB DDR4 is enough for orchestration; `/data` holds durable state. |
 | workstation | Primary cockpit | Copilot CLI, opencode client, repo work | Local models | RTX 4080 Super 16 GB and 32 GB system RAM lose to mini for this fleet; drive mini instead. |
 | iPhone | Remote control surface | Tailscale, Hermes dashboard, GitHub mobile, Grafana (Open WebUI only if `enable_openwebui` is turned on) | Bulk editing, production hosting | Starts work, reviews PRs, checks health; it is not the lab. |
 
@@ -36,19 +36,26 @@ Strix Halo is memory-bandwidth-bound, not compute-bound. Decode speed tracks act
 
 | Model | Size / shape | Speed | Residency | Use | Bandwidth rationale |
 |---|---:|---:|---|---|---|
-| `qwen3.6:35b-a3b-mtp-q4_K_M` | 22 GB, MoE 35B-A3B, 3B active | 70–80 t/s (measured) | Warm driver slot | Orchestrator, devops, doc-writer, qloop judge/reflector | The anchor: fast because only ~3B active params are read per token. |
+| `qwen3.6:35b-a3b-mtp-q4_K_M` | 22 GB, MoE 35B-A3B, 3B active | 70–80 t/s (measured) | Warm driver slot | Orchestrator, devops, doc-writer | The anchor: fast because only ~3B active params are read per token. |
 | `qwen3-coder-next:latest` | 51 GB, MoE 80B-A3B hybrid Gated-DeltaNet, 512 experts / 10 active, 3B active | ~35-50 t/s (est.) | Warm depth slot | Coder, tester, planner, architect, reviewer, security-auditor | Replaces dense 27B: much stronger coding while keeping 3B active. |
 | `glm-4.7-flash:latest` | 19 GB, MoE 30B-A3B, 3B active | ~75-90 t/s (est.) | Challenger, not resident today | Driver-slot bake-off | Similar active size to the driver; measure before swapping. |
 | `gpt-oss:120b` | 65 GB, MoE 117B-A5.1B, 5.1B active | ~30 t/s (community-measured) | Heavy tier | Strongest general reasoning that fits 128 GB | Loads by evicting a warm model; useful, not resident. |
-| `nemotron-cascade-2:latest` | 24 GB, Mamba2-Transformer MoE 30B-A3B, ~3.6B active | ~60-80 t/s (est.) | Heavy tier | Math/algorithm escalation; independent judge for `best_of_n` | Different model family beats a model grading its own samples. |
+| `nemotron-cascade-2:latest` | 24 GB, Mamba2-Transformer MoE 30B-A3B, ~3.6B active | ~60-80 t/s (est.) | Heavy tier | Math/algorithm escalation; independent judge | Different model family beats a model grading its own samples. |
 | `nemotron3:33b` | 27 GB, Nemotron-3-Nano-30B-A3B family | ~55-80 t/s (est.) | Bench-off | Long-context candidate | 1M context and Mamba layers make long context cheap; keep one winner. |
 | `nemotron-3-nano:latest` | 24 GB, same family, different quant | ~55-80 t/s (est.) | Bench-off | Long-context candidate | Compare against `nemotron3:33b`; do not keep both by habit. |
 | `qwen3.6:27b-mtp-q4_K_M` | 17 GB, dense 27B | ~11-15 t/s (est.) | Demoted rollback | Only if coder-next fails | Dense reads the whole model per token; roughly 6x slower than the driver. |
-| `qwen3.6:35b-a3b-mtp-q8_0` | 38 GB, q8 MoE | About half q4 throughput | Retirement candidate | Quality bake-off only | q8 spends bandwidth for marginal quality gain. |
+| `qwen3.6:35b-a3b-mtp-q8_0` | 38 GB, q8 MoE | 65.7 t/s measured — **76%** of q4, not half | Quality bake-off candidate | Worth testing against q4 | Costs ~24% latency, not the ~50% previously assumed here. The old estimate predated MTP, which offsets more of the extra bandwidth at q8 than at q4. Whether the quality gain justifies 24% is still unmeasured — settle it by measuring quality on real tasks. |
 | `qwen3.6:27b-mtp-q8_0` | 29 GB, q8 dense | About half q4 throughput | Retirement candidate | Quality bake-off only | Dense plus q8 is the wrong direction on this box. |
 | `nemotron-3-nano:4b` | 2.8 GB | 150+ t/s | `scout` alias | Throwaway smoke tests only | Even tiny models evict a warm slot; never leave it resident. |
 
-Serving policy is part of the model choice:
+Serving policy is part of the model choice. **As of 2026-08 the serving path is
+`llama-server` (mini's `roles/llamacpp`), not Ollama** — it measured ~3.5x faster
+single-stream on the same model (85.9 vs 24.8 tok/s) because it can use the
+GGUF's MTP head and its `--parallel` is tunable per workload. Ollama stays
+installed for pulling and quickly trying a model by hand, but does not serve:
+it and llama-server cannot both hold weights in 122 GiB. Start it only after
+stopping an instance. The Ollama-specific notes below still describe that
+on-demand path:
 
 - Exactly two resident models: `OLLAMA_MAX_LOADED_MODELS=2`, `OLLAMA_KEEP_ALIVE=-1`.
 - Warm pair today: driver `qwen3.6:35b-a3b-mtp-q4_K_M` plus depth `qwen3-coder-next:latest`.
@@ -80,7 +87,7 @@ Why this: the workstation is the cockpit, not the model host; 32 GB RAM and a 16
 
 ### opencode
 
-What it is: the sovereign coding harness on the workstation, pointed at `http://mini:11434/v1`. The default 9-agent team is `build` orchestrator, planner, architect, reviewer, security-auditor, coder, tester, devops, and doc-writer — all on mini. Two opt-in escalations sit alongside it: `heavy` (`gpt-oss:120b`, still Tier L but evicts a warm model) and `research` (xAI, Tier X, never client-confidential). Both need `opencode auth login` before they work, so the sovereign path is the failure-safe default.
+What it is: the sovereign coding harness on the workstation, pointed at `http://mini:8090/v1`. The default 9-agent team is `build` orchestrator, planner, architect, reviewer, security-auditor, coder, tester, devops, and doc-writer — all on mini. Two opt-in escalations sit alongside it: `heavy` (`gpt-oss:120b`, still Tier L but evicts a warm model) and `research` (xAI, Tier X, never client-confidential). Both need `opencode auth login` before they work, so the sovereign path is the failure-safe default.
 
 Reach for it when: the task is client-confidential, the repo is local, and the answer must stay Tier L. Config lives in `../workstation/opencode.json`; delivery contract is in [`../workstation/AGENTS.md`](../workstation/AGENTS.md).
 
@@ -110,7 +117,7 @@ Why this: ser5 is the always-on driver; Grok gives long autonomous coding runs w
 
 What it is: NousResearch Hermes on ser5 with `HERMES_HOME=/data/services/hermes`. It has three surfaces: messaging gateway, OpenAI-compatible proxy on `:8645`, and web dashboard on `:9119`.
 
-Reach for it when: you want the phone surface, a gateway, or a proxy that defaults to Tier L via `OLLAMA_BASE_URL=http://mini:11434`. It can delegate coding to `grok` through `official/autonomous-ai-agents/grok`.
+Reach for it when: you want the phone surface, a gateway, or a proxy that defaults to Tier L via mini (`http://mini:8090/v1`). It can delegate coding to `grok` through `official/autonomous-ai-agents/grok`.
 
 Start it:
 
@@ -127,23 +134,6 @@ What it is: Obsidian-compatible markdown vault for postmortems, decisions, and A
 Reach for it when: capturing lessons, browsing the knowledge graph, or letting agents search the vault via MCP.
 
 Start it: run AI Workstation with `CORTEX_VAULT_DIR=/data/brain`, or open `/data/brain` in Obsidian. See [`brain.md`](brain.md).
-
-### quality-loop (`qloop`)
-
-What it is: the lab quality authority in `packages/quality-loop` (`qloop`), deployed to `/data/agentlab` by the `agentlab` role. Strategies are `single`, `refine`, and `best_of_n`, plus ACE playbooks, STaR dataset bootstrapping, and an interactive `gate` for free-text polish.
-
-Reach for it when: choosing models, comparing prompts, measuring quality, running eval loops, or polishing Hermes free-text (no tool oracle). Do **not** use it to re-review OpenCode code diffs. Every run lands in `/data/agentlab/runs.db`; see [`ai-loops.md`](ai-loops.md) and [`../packages/quality-loop/README.md`](../packages/quality-loop/README.md).
-
-Start it:
-
-```bash
-make qloop-matrix
-qloop summary
-# free-text gate (ser5):
-/data/agentlab/jobs/quality-gate.sh --task "…" --strategy refine
-```
-
-Why this: `single` is always the baseline; `refine` and `best_of_n` spend cheap local tokens only after the baseline exists. Interactive gate uses warm models only. Aliases are `general`, `coder`, `heavy`, `judge`, and `scout`.
 
 ## From the iPhone
 
@@ -169,14 +159,14 @@ Why this: `single` is always the baseline; `refine` and `best_of_n` spend cheap 
 - The lab never hosts client production.
 - It is the dev environment, demo floor, and reference implementation.
 - No AWS Bedrock.
-- Speed figures marked `(est.)` stay marked until qloop measures them.
+- Speed figures marked `(est.)` stay marked until measured with `packages/inference-bench`.
 - Adopt a model change only on a measured win.
 - mini runs inference only: no loops, no experiments, nothing else ever.
 - ser5 owns queues, dashboards, proxies, backups, and experiment state.
 - The workstation drives; it does not host local models.
 - The iPhone initiates and reviews; it does not become an ops exception.
 - Keep prompts tight. 128k is capacity, not permission to paste the repo.
-- Read the business context when needed: [`../workstation/docs/business-layer.md`](../workstation/docs/business-layer.md) and [`roadmap.md`](roadmap.md).
+- Read the business context when needed: [`../workstation/docs/business-layer.md`](../workstation/docs/business-layer.md).
 
 ## When things are slow
 
@@ -186,4 +176,4 @@ Why this: `single` is always the baseline; `refine` and `best_of_n` spend cheap 
 | Nothing streams for minutes | Prefill wall | Prompt size versus the 128k window | Cut context, summarize, or split into smaller calls. |
 | Driver or coder is missing | Heavy model resident | `ollama ps`; look for `gpt-oss:120b` or Nemotron heavy tier | Treat heavy as scheduled eviction; finish it, then restore the warm pair. |
 | Two jobs run, the third waits | Two-way parallel queueing | `OLLAMA_NUM_PARALLEL=2` and active clients | Let it queue, or move non-urgent evals to later. Do not raise residency. |
-| Throughput is far below the table | Estimate treated as fact | Compare against qloop runs | Keep `(est.)` labels until measured; adopt only measured wins. |
+| Throughput is far below the table | Estimate treated as fact | Re-measure with `packages/inference-bench` | Keep `(est.)` labels until measured; adopt only measured wins. |

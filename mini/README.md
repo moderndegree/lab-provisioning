@@ -56,11 +56,11 @@ lab-provisioning/
       vault.yml                     (gitignored) ansible-vault encrypted secrets (NEVER commit plaintext)
     roles/
       base/                         kernel cmdline (GRUB), packages, UFW, data disk
-      amdgpu_rocm/                  ROCm stack + Vulkan primary/fallback wiring
+      amdgpu_rocm/                  ROCm 7.14 userspace (TheRock tarball) + Vulkan wiring
+      llamacpp/                     llama-server Podman quadlets + GPU/model prerequisites
       ollama/                       Ollama LLM server + systemd override
-      harness/                      (empty — opencode and Hermes both on ser5/workstation)
       tailscale/                    tailnet join
-      containers/                   rootless Podman; user lingering; quadlet support
+      containers/                   rootless Podman; user lingering; subuid/subgid; quadlet
       cloudflared/                  Cloudflare Tunnel (Podman quadlet; token-gated start)
 ```
 
@@ -156,13 +156,21 @@ gpu_backend: "rocm"   # was: vulkan
 
 Mesa Vulkan drivers are always installed regardless of backend.
 
-**Note on gfx1151 (Strix Halo):** The Radeon 8060S (gfx1151) is NOT on AMD's official
-ROCm support matrix. The `HSA_OVERRIDE_GFX_VERSION=11.5.1` environment variable (set in
-both `/etc/profile.d/rocm.sh` and the Ollama systemd override) makes the HSA runtime
-recognise the GPU as the nearest supported RDNA3 target. ROCm is installed **userspace
-only** (`amdgpu-install --no-dkms`); the in-tree `amdgpu` driver that ships with kernel
-7.0 drives the GPU. This is a community-proven workaround - re-run the verify block
-(below) after any kernel or ROCm bump.
+**Note on gfx1151 (Strix Halo):** as of **ROCm 7.14.0 (2026-07-15)** the Radeon 8060S
+(gfx1151) is an **officially supported target**, along with Ubuntu 26.04. `rocminfo`
+names it natively — `HSA_OVERRIDE_GFX_VERSION` is no longer required and survives only
+for the pre-7.14 apt rollback path.
+
+ROCm is installed from AMD's **per-architecture TheRock tarball**, not apt. This matters:
+`repo.radeon.com/rocm/apt` is frozen at 7.2.4, so checking it and concluding "we are
+current" is a trap — 7.14 ships through a different channel. The gfx1151 build is 8.3 GiB
+installed against 22 GiB for the all-arch apt stack. Still userspace-only; the in-tree
+`amdgpu` driver from kernel 7.0 drives the GPU.
+
+Nothing on the serving path actually uses host ROCm — Ollama runs Vulkan and the
+llama.cpp quadlets carry Mesa/RADV in their image. It exists as the `gpu_backend: rocm`
+fallback and for host tooling (`rocminfo`, `rocm-smi`). Re-run the verify block after
+any kernel or ROCm bump.
 
 ---
 
@@ -194,7 +202,7 @@ token, not headline parameter count.
 
 mini keeps exactly **two base models resident**, at the global
 **131072-token window**, with no baked system prompts (agent roles live in the
-workstation opencode config and quality-loop prompts - see `ollama_base_models` in
+workstation opencode config - see `ollama_base_models` in
 `ansible/group_vars/all.yml`):
 
 | Slot | Model | Shape | Used for |
@@ -223,7 +231,7 @@ anyway; 128k costs ~10 minutes worst case, which is a ceiling, not the norm.
 ### Heavy tier
 
 Pulled and kept on disk, **never resident** - loading either one evicts a warm
-model, so schedule them off-hours (for example an `agentlab-run@heavy-*` job on
+model, so schedule them off-hours (for example a systemd timer job on
 ser5):
 
 | Model | Shape | Use |
@@ -236,6 +244,46 @@ thinking (verified on Ollama 0.31.2; `/no_think` and a `think:false` body field
 are both ignored on `/v1` - native `/api/chat` honours `think:false`).
 
 ---
+
+## llama.cpp serving path (`enable_llamacpp: true`)
+
+Podman quadlets, one per entry in `llamacpp_instances`, generated into
+`llama-<name>.service`. Two by default:
+
+| Instance | Port | Model | Sizing |
+|----------|------|-------|--------|
+| `llama-quality` | 8090 | `qwen3.6-35b-a3b-mtp` (q4_K_M) | 131072/slot x 4, MTP on |
+| `llama-throughput` | 8091 | `gpt-oss-20b` (MXFP4) | 131072/slot x 8, MTP off |
+
+```bash
+systemctl --user start|stop|status llama-servers.target   # all instances
+systemctl --user restart llama-quality                     # just one
+journalctl --user -u llama-quality -f
+```
+
+`name` is the **role** and becomes the unit and container; `alias` is the **model
+identity** clients send as `model`. Swapping a model changes the alias and leaves
+the unit name alone. Adding a third instance is one entry with a free port — it
+joins the target automatically; removing an entry stops and prunes it.
+
+The image is `kyuz0/amd-strix-halo-toolboxes:vulkan-radv`, which carries a
+gfx1151-patched Mesa/RADV userspace and a llama.cpp built against it — the whole
+reason for using it rather than a stock llama.cpp container. It is an ordinary
+OCI image, so it runs directly under Podman; distrobox is not involved.
+
+For interactive work against the same stack:
+
+```bash
+podman run --rm -it --device /dev/dri --device /dev/kfd \
+  --security-opt seccomp=unconfined -v /data/models:/data/models:ro \
+  docker.io/kyuz0/amd-strix-halo-toolboxes:vulkan-radv /bin/bash
+```
+
+GGUFs are staged into `/data/models` with the `hf` CLI (installed by this role);
+the role asserts every configured model exists and fails the play if one is
+missing. `roles/toolboxes` used to own the udev rule, model dir and HF CLI and
+was removed 2026-08 — it wrapped this same image in distrobox, which bought
+nothing a quadlet does not do better and cost the ability to stop the server.
 
 ## Watch-outs
 
@@ -368,6 +416,7 @@ After `make render`, only the vault secrets still need manual entry:
 |---|-------------|-------|---------------|
 | 1 | `PLACEHOLDER_TAILSCALE_AUTH_KEY` | `vault.yml` → `vault_tailscale_authkey` | https://login.tailscale.com/admin/settings/keys |
 | 2 | `PLACEHOLDER_CLOUDFLARED_TOKEN` | `vault.yml` → `vault_cloudflared_token` | Cloudflare Zero Trust → Networks → Tunnels → Create a tunnel → Cloudflared (tunnel stays stopped until set) |
+| 3 | `PLACEHOLDER_HF_TOKEN` | `vault.yml` → `vault_hf_token` | https://huggingface.co/settings/tokens — **optional**, only for gated repos (`meta-llama/*`, `google/gemma-*`). No token file is written while unset |
 
 ---
 

@@ -1,66 +1,90 @@
-# TODO — open items from the 2026-07-28 platform review
+# TODO — open punch list
 
-Working list from a critical pass over intent and implementation. Not a
-roadmap phase — this is the punch list for things flagged as risks or loose
-ends, separate from planned feature work. Check items off in place; delete
-the whole doc once it's empty rather than let it fossilize.
+Started from the 2026-07-28 platform review; carries the loose ends from the
+2026-08 infrastructure pass as well. There is no roadmap to slot these into —
+`docs/roadmap.md` was deleted because it gated everything on a milestone that no
+longer existed, and a new one gets written once the infrastructure settles.
+
+Check items off in place; delete the whole doc once it's empty rather than let it
+fossilize.
+
+**Highest value right now:** converge both boxes (see Post-provisioning) and
+answer the quality question (see Goal balance). Everything else is bookkeeping.
 
 ## Operational (do first — a real service is affected)
 
-- [ ] **Tear down Open WebUI on mini by hand.** The role moved to ser5 this
-      session; Ansible no longer manages the mini-side deployment, so a stale
-      systemd unit + container may still be running there. On mini:
-      ```
-      systemctl --user stop openwebui.service && systemctl --user disable openwebui.service
-      rm ~/.config/containers/systemd/openwebui.container
-      podman rm -f openwebui   # if still present
-      ```
-- [ ] Set `enable_openwebui: true` in `ser5/ansible/group_vars/all.yml` and
-      `make ser5-provision` to bring it up on ser5 instead, if still wanted.
-      Verify `http://ser5:8080` reaches mini's Ollama before relying on it.
-- [ ] Re-run `make mini-provision` once to confirm `all.yml` (openwebui vars
-      removed) converges cleanly with nothing orphaned.
+- [x] **Tear down Open WebUI on mini by hand.** Verified 2026-07-28: already
+      clean on mini — no running container, quadlet source file already
+      removed, `systemctl --user daemon-reload` confirms `openwebui.service`
+      no longer exists.
+- [x] `enable_openwebui: true` set and live on ser5 (2026-07-28). Root cause
+      of the original provisioning failure was a real bug (`DNSSearch=` in the
+      wrong Quadlet section — fixed in `openwebui.container.j2`/`obs.network.j2`
+      etc.), not a fluke; `enabled: true` was also dropped from the Quadlet
+      systemd tasks since generator-managed units reject `systemctl enable`.
+      Verified: `openwebui.service` active, `curl 127.0.0.1:8080` → 200.
+- [x] Re-run `make mini-provision` once to confirm `all.yml` (openwebui vars
+      removed) converges cleanly with nothing orphaned. Done 2026-07-28.
 
-## Goal balance — the repo is carrying two priorities that compete for time
+## Goal balance — resolved by deletion, 2026-08
 
-Everything below exists because Phase 3/4-shaped work (second-brain wiring,
-business-layer tiers, Hermes surfaces) got built ahead of Phase 1's own
-acceptance criteria (a full baseline matrix + one-page quality summary from
-`runs.db`), even though the roadmap's own sequencing says measurement comes
-first.
+The 2026-07-28 review found consulting-shaped work running ahead of quality
+measurement, and froze the consulting phase behind a measurement milestone. Both
+the freeze and the milestone lived in `roadmap.md`.
 
-- [ ] **Freeze Phase 4 (consulting productization)** — no new tier
-      enforcement, client isolation, or demo-surface work — until there is a
-      concrete prospect or pilot engagement to build it for. Design docs are
-      fine; new code isn't.
-- [ ] **Finish Phase 1 before starting new subsystems.** Acceptance is
-      already written in `roadmap.md`: baseline matrix in `runs.db` across
-      {single, refine, best_of_n} × {general, coder}, plus a one-page summary
-      generated from it. Nothing in Phase 2+ should start until `qloop stats`
-      can actually produce that.
-- [ ] Adopt a cheap self-check: before starting a session's work, name which
-      goal (measured quality vs. consulting foundation) it serves. If it's
-      neither, ask whether it needs to happen now. This is a habit, not a
-      script — no tooling required.
+That whole structure is gone. quality-loop was deleted after its own recorded
+data showed the loops did not beat the baseline for their cost, and `roadmap.md`
+was deleted with it — it gated every future phase on a milestone that could no
+longer be met, which is worse than having no roadmap. A new one gets written once
+the infrastructure settles.
 
-## Measurement gap — the judge is a single point of failure with no alarm
+- [x] Freeze the consulting phase — moot; the phase structure no longer exists.
+- [x] Finish the measurement phase first — moot for the same reason.
+- [ ] **Decide what measures QUALITY now.** This is the real hole the deletions
+      left. `packages/inference-bench` measures throughput, not output quality,
+      so today nothing answers "is it getting better?" — which was goal #1 and
+      what the consulting pitch was meant to rest on. Options: ground-truth
+      verification wired into the agent flow (tests, schema checks,
+      converge-twice idempotency), a small hand-curated eval actually run on a
+      cadence, or an honest "nothing, and the quality claims get softened to
+      match".
 
-`gate.py`/`loops.py` parse a `VERDICT:`/`SCOPE:` line out of the same class of
-model being graded. The defensive parsing (fail-closed on unparsed SCOPE,
-alias handling for near-miss labels) is solid, but nothing tracks whether the
-judge is *actually following the format* over time — a future judge-model
-swap (the quarterly bake-off) could silently degrade gate accuracy with
-nothing to catch it.
+## Measurement gap — closed by deletion, and still open in substance
 
-- [ ] Persist verdict/scope parse success (`parsed`, `scope_parsed` — already
-      computed in `_refine_round`'s critique step metadata) into `runs.db` as
-      a first-class column, not just trace metadata that gets discarded.
-- [ ] Add a `qloop stats` view: judge parse rate over time, sliceable by
-      judge model. This is what makes a bake-off candidate's *reliability as
-      a judge* visible, not just its answer quality.
-- [ ] When Phase 5's independent-judge work (`nemotron-cascade-2` grading
-      `best_of_n`) lands, wire the same parse-rate tracking through it —
-      don't let a second judge path silently repeat this gap.
+The original entry was about `gate.py`/`loops.py` parsing a verdict out of the
+same class of model being graded, with nothing tracking whether the judge kept
+following the format. Parse-rate tracking was added 2026-07-28 and then
+superseded: quality-loop was removed entirely 2026-08. The 356 recorded runs
+survive as a frozen archive at `/data/agentlab/runs.db` on ser5; nothing writes
+to it now.
+
+The underlying gap did not close — it moved. See the quality question under
+"Goal balance" above.
+
+## Post-provisioning (this branch has never been converged)
+
+Everything on `inference-concurrency-tuning` was validated with `--syntax-check`
+and deployed to the boxes by hand in the form Ansible renders. That is not the
+same as a converge. Working through `docs/provisioning-checklist.md` is the
+acceptance test; these are the items that outlive it.
+
+- [ ] **`make mini-preview` and `make ser5-preview` before either apply.** The
+      branch rewrote `amdgpu_rocm` (apt -> tarball), folded `roles/toolboxes`
+      into `roles/llamacpp`, deleted a role, and moved the model directory. Read
+      the diff.
+- [ ] **Converge each box twice.** The second run should report no changes.
+      Most likely to churn: the ROCm `unarchive` (guarded by `creates:`), the
+      quadlet templates, and the legacy-unit retirement tasks — none of which
+      have ever run.
+- [ ] **Open the Grafana dashboards after ser5 converges.** 11 -> 13 is two
+      majors; "the service is up" is not the test. Rollback is
+      `grafana_version: "11.4.0"`, one line, data lives in a volume.
+- [ ] **Drop the retirement tasks once both boxes are past them.** Two blocks
+      exist purely to clean up state a converge cannot otherwise reach, and both
+      are dead weight afterwards: the legacy `llama-server*.service` retirement
+      in `roles/llamacpp`, and the `quality-gate` skill removal in
+      `roles/hermes`. Each says so in a comment.
+- [ ] **Delete `docs/provisioning-checklist.md`** when its boxes are all ticked.
 
 ## Scale-mismatch check-in (recurring, not a one-time fix)
 

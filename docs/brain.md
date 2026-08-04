@@ -29,7 +29,7 @@ here, it will drift.
 
 ```yaml
 # ser5 group_vars
-enable_brain: true   # role: brain (after agentlab)
+enable_brain: true   # role: brain
 ```
 
 ```bash
@@ -39,7 +39,6 @@ make ser5-provision   # or limit to brain role
 Layout matches `ai-workstation` `VAULT_FOLDERS`: `inbox/`, `notes/`, `sources/`,
 `journal/`, `mocs/`, `playbooks/` (+ `templates/`, nested `notes/postmortems/`).
 
-When agentlab is present, `playbooks/` → `/data/agentlab/playbooks` (symlink).
 
 ## Learn from mistakes
 
@@ -47,8 +46,8 @@ When agentlab is present, `playbooks/` → `/data/agentlab/playbooks` (symlink).
 |------|--------|
 | Capture raw thought | ai-workstation quick capture → `inbox/`, or drop a file |
 | Postmortem after a miss | `notes/postmortems/YYYY-MM-DD-….md` from `templates/postmortem.md` |
-| Durable agent tactic | `playbooks/*.md` or `qloop playbook reflect` |
-| Measured strategy quality | `/data/agentlab` + `qloop summary` (not the vault) |
+| Durable agent tactic | `playbooks/*.md` |
+| Serving benchmarks | `packages/inference-bench` (not the vault) |
 
 Agents: see `workstation/.moderndegree/skills/second-brain.md`. Prefer MCP
 search/capture when ai-workstation MCP is configured; otherwise write files
@@ -72,6 +71,4 @@ Syncthing ser5 ↔ workstation is recommended later; not automated in this role.
 ## Related
 
 - Sibling: `../ai-workstation` README (Second Brain + Cortex MCP)
-- [`roadmap.md`](roadmap.md) Phase 3
-- [`ai-loops.md`](ai-loops.md)
-- Skills: task-package, quality-gate, second-brain
+- Skills: task-package, second-brain

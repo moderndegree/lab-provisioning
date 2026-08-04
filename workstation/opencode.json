@@ -73,7 +73,7 @@
       "mode": "primary",
       "model": "ollama/qwen3.6:35b-a3b-mtp-q4_K_M",
       "reasoningEffort": "none",
-      "description": "Orchestrator. Cortex vault search + TASK PACKAGE, dispatches subagents, @@RESULT gates; must qloop-gate multi-constraint free-text (never code).",
+      "description": "Orchestrator. Cortex vault search + TASK PACKAGE, dispatches subagents, @@RESULT gates.",
       "prompt": "{file:./.moderndegree/prompts/orchestrator.md}"
     },
     "planner": {
@@ -137,7 +137,7 @@
       "mode": "subagent",
       "model": "ollama/qwen3.6:35b-a3b-mtp-q4_K_M",
       "reasoningEffort": "none",
-      "description": "Infra and shell operations, including qloop gate when asked. Deterministic, no reasoning.",
+      "description": "Infra and shell operations. Deterministic, no reasoning.",
       "prompt": "{file:./.moderndegree/prompts/devops.md}"
     },
     "heavy": {

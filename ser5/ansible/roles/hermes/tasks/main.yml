@@ -101,27 +101,22 @@
         - restart hermes-gateway
         - restart hermes-proxy
 
-    - name: Write Hermes messaging bot tokens into env when vaulted
+    # Telegram is not managed by Ansible — set up manually on the box
+    # (bot token + `hermes pairing approve telegram <code>`) if/when wanted.
+    - name: Write Hermes Discord bot token into env when vaulted
       ansible.builtin.lineinfile:
         path: "{{ hermes_home }}/.env"
-        regexp: "^{{ item.env_var }}="
-        line: "{{ item.env_var }}={{ item.value }}"
+        regexp: "^DISCORD_BOT_TOKEN="
+        line: "DISCORD_BOT_TOKEN={{ vault_hermes_discord_bot_token }}"
         state: present
         owner: "{{ username }}"
         group: "{{ username }}"
         mode: "0600"
-      loop:
-        - platform: "telegram"
-          env_var: "TELEGRAM_BOT_TOKEN"
-          value: "{{ vault_hermes_telegram_bot_token | default('') }}"
-        - platform: "discord"
-          env_var: "DISCORD_BOT_TOKEN"
-          value: "{{ vault_hermes_discord_bot_token | default('') }}"
       when: >-
         (enable_hermes_messaging | bool)
-        and (item.platform in (hermes_messaging_platforms | default([])))
-        and (item.value | default('') | length > 0)
-        and not (item.value | default('') is search('^PLACEHOLDER'))
+        and (enable_hermes_discord | bool)
+        and (vault_hermes_discord_bot_token | default('') | length > 0)
+        and not (vault_hermes_discord_bot_token | default('') is search('^PLACEHOLDER'))
       no_log: true
       notify:
         - restart hermes-gateway
@@ -203,24 +198,16 @@
           `hermes pairing approve <platform> <code>`; revoke pairings later if needed.
           Default Hermes model stays Ollama at {{ hermes_ollama_base_url }}.
 
-    # ─── quality-loop free-text gate (local skill + agentlab wrapper) ─────────
-    - name: Ensure Hermes quality-gate skill directory exists
+    # ─── Removed feature cleanup ──────────────────────────────────────────────
+    # quality-loop was removed 2026-08. Without this, an already-provisioned
+    # SKILL.md keeps sitting in HERMES_HOME for Hermes to discover, pointing at
+    # /data/agentlab/jobs/quality-gate.sh which no longer exists — a skill that
+    # fails at call time is worse than no skill. Safe to drop from this role once
+    # every host has converged past it.
+    - name: Remove the retired quality-gate skill
       ansible.builtin.file:
-        path: "{{ hermes_quality_gate_skill_dir }}"
-        state: directory
-        owner: "{{ username }}"
-        group: "{{ username }}"
-        mode: "0755"
-      when: enable_hermes_quality_gate | bool
-
-    - name: Install Hermes quality-gate skill markdown
-      ansible.builtin.template:
-        src: quality-gate-skill.md.j2
-        dest: "{{ hermes_quality_gate_skill_dir }}/SKILL.md"
-        owner: "{{ username }}"
-        group: "{{ username }}"
-        mode: "0644"
-      when: enable_hermes_quality_gate | bool
+        path: "{{ hermes_home }}/skills/quality-gate"
+        state: absent
 
     # ─── Systemd user service ─────────────────────────────────────────────────
     - name: Ensure user systemd directory exists

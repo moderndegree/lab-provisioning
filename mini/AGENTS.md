@@ -31,16 +31,16 @@ ansible/
     vault.yml            ansible-vault encrypted secrets
   roles/
     base/                kernel cmdline (GRUB), firmware pin, packages, UFW, data disk
-    amdgpu_rocm/         ROCm 7.2.4 userspace (--no-dkms) + Vulkan primary/fallback wiring
+    amdgpu_rocm/         ROCm 7.14 userspace (TheRock tarball) + Vulkan primary/fallback wiring
     ollama/              Ollama server + systemd override
-    harness/             (empty — opencode and Hermes both on ser5/workstation)
     tailscale/           tailnet join
-    containers/          rootless Podman; user lingering; quadlet support
+    containers/          rootless Podman; user lingering; subuid/subgid; quadlet support
+    llamacpp/            llama-server Podman quadlets, one per instance (enable_llamacpp)
     cloudflared/         Cloudflare Tunnel (Podman quadlet; remote-managed token)
 ```
 
 Role execution order is fixed in `ansible/site.yml`:
-`base → amdgpu_rocm → ollama → tailscale → containers → cloudflared`.
+`base → amdgpu_rocm → ollama → tailscale → containers → llamacpp → cloudflared`.
 Dependencies flow top-to-bottom (e.g. `ollama` assumes GPU userspace is already
 installed; `cloudflared` assumes `containers` has already set up quadlet support).
 Open WebUI lives on ser5 now (`roles/openwebui` there) — mini stays inference-only.
@@ -86,7 +86,8 @@ Always run `make lint` and `make syntax-check` after editing roles or vars.
   from `node_user`). Never hardcode the username, `/home/<user>`, or the hostname in a
   role — reference these vars. `autoinstall/user-data` is static cloud-init and must be
   kept in sync by hand.
-- **Comment the non-obvious.** This box runs an officially-unsupported GPU; explain
+- **Comment the non-obvious.** This box runs a consumer APU on a stack that only
+  recently gained official support; explain
   *why* for any gfx1151/ROCm/kernel workaround, not just *what*.
 - Match the existing YAML style: two-space indent, `name:` on every task,
   box-drawing comment dividers, handlers in `handlers/main.yml`.
@@ -107,23 +108,119 @@ Heavy models (`gpt-oss:120b`, `nemotron-cascade-2:latest`) are pulled but never 
 loading one evicts a warm model under `OLLAMA_MAX_LOADED_MODELS=2`, so keep them to
 scheduled/off-hours jobs. Roles live in opencode/loopkit prompts, not baked Modelfiles.
 
+## llama.cpp serving path (`roles/llamacpp`, `enable_llamacpp`)
+
+Podman **quadlets**, one per entry in `llamacpp_instances`, enabled at boot. This
+is what Open WebUI on ser5 points at. Full rationale and measurements are in
+`roles/llamacpp/defaults/main.yml`.
+
+```
+systemctl --user start|stop|status llama-servers.target   # all instances
+systemctl --user restart llama-quality                     # just one
+```
+
+**Names are roles, aliases are models** — `name: quality` becomes
+`llama-quality.service`/`llama-quality`, while `alias:` is what clients send as
+`model`. Swapping the model behind a role changes the alias and leaves the unit
+name alone; renaming an *alias* breaks clients that hardcoded it (Open WebUI
+addresses these by alias). Adding a third instance is an entry with a free port —
+it joins the target automatically.
+
+Quadlets replaced `distrobox enter` units in 2026-08. distrobox was never
+required: the image is an ordinary OCI image (empty entrypoint,
+`Cmd=/bin/bash`) and only the *image* is special — it carries the gfx1151-patched
+Mesa/RADV userspace and a llama.cpp built against it. What distrobox cost was
+control: it is a `podman exec` client, so the unit's cgroup held only that client
+while llama-server lived in the container's cgroup, and `systemctl --user stop`
+returned success while the server kept running and holding its port. A quadlet
+runs llama-server as the container's main process, so stop/restart just work —
+verified: stopping the target leaves 0 survivors and releases both ports.
+Throughput was equal or slightly better after the move (87.1 vs 85.9 tok/s at
+c=1; ~202 vs 190.7 aggregate at c=8).
+
+The things that bite:
+
+- **MTP is a per-workload trade, not a free win.** `--spec-type draft-mtp` with
+  `--spec-draft-n-max 1` buys ~15% interactive latency and costs ~29% aggregate
+  throughput. Set `llamacpp_mtp: false` for the qloop/agent workload. Acceptance
+  is healthy (50-58%); the ceiling is structural — verifying n+1 tokens routes to
+  up to `8*(n+1)` experts instead of 8, so longer drafts cost what they save.
+  Confirm it is live by grepping the journal for `MTP draft context`; without the
+  flag the loader silently logs `unused tensor blk.40.nextn.* -- ignoring`.
+- **`seccomp=unconfined` is not optional.** The ROCm/Vulkan userspace makes
+  ioctls the default Podman profile blocks, and the symptom is not a permission
+  error — the GPU simply fails to enumerate and llama.cpp falls back to CPU.
+  This is why the role sets it on every instance.
+- **Ollama and llama-server cannot both be up.** llama-server holds ~22 GiB
+  resident. `ollama.service` stays installed for model management but is not
+  started alongside it.
+- **`-c` is TOTAL context, divided by `-np`** — llama.cpp statically partitions
+  the KV cache (no PagedAttention-style pooling). Per-slot is `-c / -np`, and a
+  single request over that share fails outright with `request (N tokens) exceeds
+  the available context size (M tokens)` even on an idle server. Size it for the
+  worst-case single request: `ctx 32768` with `parallel 8` gives each caller only
+  4096 tokens, which an ordinary Open WebUI chat overruns — that exact mistake
+  produced `request (5945 tokens) exceeds the available context size (4096
+  tokens)` in Open WebUI. Both instances now run 131072/slot.
+- **DO NOT raise context blind — it can hang the box.** `-c 2097152` (262144/slot)
+  does not fail cleanly: it wedges the amdgpu DRM suballocator with the process
+  stuck in uninterruptible sleep (`state Ds`, `wchan drm_suballoc_new`),
+  immune to SIGKILL, holding ~63 GiB and the GPU device. Recovery required a
+  reboot, and the shutdown itself hung for ~7 minutes because systemd cannot kill
+  a `D`-state task. The real ceiling is what the DRM suballocator will hand out
+  without hanging, which is well below what fits in 122 GiB. Step up one
+  increment at a time and confirm each load before committing it.
+
+Models arrive through the `hf` CLI (pipx-installed by this role, because Ubuntu
+26.04 is PEP 668 externally-managed). `HF_HOME` is `llamacpp_hf_home` under
+`llamacpp_models_dir`, exported to host shells via `/etc/profile.d/huggingface.sh`
+so a download lands beside the models. `vault_hf_token` is optional and only
+matters for gated repos; unset writes no token file.
+
+- **`70-kfd.rules` is load-bearing.** Rootless Podman maps uids into a user
+  namespace, and a host GID that is not mapped there cannot satisfy the kernel
+  check on `/dev/kfd` — so the node user's `render`/`video` membership does not
+  reach inside the container. The rule (0666 on `kfd` and `renderD*`) is
+  upstream's documented fix. Removing it does not produce a permission error:
+  the GPU silently fails to enumerate and llama.cpp falls back to CPU, which
+  reads as ~2 tok/s instead of ~87.
+- **`Network=host` means these are real ports.** A quadlet binds mini's actual
+  `:8090`/`:8091`, so UFW (tailnet-only) is the single control point. Never
+  reuse 11434 — that is Ollama's.
+- Always pass `-fa 1` and `--no-mmap` on Strix Halo; without them llama.cpp
+  crashes or crawls. Both are in `llamacpp_base_args`.
+
 ## gfx1151 / Strix Halo gotchas (high blast radius — be careful)
 
-- GPU is **gfx1151**, not on AMD's official ROCm matrix. Recognition depends on
-  `HSA_OVERRIDE_GFX_VERSION=11.5.1` (set in `/etc/profile.d/rocm.sh` and the Ollama
-  systemd override). Do not remove it.
-- ROCm is pinned to **7.2.4 production**, installed **userspace-only** with
-  `amdgpu-install --no-dkms` (the in-tree `amdgpu` drives the GPU; DKMS fails to build
-  on kernel 7.0). **Never switch to ROCm 7 nightlies** — they cap memory at 64 GB.
-- AMD has no 26.04 ROCm repo yet, so `ansible/roles/amdgpu_rocm/defaults/main.yml`
-  intentionally pulls the `noble` (24.04) `amdgpu-install` deb. Change the codename only
-  if AMD ships a 26.04 repo.
+- **gfx1151 is officially supported as of ROCm 7.14.0** (2026-07-15), along with
+  Ubuntu 26.04. `HSA_OVERRIDE_GFX_VERSION` is **no longer needed** — 7.14 reports
+  `Name: gfx1151 / AMD RYZEN AI MAX+ 395 w/ Radeon 8060S` natively, verified on
+  the box. The var survives only for the pre-7.14 apt rollback path. Three older
+  notes here claimed the opposite; they were true in 2026-07 and are not now.
+- ROCm is **7.14.0, installed from TheRock per-architecture tarball**, not apt.
+  This matters: `repo.radeon.com/rocm/apt` is frozen at 7.2.4, so checking it and
+  concluding "we are current" is a trap — 7.14 ships through a different channel.
+  The gfx1151 build is 8.3 GiB installed against 22 GiB for the all-arch apt
+  stack. Still userspace-only; the in-tree `amdgpu` drives the GPU (DKMS does not
+  build on kernel 7.0 and is unnecessary).
+- **Never switch to ROCm 7 NIGHTLIES** — they cap memory at 64 GB. 7.14.0 is a
+  production release and is not affected; do not confuse the two.
+- **Nothing on the serving path consumes host ROCm.** Ollama runs Vulkan
+  (`OLLAMA_VULKAN=1`) and `roles/llamacpp` carries Mesa/RADV inside its image.
+  ROCm is here as the `gpu_backend: rocm` fallback and for host tooling
+  (`rocminfo`, `rocm-smi`). Judge changes to it on that basis, not on serving
+  throughput.
 - **Never install `linux-firmware-20251125`** — it breaks ROCm. The `base` role pins it
   out via `/etc/apt/preferences.d/no-bad-firmware`.
 - Kernel cmdline (`amd_iommu=off amdgpu.gttsize=131072 ttm.pages_limit=33554432`) is
   managed in `base` via `/etc/default/grub`. A change notifies the `update-grub` handler
   and sets the `reboot_needed` fact; the final play in `ansible/site.yml` then reboots
   the host (when `auto_reboot: true`, the default).
+- Strix Halo upstream recommends `amd_iommu=off` (benchmarked 5-12% faster than
+  any IOMMU-enabled mode). mini deliberately runs `iommu=pt amd_iommu=on` instead,
+  because the amdxdna NPU driver needs SVA and fails to bind without it. That is a
+  known, accepted trade-off — do not "fix" it to match upstream's docs without
+  deciding to give up the NPU first.
 - BIOS settings (latest BIOS, UMA 512MB, IOMMU off, power mode) are a **manual one-time
   prerequisite** — out of Ansible's scope. See `README.md`.
 - `gpu_backend: vulkan` in `ansible/group_vars/all.yml` is the committed primary; ROCm

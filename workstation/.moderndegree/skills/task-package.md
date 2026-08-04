@@ -24,8 +24,6 @@ subagent on non-trivial work.
    or requirements, gather more context first — do not dispatch yet.
 6. On subagent `BLOCKED` / `FAIL` → enrich the package (exact gaps from handoff),
    re-gather if needed, re-dispatch. Do not retry the same thin prompt.
-7. After a solid free-text draft, follow `quality-gate.md` (qloop). Quality-gate
-   does **not** replace packaging, cortex, or tool-gathering.
 
 ## Cortex pass (mandatory when tools exist)
 

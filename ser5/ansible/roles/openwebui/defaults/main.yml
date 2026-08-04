@@ -26,6 +26,49 @@ openwebui_host: "127.0.0.1"
 # DNSSearch trick that makes "mini" resolve from inside the container netns.
 openwebui_ollama_base_url: "http://mini:11434"
 
+# ─────────────────────────────────────────────────────────────────────────────
+# OpenAI-compatible backends (mini's llama-server)
+# ─────────────────────────────────────────────────────────────────────────────
+# Ollama and llama-server speak DIFFERENT protocols. OLLAMA_BASE_URL above only
+# makes Open WebUI query mini:11434/api/tags; it will never discover the
+# llama-server on :8090, which serves the OpenAI API. Without these vars the
+# model list is empty whenever ollama.service is stopped — which is now the
+# normal state, because llama-server holds ~22 GiB resident and cannot coexist
+# with two warm Ollama models at 131072 context in 122 GiB
+# (see ../../../mini/ansible/roles/llamacpp/defaults/main.yml).
+#
+# SEEDS ONLY — these do NOT override a configured instance. Open WebUI keeps its
+# live settings in the `config` table of webui.db and falls back to DEFAULT_CONFIG
+# (built from these env vars) only for keys the table does not have. Once anyone
+# saves Admin Settings -> Connections, the DB wins and changing these vars has no
+# effect. So they matter on a fresh data dir; to change an existing install, edit
+# it in the UI. Editing webui.db by hand needs the container STOPPED, or the
+# running app flushes its cached config back over the change on restart.
+#
+# Whitespace is not trimmed on the DB path: a URL saved through the UI with a
+# trailing space becomes "http://mini:8000/v1 ", which aiohttp percent-encodes
+# into ".../v1%20/models" and the endpoint 404s while looking correct on screen.
+# The env-var path below is trimmed (config.py strips each split element), which
+# is one more reason to prefer a rebuild over hand-editing.
+#
+# Semicolon-separated, and the two lists are positional: the Nth key belongs to
+# the Nth URL. Open WebUI skips an endpoint whose key is empty, so a placeholder
+# is required even though llama-server takes no API key and ignores it.
+# Authentication is not the security boundary here: mini's UFW only allows 22/tcp
+# from outside plus everything on tailscale0, so :8090 is unreachable from the
+# 10.0.0.0/24 wifi LAN and the exposed surface is the tailnet.
+#
+# Both ports are llama-server instances managed by mini's roles/llamacpp — real
+# boot services, unlike the vLLM bench servers on :8000/:8001 this used to point
+# at. Those were dropped because vLLM measured ~3x slower single-stream
+# (25 vs 87 tok/s); add them back only for a bench.
+#
+#   :8090  qwen3.6-35b-a3b-mtp  quality  — 86 tok/s, MTP on, 262144 ctx/chat
+#   :8091  gpt-oss-20b          quantity — 400 tok/s aggregate at 32-way
+openwebui_enable_openai_api: true
+openwebui_openai_base_urls: "http://mini:8090/v1;http://mini:8091/v1"
+openwebui_openai_api_keys: "llamacpp;llamacpp"
+
 # Let `podman auto-update` pull a newer image on its timer.
 openwebui_autoupdate: true
 

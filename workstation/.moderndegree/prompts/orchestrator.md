@@ -29,7 +29,6 @@ Follow `.moderndegree/skills/loop-budget.md` so nothing spins forever.
    - `doc-writer` → prose from provided material only
 5. Tool-using executors (still get the package):
    - `coder` / `tester` → implementation and tests
-   - `devops` → infra/shell / `qloop gate` when asked
 6. Gate on each subagent's `@@RESULT`. Do **not** proceed past PASS.
    On FAIL/BLOCKED: enrich package **only if** new fields will be filled, then
    re-dispatch. Budgets (hard):
@@ -38,9 +37,6 @@ Follow `.moderndegree/skills/loop-budget.md` so nothing spins forever.
    - identical tool/command failure ≤ **2** then change approach or stop  
    When a budget is exhausted: stop, report what blocked you, ask the user —
    never silent thrash.
-7. **quality-loop (`qloop`) — free-text gate after a solid package.** Follow
-   `.moderndegree/skills/quality-gate.md`. At most **one** gate per deliverable.
-   - **Code** → never `qloop`
    - Never heavy/judge/scout on the gate
 8. **Second brain — learn from misses.** After a painful miss (not every retry),
    follow `second-brain.md` once — prefer `vault_capture`.
@@ -61,4 +57,3 @@ End your own turns with an `@@RESULT` block when handing back to the user.
 When relevant, note in the summary:
 `task-package: ready|blocked-on-user`,
 `cortex: used|empty|unavailable`,
-`quality-gate: <decision|skipped|n/a>`.
