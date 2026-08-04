@@ -20,23 +20,28 @@ the whole doc once it's empty rather than let it fossilize.
 - [x] Re-run `make mini-provision` once to confirm `all.yml` (openwebui vars
       removed) converges cleanly with nothing orphaned. Done 2026-07-28.
 
-## Goal balance — the repo is carrying two priorities that compete for time
+## Goal balance — resolved by deletion, 2026-08
 
-Everything below exists because Phase 3/4-shaped work (second-brain wiring,
-business-layer tiers, Hermes surfaces) got built ahead of Phase 1's own
-acceptance criteria (a full baseline matrix + one-page quality summary from
-`runs.db`), even though the roadmap's own sequencing says measurement comes
-first.
+The 2026-07-28 review found consulting-shaped work running ahead of quality
+measurement, and froze the consulting phase behind a measurement milestone. Both
+the freeze and the milestone lived in `roadmap.md`.
 
-- [x] **Freeze Phase 4 (consulting productization)** — decided 2026-07-28,
-      recorded durably in `roadmap.md` (status note + a FROZEN marker on the
-      Phase 4 section itself) rather than living only here.
-- [x] **Finish Phase 1 before starting new subsystems** — same decision,
-      same place. The baseline matrix was never produced
-      (see Measurement gap below for the piece that moved); the constraint
-      itself is now recorded in `roadmap.md`, not just this list.
-- [x] Adopt a cheap self-check — habit adopted 2026-07-28, no tooling to
-      build.
+That whole structure is gone. quality-loop was deleted after its own recorded
+data showed the loops did not beat the baseline for their cost, and `roadmap.md`
+was deleted with it — it gated every future phase on a milestone that could no
+longer be met, which is worse than having no roadmap. A new one gets written once
+the infrastructure settles.
+
+- [x] Freeze the consulting phase — moot; the phase structure no longer exists.
+- [x] Finish the measurement phase first — moot for the same reason.
+- [ ] **Decide what measures QUALITY now.** This is the real hole the deletions
+      left. `packages/inference-bench` measures throughput, not output quality,
+      so today nothing answers "is it getting better?" — which was goal #1 and
+      what the consulting pitch was meant to rest on. Options: ground-truth
+      verification wired into the agent flow (tests, schema checks,
+      converge-twice idempotency), a small hand-curated eval actually run on a
+      cadence, or an honest "nothing, and the quality claims get softened to
+      match".
 
 ## Measurement gap — the judge is a single point of failure with no alarm
 

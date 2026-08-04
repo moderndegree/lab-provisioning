@@ -23,8 +23,7 @@ autoinstall + Ansible provisioning stack; lab software lives under
 | [`packages/inference-bench/`](packages/inference-bench/README.md) | Benchmarks for mini's llama.cpp serving path — the numbers behind the `llamacpp` role's sizing |
 | [`workstation/`](workstation/README.md) | opencode config for the 9-agent coding team (copied/symlinked onto the dev box) |
 | [`docs/brain.md`](docs/brain.md) | Second brain vault on ser5 (`/data/brain`); UI/MCP in sibling **ai-workstation** |
-| [`docs/roadmap.md`](docs/roadmap.md) | Phased plan: quality measurement, throughput, the cortex second brain, consulting productization |
-| [`docs/todo.md`](docs/todo.md) | Open punch list from the last critical review — operational follow-ups, not roadmap work |
+| [`docs/todo.md`](docs/todo.md) | Open punch list — operational follow-ups and the open question of what measures quality |
 
 ---
 
@@ -52,13 +51,15 @@ lab-provisioning/
 ├── .gitignore
 ├── .yamllint.yml            shared yamllint config (found by both machine Makefiles)
 ├── docs/
-│   ├── operating-manual.md  one-page harness/model/phone operating guide
-│   └── roadmap.md           phased lab/productization plan
+│   ├── operating-manual.md  routing tiers, models, harnesses, phone workflow
+│   ├── brain.md             second-brain vault layout and repo boundary
+│   ├── provisioning-checklist.md  one-time manual steps Ansible cannot do
+│   └── todo.md              open punch list
 ├── packages/
-│   └── inference-bench/     serving benchmarks for the llamacpp role
-│       ├── pyproject.toml
-│       ├── suites/          starter eval suites (JSONL)
-│       └── tests/
+│   └── inference-bench/     serving benchmarks behind the llamacpp sizing
+│       ├── lbench.py        raw decode throughput at a given concurrency
+│       ├── agentsim.py      workers + orchestrator, tool calls, multi-turn
+│       └── fanoutsim.py     small fan-out: N workers then a judge pass
 ├── workstation/             opencode runtime config for the dev box
 ├── mini/                    MS-S1 Max — headless inference node
 │   ├── README.md

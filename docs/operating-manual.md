@@ -166,7 +166,7 @@ Start it: run AI Workstation with `CORTEX_VAULT_DIR=/data/brain`, or open `/data
 - The workstation drives; it does not host local models.
 - The iPhone initiates and reviews; it does not become an ops exception.
 - Keep prompts tight. 128k is capacity, not permission to paste the repo.
-- Read the business context when needed: [`../workstation/docs/business-layer.md`](../workstation/docs/business-layer.md) and [`roadmap.md`](roadmap.md).
+- Read the business context when needed: [`../workstation/docs/business-layer.md`](../workstation/docs/business-layer.md).
 
 ## When things are slow
 

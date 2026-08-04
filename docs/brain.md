@@ -71,5 +71,4 @@ Syncthing ser5 ↔ workstation is recommended later; not automated in this role.
 ## Related
 
 - Sibling: `../ai-workstation` README (Second Brain + Cortex MCP)
-- [`roadmap.md`](roadmap.md) Phase 3
 - Skills: task-package, second-brain
