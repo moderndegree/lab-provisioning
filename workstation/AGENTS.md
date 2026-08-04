@@ -22,12 +22,10 @@ Full table: `.moderndegree/skills/loop-budget.md`. Hard stops:
 | Re-dispatch same subagent | 2 |
 | Package enrich → re-dispatch cycles | 3 |
 | Cortex searches per task | 2 |
-| `qloop gate` per free-text deliverable | 1 |
 | Identical failing tool command | 2 |
 
 On budget exhaust: escalate to the user with what you tried — do **not** keep
 re-prompting “to think harder.” Orchestrator/devops keep `reasoningEffort: none`.
-`qloop` forces thinking off and caps refine rounds.
 
 ## TASK PACKAGE — context is the orchestrator's main job
 
@@ -44,7 +42,6 @@ Bad answers usually come from thin handoffs. Full rules:
 - No-tools subagents work **only** from the package. Incomplete package → they
   return `BLOCKED` with exact gaps; orchestrator enriches and re-dispatches.
 - Do not dump the whole repo or chat; paste relevant excerpts (prefill is expensive).
-- `qloop` quality-gate polishes free-text **after** packaging — it does not gather
   repo or vault context.
 
 ## Placement rule (the architectural backbone)
@@ -89,16 +86,3 @@ rules: `.moderndegree/skills/second-brain.md` and the cortex pass in task-packag
   durable rules to ACE playbooks.
 - Do not treat unreviewed drafts as ground truth; no client secrets in the vault.
 
-## quality-loop (`qloop`) — automated free-text gate
-
-The lab quality authority is `qloop` (package `quality-loop`). Full rules live
-in `.moderndegree/skills/quality-gate.md` — the orchestrator **must** follow
-that decision tree:
-
-- **Code** (implement, diff, tests) → never `qloop`; tools + reviewer + `@@RESULT`.
-- **Multi-constraint free-text** (risks, proposals, runbooks, actionable plans,
-  extraction wording) → orchestrator **must** run `qloop gate` before the final
-  user-facing answer (or via `devops`).
-- Skip only when the skill says so (`GATE: skip`, short fact, pure plumbing).
-- Warm models only (`general`/`coder`). Never heavy/judge/scout in the gate.
-- Prose subagents set `handoff: run quality-gate …` when their draft is user-facing.

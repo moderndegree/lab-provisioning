@@ -7,7 +7,6 @@ wired to the **cortex** MCP server from ai-workstation (`opencode.json`).
 
 This skill is **required** for: (1) learning after misses, (2) MCP-first capture.
 It does **not** replace TASK PACKAGE (which already requires a cortex search
-pass) or quality-gate.
 
 ## Cortex tools (use these names)
 
@@ -44,7 +43,6 @@ rules live in `task-package.md`.
 3. If there is a **durable rule**, also promote to ACE playbooks:
 
 ```bash
-qloop playbook reflect /data/agentlab/playbooks/infra.md \
   --task "…" --trace "…" --outcome "FAIL …"
 ```
 
@@ -71,10 +69,8 @@ Drafts are not ground truth until a human accepts. No client-confidential dumps.
 
 - Personal/lab vault only
 - Packaging + cortex search **before** work; capture **after** misses
-- quality-gate polishes free-text; cortex remembers lessons
 
 ## Related
 
 - `task-package.md` — cortex search in the package loop
-- `quality-gate.md` — free-text polish
 - `docs/brain.md` — vault layout

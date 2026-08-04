@@ -115,24 +115,27 @@ llamacpp_ctx_warn: 1048576
 #   q8_0    37.8 GB  65.7 tok/s   (76% of q4, NOT the "about half" that
 #                                  docs/operating-manual.md claims — that
 #                                  estimate predates MTP)
-# q8 costs ~24% latency for an as-yet-unmeasured quality gain; settle it with a
-# qloop bake-off rather than by assertion before making it the default.
+# q8 costs ~24% latency for an as-yet-unmeasured quality gain; measure the gain on
+# real tasks rather than asserting it before making q8 the default.
 llamacpp_instances:
-  # Quality / interactive / qloop worker+judge. MTP on for latency.
+  # Quality / interactive. MTP on for latency.
   #
-  # parallel 4 is SIZED TO qloop, not picked for round numbers: cli.py defaults
-  # `-n 3` for best_of_n (gate caps at 3) and `-n 4` elsewhere, and both --worker
-  # and --judge default to `general` = this model. So the real peak concurrency
-  # against this instance is 4 — nothing like the 16-32 a synthetic fan-out
-  # suggests. At parallel 2 the third candidate queued behind the first two;
-  # measured on a best_of_n n=3 rounds=2 session:
+  # parallel 4 was measured against a 3-4 candidate fan-out (the quality-loop that
+  # drove this box, removed 2026-08). At parallel 2 the third candidate queued
+  # behind the first two; on an n=3 rounds=2 session:
   #   parallel 2 -> 71.1s session, generate 30.6s, 100.5 tok/s aggregate
   #   parallel 4 -> 58.6s session, generate 24.5s, 125.6 tok/s aggregate  (-18%)
   # n=4 rounds=2 lands at 71.5s with all four resident.
   #
-  # 524288/4 = 131072 per slot, which is exactly quality_loop/models.py CONTEXT.
-  # Keep those two in step: dropping parallel raises per-slot context above what
-  # the loop will ever send, and raising it silently truncates below CONTEXT.
+  # CAVEAT: nothing currently dispatches that fan-out. 4 remains a sane default —
+  # it covers interactive chat plus a small parallel dispatch without starving
+  # per-slot context — but it is sized to a workload that no longer exists.
+  # Re-measure with packages/inference-bench/fanoutsim.py against whatever
+  # actually drives this before calling it tuned.
+  #
+  # 524288/4 = 131072 per slot. Raising parallel without raising ctx truncates
+  # per-request context below what a long chat needs; see the ctx/parallel note
+  # above.
   - name: "qwen"
     model: "{{ llamacpp_models_dir }}/qwen3.6-35b-a3b-mtp-q4_K_M.gguf"
     alias: "qwen3.6-35b-a3b-mtp"

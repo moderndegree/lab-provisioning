@@ -18,8 +18,6 @@ coder), set handoff to require the quality gate:
 @@RESULT
 status: PASS | FAIL | BLOCKED
 summary: <one line>
-handoff: run quality-gate (qloop gate) on this draft before delivering to user
 @@END
 
 If the next step is clearly implementation-only, handoff may say dispatch coder
-(with the same TASK PACKAGE enriched by this plan) — no quality-gate on code.

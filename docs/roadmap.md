@@ -32,16 +32,16 @@ question at each quarterly bake-off; update this note if the answer changes.
 ## Phase 1 — Measurement foundation (do first; everything else is judged by it)
 
 Quality claims and consulting proposals both need numbers. The harness exists
-(quality-loop / qloop); the suites don't.
+(now removed); the suites don't.
 
 | Deliverable | Detail |
 |---|---|
 | Three SMB-shaped eval suites | `extraction.jsonl` (structured data from messy docs), `citation-qa.jsonl` (answer + cite the right source snippet), `structured-output.jsonl` (JSON to schema, validated by scorer) |
 | One coding suite | Small, real tasks from your own repos — scored by tests, not string match |
 | Baseline matrix | Every suite × {single, refine} × {general, coder} recorded in runs.db (`best_of_n` removed 2026-08 — dominated by `refine`) |
-| Bake-off ritual | Documented quarterly procedure: candidate model → same suites → compare `qloop stats` → adopt/reject. First job: confirm the depth swap locally and settle the driver-slot challenge. The two-model policy stays; only the *occupants* change |
+| Bake-off ritual | Documented quarterly procedure: candidate model → same tasks → compare measured results → adopt/reject. First job: confirm the depth swap locally and settle the driver-slot challenge. The two-model policy stays; only the *occupants* change |
 
-**Acceptance:** `qloop stats` shows a full baseline matrix; a one-page
+**Acceptance:** a measured comparison exists; a one-page
 "current quality" summary can be generated from runs.db.
 **Effort:** 1–2 sessions. No new infrastructure.
 
@@ -81,7 +81,7 @@ still future work on ser5; day-to-day use the vault + AI Workstation now.
 
 lab-provisioning's job stops at the filesystem: the `brain` role creates
 `/data/brain`'s folder layout, seeds templates, includes it in restic, and
-symlinks `playbooks/` to `agentlab/playbooks` so qloop and the vault share one
+keeps `playbooks/` in the vault so agents and notes share one
 copy of ACE playbooks. Retrieval, embeddings, indexing, the graph UI, ingest
 loops (triage, digest, contradiction sweeps, resurfacing), and the `cortex`
 CLI/MCP are ai-workstation's scope, not this repo's — see that repo's own
@@ -125,7 +125,7 @@ enforced or removed.
 
 | Deliverable | Detail |
 |---|---|
-| Off-hours heavy queue | `agentlab-run@heavy-*` jobs allowed to evict a warm model overnight for `gpt-oss:120b` or `nemotron-cascade-2`, restoring the "hard problem, take an hour" tier without breaking daytime memory budget. This phase is queueing/scheduling, not model hunting: both are already pulled and documented on mini. Queue in, results + eval scores out by morning |
+| Off-hours heavy queue | scheduled jobs allowed to evict a warm model overnight for `gpt-oss:120b` or `nemotron-cascade-2`, restoring the "hard problem, take an hour" tier without breaking daytime memory budget. This phase is queueing/scheduling, not model hunting: both are already pulled and documented on mini. Queue in, results + eval scores out by morning |
 | STaR → LoRA bridge | Datasets already accumulate. When a suite shows a persistent gap: rent a GPU-hour, LoRA-tune the current depth model on bootstrapped traces, eval on the same suite, adopt only on a win. Revisit native gfx1151 training each quarter |
 | LLM-level observability | Export runs.db aggregates + tokens/s to Prometheus (textfile collector); Grafana panel per suite over time — the "is it getting better?" chart, which is also consulting collateral |
 

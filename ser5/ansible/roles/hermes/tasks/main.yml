@@ -198,24 +198,16 @@
           `hermes pairing approve <platform> <code>`; revoke pairings later if needed.
           Default Hermes model stays Ollama at {{ hermes_ollama_base_url }}.
 
-    # ─── quality-loop free-text gate (local skill + agentlab wrapper) ─────────
-    - name: Ensure Hermes quality-gate skill directory exists
+    # ─── Removed feature cleanup ──────────────────────────────────────────────
+    # quality-loop was removed 2026-08. Without this, an already-provisioned
+    # SKILL.md keeps sitting in HERMES_HOME for Hermes to discover, pointing at
+    # /data/agentlab/jobs/quality-gate.sh which no longer exists — a skill that
+    # fails at call time is worse than no skill. Safe to drop from this role once
+    # every host has converged past it.
+    - name: Remove the retired quality-gate skill
       ansible.builtin.file:
-        path: "{{ hermes_quality_gate_skill_dir }}"
-        state: directory
-        owner: "{{ username }}"
-        group: "{{ username }}"
-        mode: "0755"
-      when: enable_hermes_quality_gate | bool
-
-    - name: Install Hermes quality-gate skill markdown
-      ansible.builtin.template:
-        src: quality-gate-skill.md.j2
-        dest: "{{ hermes_quality_gate_skill_dir }}/SKILL.md"
-        owner: "{{ username }}"
-        group: "{{ username }}"
-        mode: "0644"
-      when: enable_hermes_quality_gate | bool
+        path: "{{ hermes_home }}/skills/quality-gate"
+        state: absent
 
     # ─── Systemd user service ─────────────────────────────────────────────────
     - name: Ensure user systemd directory exists

@@ -197,7 +197,6 @@ These flags in `ansible/group_vars/all.yml` now match the live box:
 |------|------|--------|
 | `enable_observability: true` | `observability` | Prometheus + Grafana quadlets targeting mini's metrics (mini must be reachable) |
 | `enable_hermes: true` | `hermes` | Hermes gateway, proxy, dashboard, messaging adapters, optional Grok Build skill + xAI env (see below) |
-| `enable_agentlab: true` | `agentlab` | quality-loop experiment layer under `{{ data_mount }}/agentlab` (mini must be reachable) — see [`../docs/ai-loops.md`](../docs/ai-loops.md) |
 | `enable_brain: true` | `brain` | Obsidian-compatible second brain under `{{ data_mount }}/brain` — see [`../docs/brain.md`](../docs/brain.md) |
 | `enable_openwebui: true` | `openwebui` | Open WebUI browser chat UI, reaching mini's Ollama over the tailnet — see below |
 | `enable_backups: true` | `backups` | restic snapshots + daily timer (needs a real `vault_restic_password`) — see below |
@@ -397,7 +396,7 @@ mini — mini's hard rule is inference only.
 With `enable_backups: true` and a real `vault_restic_password` (add it via
 `make vault-edit`; generate with `openssl rand -base64 24` and keep a copy **off**
 this machine), the `backups` role snapshots `{{ user_home }}`,
-`{{ data_mount }}/agentlab`, `{{ data_mount }}/services`, and `/etc` to an
+`{{ data_mount }}/agentlab` (frozen archive of the removed quality-loop), `{{ data_mount }}/services`, and `/etc` to an
 encrypted restic repo at `{{ data_mount }}/backups`, daily at 03:30 via a
 systemd timer (`restic-backup.timer`). Retention: 7 daily / 4 weekly / 6 monthly,
 pruned after each run, with a 1% read-data integrity check.

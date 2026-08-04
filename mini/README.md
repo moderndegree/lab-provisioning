@@ -195,7 +195,7 @@ token, not headline parameter count.
 
 mini keeps exactly **two base models resident**, at the global
 **131072-token window**, with no baked system prompts (agent roles live in the
-workstation opencode config and quality-loop prompts - see `ollama_base_models` in
+workstation opencode config - see `ollama_base_models` in
 `ansible/group_vars/all.yml`):
 
 | Slot | Model | Shape | Used for |
@@ -224,7 +224,7 @@ anyway; 128k costs ~10 minutes worst case, which is a ceiling, not the norm.
 ### Heavy tier
 
 Pulled and kept on disk, **never resident** - loading either one evicts a warm
-model, so schedule them off-hours (for example an `agentlab-run@heavy-*` job on
+model, so schedule them off-hours (for example a systemd timer job on
 ser5):
 
 | Model | Shape | Use |

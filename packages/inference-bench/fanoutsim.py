@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-"""Benchmark a session shaped like qloop actually runs, not a synthetic fan-out.
+"""Benchmark a small-fan-out session: N concurrent workers, then one judge pass.
 
-Taken from packages/quality-loop/src/quality_loop/cli.py:
-  --strategy best_of_n   -n 3   (gate caps at 3)   |  -n 4 elsewhere
-  --strategy refine      --rounds 2  (3 in one subcommand)
-  --worker general  --judge general   -> BOTH are qwen3.6:35b-a3b-mtp
-
-So the real shape is: N candidates generated CONCURRENTLY on qwen, then ONE judge
-call on qwen, repeated for R sequential rounds. Peak concurrency is N (3 or 4),
-not the 16-32 the synthetic benchmark used.
+The shape: N candidates generated CONCURRENTLY on one model, then ONE judge call
+on the same model, repeated for R sequential rounds. Defaults (n=3, rounds=2) come
+from the quality-loop package that used to drive this box — it was removed 2026-08,
+but the SHAPE remains the realistic one for agent work: peak concurrency in the
+low single digits, not the 16-32 a synthetic fan-out benchmark invites. Keep using
+it to size `parallel`, and change -n to whatever your orchestrator actually
+dispatches.
 
 Reports per-round wall time and end-to-end session time, which is what a human
 waiting on the loop actually experiences.

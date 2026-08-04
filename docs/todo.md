@@ -32,7 +32,7 @@ first.
       recorded durably in `roadmap.md` (status note + a FROZEN marker on the
       Phase 4 section itself) rather than living only here.
 - [x] **Finish Phase 1 before starting new subsystems** — same decision,
-      same place. `qloop stats` still can't produce the baseline matrix yet
+      same place. The baseline matrix was never produced
       (see Measurement gap below for the piece that moved); the constraint
       itself is now recorded in `roadmap.md`, not just this list.
 - [x] Adopt a cheap self-check — habit adopted 2026-07-28, no tooling to
@@ -47,21 +47,11 @@ judge is *actually following the format* over time — a future judge-model
 swap (the quarterly bake-off) could silently degrade gate accuracy with
 nothing to catch it.
 
-- [x] Persist verdict/scope parse success (`parsed`, `scope_parsed` — already
-      computed in `_refine_round`'s critique step metadata) into `runs.db` as
-      a first-class column, not just trace metadata that gets discarded.
-      Done 2026-07-28: `results` table gained `judge_model`,
-      `critique_rounds`, `verdict_parsed`, `scope_parsed`
-      (`storage.py::RunStore.record`/`_migrate`, migrated in place for
-      existing `runs.db` files).
-- [x] Add a `qloop stats` view: judge parse rate over time, sliceable by
-      judge model. Done 2026-07-28: `RunStore.judge_stats()` +
-      `qloop stats --judge-parse`.
-- [x] Phase 5's independent-judge work is moot for `best_of_n`: that strategy was
-      removed 2026-08 (identical mean score to `refine` at 2.5x the tokens over
-      356 runs). If an independent judge is ever wired into `refine`, wire the
-      same parse-rate tracking through it — don't let a second judge path
-      silently repeat this gap.
+- [x] Judge parse-rate tracking (verdict/scope columns in `runs.db`, `qloop stats
+      --judge-parse`). Done 2026-07-28, then **superseded**: quality-loop was
+      removed entirely 2026-08. The 356 recorded runs survive as a frozen
+      archive at `/data/agentlab/runs.db` on ser5; nothing writes to it now.
+      Serving-side measurement moved to `packages/inference-bench`.
 
 ## Scale-mismatch check-in (recurring, not a one-time fix)
 
