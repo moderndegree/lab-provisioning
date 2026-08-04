@@ -43,11 +43,34 @@ Short answers mean per-request overhead dominates and simultaneous prefills
 compete without reaching the batching efficiency long generations get. A sweep
 run with the wrong workload shape will point you the wrong way.
 
-**Running both models at once is not free parallelism.** Measured with the
-orchestrator working during worker fan-out: qwen -54%, gpt-oss -56%, fan-out wall
-time 14.5s -> 30.8s. The two `llama-server` processes each schedule as if they own
-the GPU. On a bandwidth-bound box, serialising the phases finished the same
-session ~20% faster than overlapping them.
+**Running both models at once is no longer symmetric — re-measured 2026-08-03
+after the ROCm 7.14 / quadlet rebuild, and the earlier finding no longer holds.**
+
+The old numbers here (qwen -54%, gpt-oss -56%, fan-out wall 14.5s -> 30.8s)
+described a roughly even split of the damage. It is now lopsided: the
+orchestrator runs essentially free during fan-out, and the workers absorb the
+whole cost.
+
+| | orchestrator (qwen, :8090) | worker fan-out wall (gpt-oss, :8091) |
+|---|---|---|
+| workers alone (`--orch-rounds 0`) | — | 13.2-15.5s |
+| orchestrator working during fan-out | +3 to +4% vs isolated | 20.8-24.1s |
+
+Median session (8 workers x 2 turns + 3 orchestrator rounds): **~31s wall,
+~100 tok/s aggregate**, tool-call rate 8/8. So supervising a fan-out from :8090
+is close to free now; budget the contention against the workers instead.
+
+**`per-stream` in `agentsim.py` conflates queueing with throughput loss — do not
+read it as a contention cost.** It divides tokens by each request's total
+elapsed time, including time queued. 8 workers x 2 turns = 16 requests through
+8 slots is two waves, so gpt-oss shows -79% to -84% per-stream *with no
+orchestrator running at all*. Only the -89% vs -84% gap is contention. Compare
+fan-out wall time or aggregate throughput; ignore per-stream across configs
+with different request counts.
+
+**Discard the first run after a server restart.** A cold prompt cache cost 26%:
+run 1 gave 39.1s wall / 77.8 tok/s aggregate and showed the orchestrator at
+-42%, while runs 2-4 gave 28.7/31.8/31.2s and +3 to +4%. Warm up, then measure.
 
 **Size `parallel` to the real fan-out, which is small.** The loop that used to
 drive this box dispatched 3-4 candidates per round with rounds run sequentially —
