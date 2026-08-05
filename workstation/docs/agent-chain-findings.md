@@ -30,6 +30,45 @@ at all:
   same lesson as `task-package.md` rule 5 ("a role named as a gate gets invoked;
   one mentioned as advice does not"), applied one level down.
 
+## A PASS verdict does not mean the work was safe
+
+Measured 2026-08-05, run `issue3` — the first probe against an existing repo
+(ai-workstation, 122 files, TypeScript) rather than an empty directory.
+
+The chain scored perfectly: `4/4` critics, `qa=2`, `forbidden_tool_calls=0`,
+`stuck_tools=0`, `exit=0`, **`VERDICT: PASS`**, and the first `cortex_vault_capture`
+ever recorded. The dispatch tree was the best yet — `librarian → [architect,
+planner] → coder → [4 critics] → … → qa → coder → qa → librarian`, with `qa`
+running twice because the first one found real problems.
+
+It also wrote five test fixtures into the **live cortex vault**, which the task
+package forbade in writing.
+
+Root cause is worth keeping, because it is a trap and not a slip. The task was to
+remove a `process.cwd()` fallback in favour of an absolute path, so the delivered
+code read `CORTEX_VAULT_DIR || "/data/brain"`. `coder` and `tester` then ran the
+new migration script **without** setting that variable — four times between 10:34
+and 10:42 — and it did exactly what they had just written. The `cwd()` fallback
+everyone called a bug had been accidentally protective: an unqualified run used
+to land in the repo's own directory.
+
+`qa` passed the "no writes outside the project" criterion having grepped the
+source file and listed `/tmp`. It never looked at the one directory the
+constraint named.
+
+Three things follow:
+
+- **The probe scores delegation, not correctness or safety.** It always did; this
+  is the run that made the gap visible. `PASS` means the chain routed properly.
+  Read the diff.
+- **`qa.md` now has a section on criteria that assert a non-event** — you cannot
+  verify an absence by sampling, and the evidence for "did not touch X" is a
+  listing of X.
+- **`agent-probe.sh` now exports `CORTEX_VAULT_DIR` into a per-run scratch
+  directory.** That closes the one production path the chain is known to reach.
+  It is not a sandbox: probes run as a real user on a real box, and anything with
+  `bash` can write anywhere that user can.
+
 ## Role sequencing lives in the ASK, not in any prompt
 
 Measured 2026-08-05, and it settles a question the dispatch counts had been

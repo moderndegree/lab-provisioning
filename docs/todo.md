@@ -172,40 +172,46 @@ answer down; if it's "yes, drifted," that's what triggers the freeze above.
 
       Until this is decided, treat Hermes as third-party-egress.
 
-## Backups have never run on ser5 (found 2026-08-05)
+## Backups — turned on 2026-08-05 (was off since the box was built)
 
-- [ ] **Turn on restic, or decide in writing not to.** Verified on the box, not
-      from config: `restic` is not installed, `/etc/restic` does not exist,
-      `/data/backups` is empty and dated Jun 19 (the disk-setup mkdir), and no
-      backup timer is loaded. The cause is one line —
-      `ser5/ansible/group_vars/all.yml:84`, `enable_backups: false`.
+Found unconfigured at 08:52 on 2026-08-05: `restic` not installed, `/etc/restic`
+absent, `/data/backups` empty since the Jun 19 disk-setup mkdir, no timer loaded
+— `enable_backups: false`. Resolved the same morning: the flag was flipped,
+`vault_restic_password` set, and ser5 converged. Verified on the box at 10:20:
+`restic 0.18.1` installed, `/etc/restic/restic.env` present, repo initialised at
+`/data/backups` (config/data/index/keys/locks), `restic-backup.timer` scheduled
+for 03:43 daily.
 
-      The role itself is complete and correct: gated at `site.yml:42-43`, it
-      would snapshot `{{ user_home }}`, `/data/agentlab`, `/data/brain`,
-      `/data/services` and `/etc` daily at 03:30 with 7/4/6 retention. It has
-      simply never been switched on, so every comment in the repo describing what
-      restic "retains" describes an intention rather than a state — including the
-      one in `roles/backups/defaults/main.yml` about agentlab, and the one in the
-      agentlab item below.
+Note for anyone reading the repo's older comments: every mention of what restic
+"retains" — including the one in `roles/backups/defaults/main.yml` about
+agentlab, and the `/data/agentlab` item below — described an intention rather
+than a state until this date. Nothing was in restic before 2026-08-05.
 
-      Single-copy on ser5 right now, all of it unbacked:
-      - `/data/brain` — the cortex vault
-      - `/data/agentlab/runs.db` — 356 runs that cannot be regenerated
-      - `~/agentprobe/` — the raw agent-chain measurement runs
-      - `~/moderndegree-consulting-plan.md` — 24K, searched `~` and `/data`, this
-        is the only copy anywhere
+- [ ] **Confirm the first snapshot completed and is restorable.** The repo was
+      initialised at 08:50 but `/data/backups/snapshots/` was still empty at
+      10:20 — initialising a repo is not taking a backup. A run was triggered by
+      hand; check `sudo bash -c 'source /etc/restic/restic.env && restic
+      snapshots'` shows one, then actually restore a file from it. An untested
+      backup is a belief, not a backup.
 
-      Blocked on you, not on code: it needs `vault_restic_password` in
-      `group_vars/vault.yml` (`make vault-edit`). The role asserts and fails
-      loudly rather than backing up nothing, which is why flipping the flag alone
-      is not enough.
+- [ ] **Add an off-site tier.** `restic_repo` is `/data/backups` — the same
+      physical box, though a different disk (`sda1`, separate from the OS on
+      `nvme0n1p2`). That survives an OS wipe and nothing else: not disk failure,
+      theft, or fire. The role's own header says to pair it with B2/S3/rclone.
+
+- [ ] **Record both passwords outside this control node.** The restore chain is
+      ansible-vault password (in your head) → `ser5/ansible/group_vars/vault.yml`
+      (AES256, gitignored at `ser5/.gitignore:7`, exists only on the WSL control
+      node) → restic password → `/data/backups`. If the control node dies, the
+      snapshots survive and the key does not. Password manager, not the repo.
 
 ## Housekeeping
 
 - [ ] **Decide on `/data/agentlab` (824K on ser5) — deliberately, not by reflex.**
       Frozen archive of quality-loop's 356 recorded runs (`runs.db`) plus a README
-      explaining what it was. Nothing writes to it. It is NOT backed up — see the
-      backups item below; the earlier "it is in restic" here was false. Keep as evidence
+      explaining what it was. Nothing writes to it. It is in restic as of
+      2026-08-05 and was NOT before that date, despite this line having claimed
+      otherwise. Keep as evidence
       for the "what measures quality" question above, or archive and delete:
 
       ```sh

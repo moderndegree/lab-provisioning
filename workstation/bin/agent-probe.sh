@@ -4,7 +4,12 @@
 # critic fan-out landed in a SINGLE assistant turn — that batching is the metric
 # that matters, not the raw dispatch count.
 #
-#   ./agent-probe.sh "<prompt>" [timeout] [label]
+#   ./agent-probe.sh "<prompt>" [timeout] [label] [seed_repo]
+#
+# seed_repo clones an existing repository into the run directory before starting,
+# for measuring the chain against EXISTING code rather than an empty dir. Always
+# a throwaway clone — `coder` has edit rights, so never point the chain at a
+# working checkout.
 #
 # Run it after any change to opencode.json or .moderndegree/prompts/*. VERDICT:
 # PASS requires all four critics distinct, qa having run, and zero forbidden
@@ -17,8 +22,33 @@ set -uo pipefail
 export PATH="$HOME/.npm-global/bin:$PATH"
 DB="$HOME/.local/share/opencode/opencode.db"
 LABEL="${3:-run}"
+SEED="${4:-}"
 DIR=$HOME/agentprobe/$(date +%H%M%S)-$LABEL
 mkdir -p "$DIR" && cd "$DIR"
+
+if [ -n "$SEED" ]; then
+  # Clone HEAD only. Uncommitted work in the source checkout deliberately does
+  # not come along — the probe should measure the chain against a clean tree,
+  # and a dirty seed makes the diff unreadable afterwards.
+  if ! git clone --quiet --depth 1 "$SEED" "$DIR/repo" 2>"$DIR/clone.err"; then
+    echo "!! seed clone failed: $SEED"; cat "$DIR/clone.err"; exit 1
+  fi
+  cd "$DIR/repo"
+  echo "=== seeded from $SEED at $(git rev-parse --short HEAD) ($(git ls-files | wc -l) files)"
+fi
+
+# Probes run as a real user on a real box, so anything the chain writes lands on
+# the real filesystem. Measured 2026-08-05 (run `issue3`): coder and tester both
+# invoked a migration script whose default destination was the PRODUCTION cortex
+# vault, and wrote five test fixtures into /data/brain — while the package
+# explicitly forbade it and qa certified compliance. Point the vault at scratch
+# so the blast radius of a path bug is a temp directory.
+#
+# This does NOT sandbox the run. It closes the one production path the chain is
+# known to reach; treat any probe that touches system paths as capable of
+# writing to them.
+export CORTEX_VAULT_DIR="$DIR/scratch-vault"
+mkdir -p "$CORTEX_VAULT_DIR"
 
 PREV=$(sqlite3 "$DB" "select coalesce(max(time_created),0) from session;")
 START=$(date +%s)
@@ -113,5 +143,12 @@ printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
 echo "--- tools left RUNNING (hang evidence)"
 sqlite3 "$DB" "select '  '||s.agent||' | '||json_extract(p.data,'\$.tool')||' | '||substr(replace(coalesce(json_extract(p.data,'\$.state.input.command'),json_extract(p.data,'\$.state.input.filePath'),''),char(10),' '),1,80) from part p join session s on s.id=p.session_id where (s.id='$SID' or s.parent_id='$SID') and json_extract(p.data,'\$.state.status')='running';" | grep . || echo "  none"
 
-echo "=== files produced"; find "$DIR" -type f -not -name out.txt | head -10 | sed 's/^/  /'
+if [ -n "$SEED" ]; then
+  # In a seeded run every repo file is "produced"; the change is what matters.
+  echo "=== changes to the seeded repo"
+  ( cd "$DIR/repo" && git status --short | head -20 | sed 's/^/  /'
+    echo "  ---"; git diff --stat | tail -12 | sed 's/^/  /' )
+else
+  echo "=== files produced"; find "$DIR" -type f -not -name out.txt | head -10 | sed 's/^/  /'
+fi
 echo "=== tail"; tail -8 "$DIR/out.txt" | sed 's/^/  /'

@@ -71,6 +71,31 @@ Then name the returned slug in your `evidence`. If the run was clean, skip it an
 say `no capture: clean run` — a vault full of "worked as expected" is a vault
 nobody reads. One call maximum either way; you are a gate, not a diarist.
 
+## Criteria that assert a NON-event
+
+Some criteria say nothing happened: "wrote no file outside the project", "made no
+network call", "left no process running", "did not modify the database". These
+are the easiest to fake a PASS on, because looking in one place and finding
+nothing feels like evidence and is not.
+
+**You cannot verify an absence by sampling.** Enumerate every place the thing
+could have happened, then check all of them:
+
+- Where does the code say it writes? Read the default — not the value the tests
+  pass in. A destination that is only safe when an environment variable is set is
+  unsafe every time someone forgets.
+- What did the run actually touch? `find <candidate dirs> -newermt "<run start>"`
+  beats any amount of reading.
+- Then check the specific paths named in the constraint, by name.
+
+Measured 2026-08-05: a run was told in writing not to write to `/data/brain`. Two
+agents ran a script whose default destination WAS `/data/brain`, five files
+landed there, and qa passed the criterion having grepped the source file and
+listed `/tmp`. The one directory named in the constraint was never looked at.
+
+If a criterion forbids touching a path, the evidence is a listing of that path.
+Nothing else counts.
+
 ## Interrogate the criteria too
 
 A system can satisfy every stated criterion and still be broken, because the
