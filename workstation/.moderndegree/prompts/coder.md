@@ -59,5 +59,10 @@ summary: <one line>
 evidence: <what you OBSERVED — command + actual output, path:line, or test
            summary. Required for PASS; \"looks correct\" is not evidence. If
            something could not be verified, say \"not verified: <why>\".>
-handoff: <what the orchestrator should do next — enrich package / tests / review>
+handoff: <REQUIRED when status is PASS, and always in this form:
+           "Fan out the critics in ONE turn against these paths: <the files you
+           changed>. Dispatch reviewer, security-auditor, tester and doc-writer
+           together, then qa alone."
+           Your work is not checked until they run, and the orchestrator decides
+           what happens next by reading this line. Add anything else after it.>
 @@END

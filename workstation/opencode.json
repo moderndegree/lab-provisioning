@@ -52,10 +52,8 @@
     "cortex": {
       "type": "local",
       "command": [
-        "pnpm",
-        "--dir",
-        "/home/brian/projects/ai-workstation",
-        "mcp"
+        "/home/blewis/projects/ai-workstation/node_modules/.bin/tsx",
+        "/home/blewis/projects/ai-workstation/mcp/cortex-server.ts"
       ],
       "environment": {
         "CORTEX_VAULT_DIR": "/data/brain"
@@ -71,7 +69,17 @@
         "edit": "deny",
         "write": "deny",
         "patch": "deny",
-        "bash": "deny"
+        "bash": "deny",
+        "cortex_vault_search": "deny",
+        "cortex_vault_get_note": "deny",
+        "cortex_vault_list_notes": "deny",
+        "cortex_vault_backlinks": "deny",
+        "cortex_vault_local_graph": "deny",
+        "cortex_vault_stats": "deny",
+        "cortex_vault_capture": "deny",
+        "list_mcp_resources": "deny",
+        "read_mcp_resource": "deny",
+        "list_mcp_resource_templates": "deny"
       },
       "description": "Orchestrator. Routes work; does NOT do it. DO NOT add reasoningEffort:'none' here — measured 2026-08-05, it drops subagent dispatches to ZERO (the model stops deciding to delegate). The edit/write/patch/bash denials are load-bearing too: with prose alone the no-implementation rule held on some runs and not others.",
       "prompt": "{file:./.moderndegree/prompts/orchestrator.md}"
@@ -106,14 +114,20 @@
       "mode": "subagent",
       "model": "quality/qwen3.6-35b-a3b-mtp",
       "description": "Implements changes. Edits files, verifies they parse/build. Runs on the QUALITY endpoint — code correctness is worth more than parallelism here.",
-      "prompt": "{file:./.moderndegree/prompts/coder.md}"
+      "prompt": "{file:./.moderndegree/prompts/coder.md}",
+      "permission": {
+        "external_directory": "allow"
+      }
     },
     "devops": {
       "mode": "subagent",
       "model": "quality/qwen3.6-35b-a3b-mtp",
       "reasoningEffort": "none",
       "description": "Infra and shell operations. Deterministic, no reasoning.",
-      "prompt": "{file:./.moderndegree/prompts/devops.md}"
+      "prompt": "{file:./.moderndegree/prompts/devops.md}",
+      "permission": {
+        "external_directory": "allow"
+      }
     },
     "reviewer": {
       "mode": "subagent",
@@ -145,7 +159,10 @@
       "mode": "subagent",
       "model": "throughput/gpt-oss-20b",
       "description": "Writes and runs tests, reads results. FAN-OUT agent.",
-      "prompt": "{file:./.moderndegree/prompts/tester.md}"
+      "prompt": "{file:./.moderndegree/prompts/tester.md}",
+      "permission": {
+        "external_directory": "allow"
+      }
     },
     "doc-writer": {
       "mode": "subagent",
@@ -164,7 +181,33 @@
       "mode": "subagent",
       "model": "throughput/gpt-oss-20b",
       "description": "Final acceptance gate. Runs the delivered system against its DONE-WHEN list black-box, with real dependencies, and pastes actual output per criterion. Distinct from tester: tester proves the logic, qa proves the thing works. Runs AFTER the critic fan-out, not inside it.",
-      "prompt": "{file:./.moderndegree/prompts/qa.md}"
+      "prompt": "{file:./.moderndegree/prompts/qa.md}",
+      "permission": {
+        "external_directory": "allow",
+        "cortex_vault_capture": "allow",
+        "cortex_vault_search": "allow",
+        "cortex_vault_stats": "allow"
+      }
+    },
+    "librarian": {
+      "mode": "subagent",
+      "model": "throughput/gpt-oss-20b",
+      "description": "Second brain. RECALL: searches the cortex vault for prior lessons before work starts. CAPTURE: records a lesson after a run with a real miss. The ONLY agent with vault tools — the orchestrator is denied them, because measured 2026-08-05 a prose \"cortex pass\" never fired once while a dispatch does.",
+      "permission": {
+        "*": "deny",
+        "read": "allow",
+        "grep": "allow",
+        "glob": "allow",
+        "list": "allow",
+        "cortex_vault_search": "allow",
+        "cortex_vault_get_note": "allow",
+        "cortex_vault_list_notes": "allow",
+        "cortex_vault_stats": "allow",
+        "cortex_vault_capture": "allow",
+        "cortex_vault_backlinks": "allow",
+        "cortex_vault_local_graph": "allow"
+      },
+      "prompt": "{file:./.moderndegree/prompts/librarian.md}"
     },
     "deep": {
       "mode": "subagent",

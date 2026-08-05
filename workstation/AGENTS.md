@@ -21,6 +21,19 @@ hold read-only tools (`read`, `grep`, `glob`, `list`) and return analysis as tex
 Only `coder`, `tester`, `devops`, `qa` and the orchestrator write to the
 filesystem or run shell commands (`qa` runs things but never modifies them).
 
+## What makes the critic fan-out fire
+
+Measured 2026-08-05: baseline never reached 4/4 critics in six runs; the fix ran
+5/5. The lever is **`coder`'s `handoff` line naming the fan-out** — the
+orchestrator picks its next move by reading the `@@RESULT` in front of it, and
+that beats any rule in its system prompt. Same lesson as `task-package.md` rule 5
+("named as a gate gets invoked; mentioned as advice does not"), one level down.
+
+Three things that looked like fixes and measured worse — `temperature: 0.2`,
+denying `read` to `build`, and cutting INTAKE alone. Full evidence, plus the two
+run-eating hangs (backgrounded servers, `/tmp` reads), are in
+`docs/agent-chain-findings.md`. Read it before changing orchestrator settings.
+
 ## Two orchestrator settings that are load-bearing
 
 Measured 2026-08-05 by driving `opencode run` headlessly and counting `task`
@@ -92,7 +105,8 @@ Full table: `.moderndegree/skills/loop-budget.md`. Hard stops:
 | Identical failing tool command | 2 |
 
 On budget exhaust: escalate to the user with what you tried — do **not** keep
-re-prompting “to think harder.” Orchestrator/devops keep `reasoningEffort: none`.
+re-prompting “to think harder.” `devops` keeps `reasoningEffort: none`; the
+orchestrator must NOT — see the load-bearing settings above.
 
 ## TASK PACKAGE — context is the orchestrator's main job
 
@@ -102,9 +116,11 @@ Bad answers usually come from thin handoffs. Full rules:
 - Orchestrator **must** clarify the problem and build a **TASK PACKAGE** (goal,
   done-when, constraints, assumptions, pasted context excerpts) before dispatching
   any non-trivial subagent.
-- **Cortex MCP** (when available): **must** `vault_search` → read top **1–3** notes
-  into the package before dispatch. Prefer postmortems/playbooks. Cap volume —
-  never dump the vault. If MCP is down, continue with repo tools and note it.
+- **Cortex (second brain): dispatch `librarian`, do not search yourself.** The
+  orchestrator holds no vault tools — a prose "cortex pass" never fired once in
+  measured runs, so recall is a `task` call now. `librarian` returns 1–3 note
+  excerpts + ids for the package, and records lessons after a run with a real
+  miss. If cortex is down it says so; continue and note it.
 - Prefer **tools over user questions**; ask the user only for **blocking** unknowns.
 - No-tools subagents work **only** from the package. Incomplete package → they
   return `BLOCKED` with exact gaps; orchestrator enriches and re-dispatches.
@@ -134,7 +150,7 @@ orchestrator supervising a fan-out costs only +3-4%.
 
 - **`throughput` → `http://mini:8091/v1`** — `gpt-oss-20b` (MoE 20B), 8 slots,
   no MTP. 33 t/s per stream at 4-way for 114 t/s aggregate. This endpoint is for
-  the FAN-OUT — agents dispatched simultaneously against the same finished diff:
+  the FAN-OUT — agents dispatched simultaneously against the same finished change:
   `reviewer`, `security-auditor`, `tester`, `doc-writer`. Plus `qa`, which runs
   on this endpoint but SEQUENTIALLY, after the batch — see below.
 
@@ -167,7 +183,8 @@ So `planner`, `architect`, `reviewer`, `security-auditor`, `doc-writer` and `dee
 now hold `read`/`grep`/`glob`/`list`. Packages carry POINTERS — paths, symbols,
 ranges — and the agent fetches its own detail. Literal content is pasted only when
 it is not retrievable from the repo (the user's words, an error, a log, a vault
-note, or the diff under review).
+note). The critics get changed PATHS, not a pasted diff — the orchestrator has no
+`bash` and cannot produce one.
 
 The orchestrator must not edit files, write implementations, run tests, or read a
 file in full to "understand the repo". Those are dispatches, not shortcuts.
@@ -203,7 +220,7 @@ Vault at `/data/brain`; OpenCode loads **cortex** MCP (`opencode.json`). Full
 rules: `.moderndegree/skills/second-brain.md` and the cortex pass in task-package.
 
 - **Before work:** search vault → 1–3 notes into TASK PACKAGE.
-- **After painful misses:** `vault_capture` (preferred) or postmortem file; promote
+- **After painful misses:** `cortex_vault_capture` (preferred) or postmortem file; promote
   durable rules to ACE playbooks.
 - Do not treat unreviewed drafts as ground truth; no client secrets in the vault.
 

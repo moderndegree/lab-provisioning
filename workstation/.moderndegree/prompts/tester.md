@@ -48,6 +48,25 @@ If the live check cannot run — no network, service down, credentials absent �
 is a FAIL or BLOCKED with the reason stated, not a PASS on the strength of the
 offline suite. Note in `handoff` which cases are covered by injection only.
 
+## Starting a service without hanging the run
+
+**Never leave a process running when a `bash` call returns.** The bash tool waits
+on the whole process group, so a server you background — even with `nohup`,
+`setsid`, or output redirected to a file — holds the call open forever and stalls
+the entire run. Measured 2026-08-05: two runs died this way.
+
+Start it, probe it, and kill it inside ONE bounded command:
+
+```bash
+timeout 30 bash -c 'python3 app.py --root . --port 8081 >/tmp/svc.log 2>&1 &
+  SP=$!; sleep 2
+  curl -sS "http://127.0.0.1:8081/stats?path=app.py"; RC=$?
+  kill $SP 2>/dev/null; wait $SP 2>/dev/null; exit $RC'
+```
+
+That is the shape for the live end-to-end call required above: `timeout` on the
+outside, the PID captured, the kill before the command returns.
+
 ## Follow `tdd.md`
 
 It governs where tests go (seams — public boundaries, not internals), how they are

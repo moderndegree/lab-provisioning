@@ -13,8 +13,8 @@ file you paste costs you permanently and saves them nothing. Give coordinates
 (paths, symbols, ranges), the goal, and done-when; let them fetch the detail.
 
 Paste literal content only where it is NOT retrievable from the repo: the user's
-own words, a runtime error, a log excerpt, a vault note, a decision you made — and
-the diff under review, which may not be committed yet.
+own words, a runtime error, a log excerpt, a vault note, a decision you made. A
+change under review is named by its PATHS, not pasted as a diff.
 
 ## Decision tree (follow in order)
 
@@ -86,17 +86,17 @@ relevant notes max into the package — never the whole vault.
 
 | Step | Tool | How |
 |------|------|-----|
-| 1. Search lessons | `vault_search` | Query from goal keywords + domain (e.g. "ser5 ollama eviction", "postmortem handoff") |
-| 2. Optional list | `vault_list_notes` | Filter `kind` if useful (`playbook`, `note`) |
-| 3. Read hits | `vault_get_note` | Only the top 1–3 ids that match this task |
-| 4. Optional neighborhood | `vault_backlinks` / `vault_local_graph` | When a hit is central and you need related context |
+| 1. Search lessons | `cortex_vault_search` | Query from goal keywords + domain (e.g. "ser5 ollama eviction", "postmortem handoff") |
+| 2. Optional list | `cortex_vault_list_notes` | Filter `kind` if useful (`playbook`, `note`) |
+| 3. Read hits | `cortex_vault_get_note` | Only the top 1–3 ids that match this task |
+| 4. Optional neighborhood | `cortex_vault_backlinks` / `cortex_vault_local_graph` | When a hit is central and you need related context |
 | 5. Skip capture here | — | Capture/postmortems are `second-brain.md` after work |
 
 Paste into TASK PACKAGE under **Context** as short excerpts + note ids
 (e.g. `notes/postmortems/2026-…`, `playbooks/infra`). Prefer postmortems and
 playbooks over random MOCs unless the MOC is the topic.
 
-If `vault_stats` shows `exists: false` or zero notes, skip cortex content and
+If `cortex_vault_stats` shows `exists: false` or zero notes, skip cortex content and
 proceed (empty vault is fine).
 
 ## Understanding pass (before first subagent)
@@ -139,7 +139,7 @@ Then **load** the context map with tools (repo + cortex). Paste **excerpts**.
 | Do | Don't |
 |----|--------|
 | Relevant files, diffs, error logs | Entire chat history or whole repo |
-| 1–3 vault notes / playbook bullets | Dumping vault_search full JSON |
+| 1–3 vault notes / playbook bullets | Dumping cortex_vault_search full JSON |
 | Interfaces + call sites that matter | Every transitive dependency |
 | Prior failing @@RESULT text | "See earlier discussion" |
 
@@ -151,7 +151,7 @@ Heuristic: a cold subagent must succeed **without** asking what the user meant.
 |----------|----------------------|
 | planner / architect | Goal, constraints, done-when, relevant design/code + vault lessons |
 | coder / tester / devops | Full package; they may read more files but must not redefine goal |
-| reviewer / security | Diff + stated requirements + surrounding excerpts needed to judge |
+| reviewer / security | Changed paths + what changed + stated requirements; they read the files |
 | doc-writer | All material to write from; no "look it up" |
 
 ## Subagent contract (they already enforce; you must enable it)

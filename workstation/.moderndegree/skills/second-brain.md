@@ -12,12 +12,12 @@ It does **not** replace TASK PACKAGE (which already requires a cortex search
 
 | Tool | Use |
 |------|-----|
-| `vault_search` | Find related notes / postmortems / playbooks |
-| `vault_list_notes` | Browse by kind |
-| `vault_get_note` | Read full note by id |
-| `vault_backlinks` / `vault_local_graph` | Neighborhood of a note |
-| `vault_stats` | Empty vault / health check |
-| `vault_capture` | Drop raw text into `inbox/` (preferred over shell) |
+| `cortex_vault_search` | Find related notes / postmortems / playbooks |
+| `cortex_vault_list_notes` | Browse by kind |
+| `cortex_vault_get_note` | Read full note by id |
+| `cortex_vault_backlinks` / `cortex_vault_local_graph` | Neighborhood of a note |
+| `cortex_vault_stats` | Empty vault / health check |
+| `cortex_vault_capture` | Drop raw text into `inbox/` (preferred over shell) |
 
 Pull **1–3** notes into a TASK PACKAGE — never the whole vault. Full search
 rules live in `task-package.md`.
@@ -36,7 +36,7 @@ rules live in `task-package.md`.
 
 **Preferred:**
 
-1. `vault_capture` with a short structured body (symptom, bad question, package
+1. `cortex_vault_capture` with a short structured body (symptom, bad question, package
    gaps, 1–3 fixes). Title line first — it becomes the inbox slug.
 2. Tell the user the note landed in `inbox/` and should be triaged into
    `notes/postmortems/` (human or nightly triage).
@@ -61,8 +61,8 @@ Drafts are not ground truth until a human accepts. No client-confidential dumps.
 
 | Intent | Action |
 |--------|--------|
-| Quick thought / link | `vault_capture` only |
-| Structured failure analysis | `vault_capture` with postmortem fields, or template under `notes/postmortems/` |
+| Quick thought / link | `cortex_vault_capture` only |
+| Structured failure analysis | `cortex_vault_capture` with postmortem fields, or template under `notes/postmortems/` |
 | Agent operating rule | playbook reflect / edit `playbooks/*.md` |
 
 ## Governance

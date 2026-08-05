@@ -8,7 +8,7 @@ Models and agents must not thrash. Hard budgets for every non-trivial task.
 |--------|-----|-----------|
 | Re-dispatch **same** subagent after FAIL/BLOCKED | **2** | Escalate to user; do not call it a third time with the same package |
 | TASK PACKAGE enrich → re-dispatch cycles | **3** | Stop, return best effort + gaps, ask user |
-| Cortex `vault_search` rounds per task | **2** | Use what you have; no search thrash |
+| Cortex `cortex_vault_search` rounds per task | **2** | Use what you have; no search thrash |
 | Tool retries on identical failing command | **2** | Change approach or BLOCKED |
 | Subagents in parallel for same subtask | **1** | No duplicate planner/coder races |
 | Critics dispatched in parallel on one diff | **4** | `reviewer`, `security-auditor`, `tester`, `doc-writer` — this is the throughput endpoint's measured peak; a 5th slows all of them |
@@ -40,7 +40,7 @@ Need from you: … (or confirm I should stop)
 
 ## Cortex
 
-- At most **2** search calls, then **1–3** `vault_get_note`  
+- At most **2** search calls, then **1–3** `cortex_vault_get_note`  
 - Do not re-search with the same query  
 
 ## Related
