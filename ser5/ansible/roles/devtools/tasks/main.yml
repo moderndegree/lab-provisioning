@@ -214,6 +214,51 @@
     mode: "0644"
     directory_mode: "0755"
 
+# ─── Prune skills/prompts deleted from the repo ──────────────────────────────
+# ansible.builtin.copy on a directory only ADDS and overwrites — it never removes
+# a file that disappeared from the source. Every agent loads
+# .moderndegree/skills/*.md, so a deleted skill keeps being injected into every
+# prompt indefinitely.
+#
+# This was not theoretical: quality-flow.md, quality-gate.md and
+# work-breakdown.md survived the 2026-08 quality-loop deletion and were still
+# being loaded on 2026-08-05. quality-gate.md instructs the orchestrator to run
+# `qloop gate` — a binary that no longer exists — so agents were being told to
+# invoke a deleted tool as a REQUIRED step.
+#
+# Comparing both trees is deliberate: an explicit deny-list of known-stale names
+# needs updating every time something is removed, which is the same failure again.
+- name: Enumerate .moderndegree source files (control node)
+  ansible.builtin.find:
+    paths: "{{ playbook_dir }}/../../workstation/.moderndegree"
+    recurse: true
+    file_type: file
+  register: moderndegree_src
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+- name: Enumerate deployed .moderndegree files
+  ansible.builtin.find:
+    paths: "{{ user_home }}/.config/opencode/.moderndegree"
+    recurse: true
+    file_type: file
+  register: moderndegree_deployed
+  changed_when: false
+
+- name: Prune deployed .moderndegree files no longer present in the repo
+  ansible.builtin.file:
+    path: "{{ user_home }}/.config/opencode/.moderndegree/{{ item }}"
+    state: absent
+  loop: "{{ moderndegree_deployed_rel | difference(moderndegree_src_rel) }}"
+  vars:
+    moderndegree_src_rel: >-
+      {{ moderndegree_src.files | map(attribute='path')
+         | map('regex_replace', '^.*/workstation/\.moderndegree/', '') | list }}
+    moderndegree_deployed_rel: >-
+      {{ moderndegree_deployed.files | map(attribute='path')
+         | map('regex_replace', '^.*/\.config/opencode/\.moderndegree/', '') | list }}
+
 # ─── Grok Build (xAI coding agent CLI) ───────────────────────────────────────
 # Official installer places the binary under ~/.grok/bin and may symlink into
 # ~/.local/bin. Auth is interactive (grok login) or XAI_API_KEY — not provisioned
