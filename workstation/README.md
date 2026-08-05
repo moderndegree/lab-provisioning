@@ -105,13 +105,26 @@ So: if the hard part of the task is a design question, say so in PROCESS. If you
 don't, it will go straight to `coder` — competently, and without ever having
 designed anything.
 
-Three rules, each learned by watching it go wrong:
+Four rules, each learned by watching it go wrong:
 
 - **Every criterion must reject a broken build.** "Returns valid JSON" passes on a
   response reporting total failure. "Returns non-null fields parsed from live
   data" cannot.
 - **Say "was run", not "exists".** A wrapper script that exists satisfies
   "a wrapper exists" and still crashes on import.
+- **A criterion that asserts a NON-event must name its verification command.**
+  "Wrote no file outside the project", "left no process running", "made no
+  network call" — state the check, do not leave the instrument to the agent.
+  Write `paste the output of: find /data/brain -newermt <start>`, not "confirm
+  nothing outside the repo was written".
+
+  Measured twice on the same task. Given the loose wording, `qa` passed the
+  criterion once by grepping a source file and listing `/tmp`, and once by
+  running `git status --short` — from inside the repo, an instrument that cannot
+  by construction see outside it. On the first of those runs five files had in
+  fact been written to the forbidden directory. Adding a section to `qa.md`
+  telling it how to verify absences did **not** change the method on the next
+  run; naming the command in the ask is the lever that works.
 - **Anything not in DONE WHEN gets dropped.** Requirements mentioned in passing
   lose to the ones being graded. If you would be unhappy to receive the work
   without it, it is a criterion.

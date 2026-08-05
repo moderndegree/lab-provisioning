@@ -56,6 +56,25 @@ to land in the repo's own directory.
 source file and listed `/tmp`. It never looked at the one directory the
 constraint named.
 
+**The re-run settled how to fix it.** Same task, same seed, with `qa.md` given a
+new section on verifying non-events and the probe exporting a scratch
+`CORTEX_VAULT_DIR`. Result: production untouched (6 files, baseline 6), and `qa`
+verified "no file outside this repo" with **`git status --short`** — run inside
+the repo, an instrument that cannot by construction see outside it. The prose
+section changed nothing. That is the fourth measured instance of a prompt rule
+failing to move behaviour, against a 100% record for instructions placed in the
+ask or enforced by config.
+
+So the rule moved to the ask (`README.md`: a non-event criterion must name its
+verification command) and the check moved into the harness (`agent-probe.sh`
+now diffs a `PROBE_GUARD_PATHS` list against the run's start time and reports
+`VERDICT: UNSAFE`, ahead of every other signal). Asking the agents was never
+evidence.
+
+Also worth noting from the re-run: `librarian` fired twice in `issue3` and **zero
+times** in `issue3b` on identical input. RECALL is not reliable unless the role
+is named in a `PROCESS` line like any other.
+
 Three things follow:
 
 - **The probe scores delegation, not correctness or safety.** It always did; this
