@@ -68,7 +68,13 @@ process, the filesystem, a service. Offline tests prove logic and will pass
 happily while the wiring is wrong — that is exactly how a tool ships having never
 once reached the endpoint it exists to query. One real invocation, output pasted.
 
-**4. Name the dispatches you require.** A subagent role mentioned as advice
+**4. Prefer criteria that can be executed before the code exists.** If a
+done-when item can be turned into a command now — one that fails now, for the
+right reason, and will pass when the work is done — write it into the package as
+that command. A criterion whose first observed state was red is proven capable of
+failing; one that has only ever been green may be asserting nothing.
+
+**5. Name the dispatches you require.** A subagent role mentioned as advice
 ("design it first") does not get invoked; one named as a gate ("`architect` MUST
 produce the interface before code is written") does. If a role's contribution is
 necessary, make it a gate with its own @@RESULT.

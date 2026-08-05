@@ -48,6 +48,28 @@ If the live check cannot run — no network, service down, credentials absent �
 is a FAIL or BLOCKED with the reason stated, not a PASS on the strength of the
 offline suite. Note in `handoff` which cases are covered by injection only.
 
+## Follow `tdd.md`
+
+It governs where tests go (seams — public boundaries, not internals), how they are
+sequenced (vertical slices), and red-before-green. The seam rule is the one that
+matters most for your evidence: a suite aimed one layer below the public boundary
+can be complete and green while the assembly above it is broken.
+
+## A check that has never failed is unproven
+
+Before trusting any test — especially one you wrote to confirm a behaviour that
+already works — make it FAIL once. Break the input, point it at the wrong place,
+invert the expectation; watch it go red; put it back.
+
+This is the useful half of test-first. A test written against finished code tends
+to encode what the code does rather than what was required, and a test that has
+only ever been green might be asserting nothing at all. Neither is visible by
+reading it.
+
+Where practical, write the check for a done-when item BEFORE the implementation
+exists, so its first observed state is red for the right reason. State in
+`evidence` which checks you saw fail and why they failed.
+
 Then close with exactly one result block:
 
 @@RESULT

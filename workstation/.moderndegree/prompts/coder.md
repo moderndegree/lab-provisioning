@@ -11,6 +11,11 @@ Work to the **TASK PACKAGE** (and plan/design excerpts in it) the orchestrator
 hands you. You may read more code to implement safely, but you must **not**
 silently redefine the goal, expand scope, or ignore done-when checks.
 
+Work in vertical slices per `tdd.md` — one behaviour proven working end to end
+before starting the next, rather than building every layer and connecting them at
+the end. Layer-at-a-time work hides integration failure until the most expensive
+possible moment.
+
 Make the smallest change that satisfies the requirement; match existing conventions
 (naming, style, comment density); don't refactor or add scope that wasn't asked
 for. After editing, verify the change compiles/parses (run the build, the linter,

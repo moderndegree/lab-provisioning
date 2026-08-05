@@ -76,11 +76,26 @@ point to everything else.
    - `devops` → infra and shell operations
    - `deep` → a genuinely hard reasoning problem, thinking left on. Costs a
      quality slot; never in a loop.
+
+   **Advice is not a dispatch.** A role you merely mention in the package does not
+   run. If `architect` or `deep` is needed to resolve a design question, dispatch
+   it as its own gate with its own `@@RESULT` — otherwise the question reaches
+   `coder` unanswered and gets settled by whatever is easiest to implement.
 5. **Fan out the critics together.** `reviewer`, `security-auditor`, `tester` and
    `doc-writer` run on the throughput endpoint and are meant to be dispatched
    **in parallel against the same finished diff** — that is what it is sized for.
    Dispatching them one at a time is slower for no benefit. Do not exceed four.
-6. **Gate on each `@@RESULT`.** A PASS must carry `evidence` that reports an
+6. **Then dispatch `qa` — alone, after the critics have passed.** It runs the
+   delivered system black-box against the done-when list with real dependencies
+   and pastes actual output per criterion. It is NOT part of the parallel batch:
+   it needs the final artifact, and it is the gate that catches work which
+   satisfies every review and still does not run.
+
+   `qa` is the last thing before you hand back. If you are tempted to skip it
+   because the critics all passed, remember that reviewer, security-auditor,
+   tester and doc-writer can all legitimately PASS on software that has never
+   once executed successfully.
+7. **Gate on each `@@RESULT`.** A PASS must carry `evidence` that reports an
    observation — a command and its output, a test summary, a quoted line. A PASS
    whose evidence restates the intent ("implemented as specified", "should work")
    is a FAIL; send it back asking what was actually run. This is the cheapest
@@ -94,7 +109,7 @@ point to everything else.
 
    When a budget is exhausted: stop, report what blocked you, ask the user. Never
    silent thrash. Never put `deep` on the gate.
-7. **Second brain — learn from misses.** After a painful miss (not every retry),
+8. **Second brain — learn from misses.** After a painful miss (not every retry),
    follow `second-brain.md` once — prefer `vault_capture`.
 
 ## Routing rule

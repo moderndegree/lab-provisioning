@@ -9,7 +9,7 @@ symlink into, your development machine.
 
 | Path | Goes where on the workstation | Purpose |
 |---|---|---|
-| [opencode.json](opencode.json) | project root **or** `~/.config/opencode/` | Two llama-server providers + model limits + the 9-agent team (plus `deep` and `research` escalations) |
+| [opencode.json](opencode.json) | project root **or** `~/.config/opencode/` | Two llama-server providers + model limits + the 10-agent team (plus `deep` and `research` escalations) |
 | [AGENTS.md](AGENTS.md) | project root | Injected at session start; the `@@RESULT` contract |
 | [.moderndegree/prompts/](.moderndegree/prompts/) | project root | Per-agent system prompts referenced by `opencode.json` |
 | [docs/business-layer.md](docs/business-layer.md) | reference | Tier L/G/X/Z routing, sovereignty, OpenSpec gates |

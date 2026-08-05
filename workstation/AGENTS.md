@@ -18,8 +18,24 @@ observation is treated as FAIL — send it back.
 
 `planner`, `architect`, `reviewer`, `security-auditor`, `doc-writer` and `deep`
 hold read-only tools (`read`, `grep`, `glob`, `list`) and return analysis as text.
-Only `coder`, `tester`, `devops` and the orchestrator write to the filesystem or
-run shell commands.
+Only `coder`, `tester`, `devops`, `qa` and the orchestrator write to the
+filesystem or run shell commands (`qa` runs things but never modifies them).
+
+## tester and qa are different jobs
+
+They are the two halves of "does it work", and either alone is a blind spot.
+
+| | `tester` | `qa` |
+|---|---|---|
+| works from | the diff | the DONE-WHEN list |
+| view | white box | black box |
+| inputs | injected / mocked | the real dependency |
+| proves | the LOGIC is right | the THING WORKS |
+| runs | in the parallel critic batch | alone, after it, as the final gate |
+
+Both can legitimately PASS while the system has never once functioned — a green
+unit suite around dead wiring is the normal shape of that failure, not an exotic
+one. `qa` exists to close it, and it is the last gate before work is handed back.
 
 ## Evidence over assertion
 
@@ -99,9 +115,10 @@ orchestrator supervising a fan-out costs only +3-4%.
 - **`throughput` → `http://mini:8091/v1`** — `gpt-oss-20b` (MoE 20B), 8 slots,
   no MTP. 33 t/s per stream at 4-way for 114 t/s aggregate. This endpoint is for
   the FAN-OUT — agents dispatched simultaneously against the same finished diff:
-  `reviewer`, `security-auditor`, `tester`, `doc-writer`.
+  `reviewer`, `security-auditor`, `tester`, `doc-writer`. Plus `qa`, which runs
+  on this endpoint but SEQUENTIALLY, after the batch — see below.
 
-  There are exactly four of them because four is where `:8091` peaks. Adding a
+  There are exactly four in the batch because four is where `:8091` peaks. Adding a
   fifth parallel critic buys nothing: at 8-way the endpoint delivers LESS
   aggregate throughput (81 t/s) than at 4-way and halves per-stream speed.
 
