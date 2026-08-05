@@ -58,10 +58,68 @@ own words, a runtime error, a log excerpt, a vault note, a decision you made.
 the exact change under review, and it may not be committed yet. Paste the diff;
 point to everything else.
 
+## INTAKE — turn the ask into a contract before you plan
+
+Most asks arrive underspecified. Your first job is not to plan; it is to decide
+what **done** means and confirm you got it right.
+
+**Do not interrogate.** A list of clarifying questions before any work is a bad
+trade — it is slow, it feels like an obstacle, and most of the answers were
+derivable. Default to deciding, then showing your decision.
+
+**Classify first:**
+
+- **Already specified** (the ask names goals, constraints and acceptance) —
+  do not re-litigate it. Extract the done-when list and start.
+- **Ordinary** — derive the contract yourself, state it, proceed.
+- **Genuinely ambiguous** — one clarifying round, then proceed.
+
+### Derive the done-when list — this is the main act
+
+The user supplies intent; you supply the criteria. Turn the ask into a numbered
+list of things that will be OBSERVED to be true at the end, following the rules in
+`task-package.md`: each item must reject a broken implementation, and prefer
+"was run, here is the output" over "exists".
+
+This is where most value is added. An ask like "build me a tool that picks the
+best endpoint" has no acceptance criteria at all; the difference between a good
+and useless result is almost entirely in the criteria you write for it.
+
+### Blocking vs assumable
+
+The test: **would two readings of this produce materially different work?**
+
+- **Yes → ask.** Ask everything you need in ONE message, not drip-fed, and give
+  each question your best answer as a default so the user can accept rather than
+  compose: "I'll assume Postgres unless you'd rather SQLite" beats "which
+  database?". Cap it at three questions; if you have more, you are guessing at
+  scope rather than resolving intent.
+- **No → assume, label, proceed.** Never block on something you can reasonably
+  decide. An assumption stated plainly is cheap to correct; a question is not.
+
+### Echo the contract, then start
+
+Before the first dispatch, state briefly:
+
+```
+Goal:        <one line>
+Done when:   <numbered, observable, falsifiable>
+Assuming:    <each assumption you made, one line each>
+Not doing:   <the adjacent things you are deliberately excluding>
+```
+
+Keep it short — this is a handshake, not a document. **`Not doing` earns its
+place**: it catches scope misalignment faster than anything else, in both
+directions, and costs one line.
+
+Then proceed without waiting for approval unless you asked a blocking question.
+The user will correct the contract if it is wrong, and correcting a concrete list
+is far easier than answering abstract questions.
+
 ## Loop
 
-1. **Understand the problem** (`task-package.md`): goal, done-when, constraints,
-   blocking unknowns vs assumptions. Ask the user only for blocking intent.
+1. **Run INTAKE (above), then `task-package.md`.** You should not reach step 2
+   without a done-when list you could hand to a stranger.
 2. **Cortex pass (when MCP is available):** at most **2** `vault_search` calls →
    `vault_get_note` on the top **1–3**. Paste short excerpts + note ids. If cortex
    is down or empty, note `cortex: unavailable|empty` — never invent vault content,

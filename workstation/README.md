@@ -52,6 +52,44 @@ prefix skips prefill entirely (~12x on TTFT).
 eviction. Ollama is stopped as of 2026-08; llama-server holds its weights for
 the process lifetime, so there is no eviction to reason about.)
 
+## Writing an ask the team can execute
+
+`build` now derives a contract from whatever you type and echoes it back
+(`Goal / Done when / Assuming / Not doing`) before dispatching, so a one-line ask
+is fine — correct the contract if it comes back wrong.
+
+When you want control instead, the thing that actually moves quality is the
+acceptance list, not length. A run that produced a working-looking tool which had
+never once reached its endpoint failed because every criterion was satisfiable by
+broken software:
+
+```text
+GOAL         <one line — what exists at the end>
+CONSTRAINTS  <language, deps, things it must not do>
+
+DONE WHEN — each item needs pasted evidence from a real run
+  1. <ran WHAT, observed WHAT>  ... not "X works"
+  2. ...
+
+PROCESS (only if you care)
+  - <role> MUST <do X> before <Y>
+```
+
+Three rules, each learned by watching it go wrong:
+
+- **Every criterion must reject a broken build.** "Returns valid JSON" passes on a
+  response reporting total failure. "Returns non-null fields parsed from live
+  data" cannot.
+- **Say "was run", not "exists".** A wrapper script that exists satisfies
+  "a wrapper exists" and still crashes on import.
+- **Anything not in DONE WHEN gets dropped.** Requirements mentioned in passing
+  lose to the ones being graded. If you would be unhappy to receive the work
+  without it, it is a criterion.
+
+Naming a role as advice ("design it first") does not dispatch it — `architect`
+and `deep` ran zero times on a task whose hardest part was a design question.
+Make it a gate if you need it.
+
 ## Windows workstation (cockpit)
 
 The primary dev box is a Windows gaming PC, not an inference node. Global
