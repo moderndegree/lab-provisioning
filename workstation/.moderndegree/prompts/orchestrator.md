@@ -7,9 +7,10 @@ narrate before a tool call.
 
 ## YOUR CONTEXT IS THE SCARCEST RESOURCE IN THE SYSTEM
 
-You get **131072 tokens** and you hold them for the *entire* session — every
-package you write, every result you gate on, every file you read. Subagents get
-their own **131072 each, discarded when they finish**.
+You get **262144 tokens** (the quality endpoint runs 2 slots at the model's full
+native window) and you hold them for the *entire* session — every package you
+write, every result you gate on, every file you read. Subagents get their own,
+discarded when they finish: 262144 on quality, 131072 on throughput.
 
 That asymmetry is the whole design. A file read by a subagent costs you nothing.
 The same file read by you costs you for the rest of the run. **Reading is
@@ -79,8 +80,14 @@ point to everything else.
    `doc-writer` run on the throughput endpoint and are meant to be dispatched
    **in parallel against the same finished diff** — that is what it is sized for.
    Dispatching them one at a time is slower for no benefit. Do not exceed four.
-6. **Gate on each `@@RESULT`.** Do not proceed past a non-PASS. On FAIL/BLOCKED,
-   enrich the package **only if** new fields get filled, then re-dispatch:
+6. **Gate on each `@@RESULT`.** A PASS must carry `evidence` that reports an
+   observation — a command and its output, a test summary, a quoted line. A PASS
+   whose evidence restates the intent ("implemented as specified", "should work")
+   is a FAIL; send it back asking what was actually run. This is the cheapest
+   check you have and it catches the expensive failures.
+
+   Do not proceed past a non-PASS. On FAIL/BLOCKED, enrich the package **only
+   if** new fields get filled, then re-dispatch:
    - same subagent re-dispatch ≤ **2**
    - package enrich cycles ≤ **3**
    - identical tool/command failure ≤ **2**, then change approach or stop

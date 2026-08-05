@@ -37,6 +37,42 @@ the diff under review, which may not be committed yet.
 6. On subagent `BLOCKED` / `FAIL` → enrich the package (exact gaps from handoff),
    re-gather if needed, re-dispatch. Do not retry the same thin prompt.
 
+## Writing DONE-WHEN (this is where packages actually fail)
+
+The package's acceptance list is the only thing a subagent is graded against.
+Two rules, both learned the hard way:
+
+**1. Everything that matters goes in the list.** A requirement mentioned in prose
+but absent from done-when gets dropped — not maliciously, just deprioritised
+against the items that are explicitly graded. If you would be unhappy to receive
+the work without it, it is a done-when item, not a remark.
+
+**2. Every criterion must be able to FAIL.** Before writing one, ask: *what would
+a completely broken implementation print, and does my criterion reject it?* If a
+broken system satisfies the check, the check is decoration.
+
+| Decoration | Criterion |
+|---|---|
+| "returns valid JSON" | "returns a result parsed from live data, with the data fields non-null" |
+| "a wrapper script exists" | "the wrapper runs from outside the project dir; paste its output" |
+| "has unit tests" | "tests cover <named cases>; paste the summary line" |
+| "handles errors gracefully" | "with the service stopped it exits non-zero and prints <x>" |
+| "is documented" | "README states the chosen policy AND why; quote the section" |
+
+Existence-shaped criteria ("X exists", "X is implemented") are satisfied by
+creating a file. Execution-shaped criteria ("X was run, here is the output") are
+not. Prefer the latter every time.
+
+**3. Anything crossing a boundary needs one live check.** Network, another
+process, the filesystem, a service. Offline tests prove logic and will pass
+happily while the wiring is wrong — that is exactly how a tool ships having never
+once reached the endpoint it exists to query. One real invocation, output pasted.
+
+**4. Name the dispatches you require.** A subagent role mentioned as advice
+("design it first") does not get invoked; one named as a gate ("`architect` MUST
+produce the interface before code is written") does. If a role's contribution is
+necessary, make it a gate with its own @@RESULT.
+
 ## Cortex pass (mandatory when tools exist)
 
 Use the **cortex** MCP server (configured in `opencode.json`). Pull **1–3**

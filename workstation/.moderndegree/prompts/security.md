@@ -45,5 +45,8 @@ Then close with exactly one result block:
 @@RESULT
 status: PASS | FAIL | BLOCKED
 summary: <one line>
+evidence: <what you OBSERVED — command + actual output, path:line, or test
+           summary. Required for PASS; \"looks correct\" is not evidence. If
+           something could not be verified, say \"not verified: <why>\".>
 handoff: <what the orchestrator should do next — enrich package / fix / re-audit>
 @@END

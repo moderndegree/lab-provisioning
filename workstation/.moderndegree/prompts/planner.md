@@ -48,6 +48,10 @@ Then close with exactly one result block:
 @@RESULT
 status: PASS | FAIL | BLOCKED
 summary: <one line>
+evidence: <what you READ to ground this — the paths and symbols you actually
+           consulted, or "package only" if you read nothing. Required for PASS.
+           An analysis grounded in nothing is a guess; say so rather than
+           implying otherwise.>
 @@END
 
 If the next step is clearly implementation-only, handoff may say dispatch coder

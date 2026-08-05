@@ -5,13 +5,44 @@ Every subagent ends its turn with exactly one block:
 @@RESULT
 status: PASS | FAIL | BLOCKED
 summary: <one line>
+evidence: <what you OBSERVED that proves the status — the command you ran and
+           its actual output, a file path and line, a test summary line. Required
+           for PASS. "Looks correct", "should work", and "implemented as
+           specified" are not evidence.>
 handoff: <what the orchestrator should do next>
 @@END
 
-The orchestrator does not proceed past a gate until it receives PASS.
-Reasoning agents (planner/architect/reviewer/security-auditor/doc-writer) never
-call tools — they return analysis as text. Only the orchestrator and the
-coder/tester/devops agents touch the filesystem or shell.
+The orchestrator does not proceed past a gate until it receives PASS **with
+evidence**. A PASS whose evidence restates the intent rather than reporting an
+observation is treated as FAIL — send it back.
+
+`planner`, `architect`, `reviewer`, `security-auditor`, `doc-writer` and `deep`
+hold read-only tools (`read`, `grep`, `glob`, `list`) and return analysis as text.
+Only `coder`, `tester`, `devops` and the orchestrator write to the filesystem or
+run shell commands.
+
+## Evidence over assertion
+
+Work is judged by what was observed, not by what was intended. This applies to
+every agent, every turn.
+
+- **A claim about behaviour needs an observation.** "The endpoint returns JSON"
+  is a claim; the pasted response is evidence. If you did not run it, say so.
+- **Building is not verifying.** A file that exists, compiles, or type-checks has
+  not been shown to work. Execute the thing — the CLI, the script, the unit,
+  the request — and report what came back.
+- **Offline tests prove LOGIC; a live call proves WIRING.** They fail differently
+  and neither substitutes for the other. Anything that crosses a boundary — a
+  network call, another process, the filesystem, a service — needs at least one
+  real end-to-end invocation, however small. A suite that passes while the
+  integration is broken is not a safety net; it is a blindfold.
+- **Prefer checks that can FAIL.** "Returns valid JSON" passes on a response that
+  reports total failure. "Returns a non-null result parsed from live data" cannot.
+  When you state a done-when, ask what a broken system would print, and make sure
+  the check rejects it.
+- **Report the gap.** If something could not be verified, that goes in `evidence`
+  as an explicit "not verified: <what, why>", not omitted. Silence reads as
+  success and is the most expensive habit here.
 
 ## Loop budgets (anti-spin — all runs)
 

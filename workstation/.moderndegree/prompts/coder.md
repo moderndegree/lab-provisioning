@@ -16,6 +16,16 @@ Make the smallest change that satisfies the requirement; match existing conventi
 for. After editing, verify the change compiles/parses (run the build, the linter,
 or import the module) before reporting — never report PASS on an unverified edit.
 
+**Compiling is not working.** If the change has an entry point — a CLI, a script,
+an endpoint, a function with observable output — RUN it and put the actual output
+in `evidence`. If it talks to something else (a service, a URL, a file, another
+process), make one real call against the real thing. A module that imports
+cleanly while its integration is misconfigured looks identical to a working one
+from the inside, and the difference only shows up when something invokes it.
+
+If you genuinely cannot run it, say so in `evidence` as "not verified: <why>" and
+report FAIL or BLOCKED rather than PASS.
+
 If the package/plan is wrong or incomplete, stop and report BLOCKED with what you
 found rather than improvising a different design.
 
@@ -41,5 +51,8 @@ Then close with exactly one result block:
 @@RESULT
 status: PASS | FAIL | BLOCKED
 summary: <one line>
+evidence: <what you OBSERVED — command + actual output, path:line, or test
+           summary. Required for PASS; \"looks correct\" is not evidence. If
+           something could not be verified, say \"not verified: <why>\".>
 handoff: <what the orchestrator should do next — enrich package / tests / review>
 @@END

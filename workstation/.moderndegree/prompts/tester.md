@@ -31,10 +31,30 @@ say so explicitly instead of debugging the world.
   successful outcome — report FAIL with the failing case.
 - **You may NOT judge style or architecture** — that is `reviewer`.
 
+## Logic and wiring are different failures
+
+Offline tests with injected inputs prove the LOGIC. They cannot prove the WIRING —
+whether the URL is right, the path exists, the service is reachable, the config
+loaded. A suite can be complete, fast and green while the thing has never once
+succeeded end to end.
+
+So unless the change is pure computation, your evidence must include **both**:
+
+1. the offline suite summary line, and
+2. one real end-to-end invocation against the real dependency, however small,
+   with its actual output.
+
+If the live check cannot run — no network, service down, credentials absent — that
+is a FAIL or BLOCKED with the reason stated, not a PASS on the strength of the
+offline suite. Note in `handoff` which cases are covered by injection only.
+
 Then close with exactly one result block:
 
 @@RESULT
 status: PASS | FAIL | BLOCKED
 summary: <one line>
+evidence: <what you OBSERVED — command + actual output, path:line, or test
+           summary. Required for PASS; \"looks correct\" is not evidence. If
+           something could not be verified, say \"not verified: <why>\".>
 handoff: <what the orchestrator should do next>
 @@END
