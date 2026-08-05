@@ -21,6 +21,26 @@ hold read-only tools (`read`, `grep`, `glob`, `list`) and return analysis as tex
 Only `coder`, `tester`, `devops`, `qa` and the orchestrator write to the
 filesystem or run shell commands (`qa` runs things but never modifies them).
 
+## Two orchestrator settings that are load-bearing
+
+Measured 2026-08-05 by driving `opencode run` headlessly and counting `task`
+(dispatch) calls in opencode's own database. Both were found by measurement after
+prompt wording failed twice:
+
+- **`build` must NOT have `reasoningEffort: "none"`.** With it, dispatches went to
+  ZERO across repeated runs — the orchestrator built everything itself, 50 tests
+  and all. Deciding "this warrants a subagent" is a judgement call, and that
+  setting removes the budget to make it. Removing it restored dispatching.
+- **`build` denies `edit`, `write`, `patch` and `bash`.** Reasoning alone was
+  necessary but NOT sufficient: with the same config and prompt, one run used
+  `task` twice and no bash, the next used `bash` 13 times and `task` once. The
+  rule was advisory, so compliance was stochastic. Denying the tools made it
+  structural — the run after that was `task` x4, zero bash, and reached `qa` for
+  the first time, with zero blocked-tool attempts.
+
+The general form: **prose advises, structure binds.** Where a rule matters, encode
+it in config rather than in the prompt.
+
 ## tester and qa are different jobs
 
 They are the two halves of "does it work", and either alone is a blind spot.

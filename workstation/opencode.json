@@ -67,8 +67,13 @@
     "build": {
       "mode": "primary",
       "model": "quality/qwen3.6-35b-a3b-mtp",
-      "reasoningEffort": "none",
-      "description": "Orchestrator. Cortex vault search + TASK PACKAGE, dispatches subagents, @@RESULT gates.",
+      "permission": {
+        "edit": "deny",
+        "write": "deny",
+        "patch": "deny",
+        "bash": "deny"
+      },
+      "description": "Orchestrator. Routes work; does NOT do it. DO NOT add reasoningEffort:'none' here — measured 2026-08-05, it drops subagent dispatches to ZERO (the model stops deciding to delegate). The edit/write/patch/bash denials are load-bearing too: with prose alone the no-implementation rule held on some runs and not others.",
       "prompt": "{file:./.moderndegree/prompts/orchestrator.md}"
     },
     "planner": {
