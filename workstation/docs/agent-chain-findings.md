@@ -1,7 +1,7 @@
 # Agent chain — what is measured, and what only looked true
 
-Method: `~/probe2.sh` on ser5 drives `opencode run` headlessly and reads
-opencode's own sqlite db. The metric that matters is **task calls grouped by
+Method: `workstation/bin/agent-probe.sh` (run on ser5, where opencode lives)
+drives `opencode run` headlessly and reads opencode's own sqlite db. The metric that matters is **task calls grouped by
 assistant turn** — a four-way fan-out means four `task` calls sharing one
 `message_id`, not four calls spread over four turns.
 
@@ -49,7 +49,7 @@ Both hit `tester`/`qa`, because both stand a service up to verify it:
   `external_directory: allow`. Note bash can *write* `/tmp` with no prompt, so
   the asymmetry is easy to hit.
 
-A stalled run looks exactly like a run that skipped its critics. `probe2.sh` has
+A stalled run looks exactly like a run that skipped its critics. `agent-probe.sh` has
 a stall watchdog for this reason — if no new DB rows land for 6 minutes it kills
 the run and names the tool left `running`.
 

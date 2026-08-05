@@ -6,6 +6,12 @@
 restic_repo: "{{ data_mount }}/backups"
 restic_password: "{{ vault_restic_password | default('') }}"
 
+# NOTE (2026-08-05): none of the below is in effect. enable_backups is false in
+# group_vars/all.yml and always has been — restic is not installed on ser5 and
+# the repo at {{ data_mount }}/backups was never initialised. Everything here
+# describes what WOULD be snapshotted once the flag is flipped and
+# vault_restic_password is set. See docs/todo.md.
+#
 # What gets snapshotted. services carries Grafana dashboards and Prometheus
 # config.
 #

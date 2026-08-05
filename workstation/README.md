@@ -9,13 +9,15 @@ symlink into, your development machine.
 
 | Path | Goes where on the workstation | Purpose |
 |---|---|---|
-| [opencode.json](opencode.json) | project root **or** `~/.config/opencode/` | Two llama-server providers + model limits + the 10-agent team (plus `deep` and `research` escalations) |
+| [opencode.json](opencode.json) | project root **or** `~/.config/opencode/` | Two llama-server providers + model limits + the 11-agent team (plus `deep` and `research` escalations) |
 | [AGENTS.md](AGENTS.md) | project root | Injected at session start; the `@@RESULT` contract |
 | [.moderndegree/prompts/](.moderndegree/prompts/) | project root | Per-agent system prompts referenced by `opencode.json` |
 | [docs/business-layer.md](docs/business-layer.md) | reference | Tier L/G/X/Z routing, sovereignty, OpenSpec gates |
 | [.moderndegree/skills/task-package.md](.moderndegree/skills/task-package.md) | project root | **Required** problem understanding + context packaging before subagent handoffs |
 | [.moderndegree/skills/second-brain.md](.moderndegree/skills/second-brain.md) | project root | Postmortems + playbook promotion after misses (`/data/brain`) |
 | [.moderndegree/skills/loop-budget.md](.moderndegree/skills/loop-budget.md) | project root | Anti-spin circuit breakers for agents |
+| [.moderndegree/skills/tdd.md](.moderndegree/skills/tdd.md) | project root | Test-first discipline; tests sit at the public seam, not an inner helper |
+| [bin/](bin/) | **run on ser5**, not copied | Measurement harness for the agent chain — see [bin/README.md](bin/README.md) |
 
 ## The split that drives everything
 
@@ -24,8 +26,8 @@ CONCURRENCY rather than by difficulty. Roles live in the agent prompts rather
 than baked model variants.
 
 - **`quality` — `http://mini:8090/v1`** — `qwen3.6-35b-a3b-mtp` (MoE 35B-A3B,
-  3B active), 4 slots, MTP on, 88 t/s solo. Critical-path work that runs largely
-  alone: `build`, `planner`, `architect`, `coder`, `devops`, `deep`.
+  3B active), **2 slots**, MTP on, 88 t/s solo. Critical-path work that runs
+  largely alone: `build`, `planner`, `architect`, `coder`, `devops`, `deep`.
 - **`throughput` — `http://mini:8091/v1`** — `gpt-oss-20b` (MoE 20B), 8 slots,
   33 t/s per stream at 4-way (114 aggregate). The parallel fan-out:
   `reviewer`, `security-auditor`, `tester`, `doc-writer`.
@@ -39,8 +41,9 @@ fastest. Numbers in `../mini/AGENTS.md`.
 mini is memory-bandwidth-bound, not compute-bound. Decode speed tracks active
 parameters per token, so MoE wins; a dense model is a mistake here.
 
-Context is **131,072 per slot**, partitioned statically at startup (`-c` total /
-`-np` slots) — a single session cannot exceed it however idle the box is, and
+Context on quality is **262,144 per slot** — the model's native maximum — from
+`ctx: 524288` across `parallel: 2`. It is partitioned statically at startup
+(`-c` total / `-np` slots) — a single session cannot exceed it however idle the box is, and
 there is no per-request `num_ctx`. KV cost is ctx × slots, so raise one only by
 lowering the other. Prefill degrades with depth — 1025 t/s at depth 0, 652 at
 65536, 486 t/s measured on a real 137622-token request — so a packed 262144

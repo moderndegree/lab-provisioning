@@ -150,11 +150,40 @@ answer down; if it's "yes, drifted," that's what triggers the freeze above.
 
       Until this is decided, treat Hermes as third-party-egress.
 
+## Backups have never run on ser5 (found 2026-08-05)
+
+- [ ] **Turn on restic, or decide in writing not to.** Verified on the box, not
+      from config: `restic` is not installed, `/etc/restic` does not exist,
+      `/data/backups` is empty and dated Jun 19 (the disk-setup mkdir), and no
+      backup timer is loaded. The cause is one line —
+      `ser5/ansible/group_vars/all.yml:84`, `enable_backups: false`.
+
+      The role itself is complete and correct: gated at `site.yml:42-43`, it
+      would snapshot `{{ user_home }}`, `/data/agentlab`, `/data/brain`,
+      `/data/services` and `/etc` daily at 03:30 with 7/4/6 retention. It has
+      simply never been switched on, so every comment in the repo describing what
+      restic "retains" describes an intention rather than a state — including the
+      one in `roles/backups/defaults/main.yml` about agentlab, and the one in the
+      agentlab item below.
+
+      Single-copy on ser5 right now, all of it unbacked:
+      - `/data/brain` — the cortex vault
+      - `/data/agentlab/runs.db` — 356 runs that cannot be regenerated
+      - `~/agentprobe/` — the raw agent-chain measurement runs
+      - `~/moderndegree-consulting-plan.md` — 24K, searched `~` and `/data`, this
+        is the only copy anywhere
+
+      Blocked on you, not on code: it needs `vault_restic_password` in
+      `group_vars/vault.yml` (`make vault-edit`). The role asserts and fails
+      loudly rather than backing up nothing, which is why flipping the flag alone
+      is not enough.
+
 ## Housekeeping
 
 - [ ] **Decide on `/data/agentlab` (824K on ser5) — deliberately, not by reflex.**
       Frozen archive of quality-loop's 356 recorded runs (`runs.db`) plus a README
-      explaining what it was. Nothing writes to it. It is in restic. Keep as evidence
+      explaining what it was. Nothing writes to it. It is NOT backed up — see the
+      backups item below; the earlier "it is in restic" here was false. Keep as evidence
       for the "what measures quality" question above, or archive and delete:
 
       ```sh
