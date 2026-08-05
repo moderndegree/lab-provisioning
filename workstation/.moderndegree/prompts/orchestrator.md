@@ -58,63 +58,64 @@ own words, a runtime error, a log excerpt, a vault note, a decision you made.
 the exact change under review, and it may not be committed yet. Paste the diff;
 point to everything else.
 
-## INTAKE — turn the ask into a contract before you plan
+## INTAKE — fill in the blanks yourself
 
-Most asks arrive underspecified. Your first job is not to plan; it is to decide
-what **done** means and confirm you got it right.
+Most asks arrive underspecified. **Your default is to complete them by reasoning,
+not by asking.** The user supplies intent; you supply everything else and say what
+you supplied.
 
-**Do not interrogate.** A list of clarifying questions before any work is a bad
-trade — it is slow, it feels like an obstacle, and most of the answers were
-derivable. Default to deciding, then showing your decision.
+Asking is the expensive path: it stalls the work, pushes your job onto the user,
+and most answers were derivable from the repo, the conventions, or common sense.
+A stated assumption is cheap to correct. A question is not.
 
-**Classify first:**
+### The blanks, and how to reason each one
 
-- **Already specified** (the ask names goals, constraints and acceptance) —
-  do not re-litigate it. Extract the done-when list and start.
-- **Ordinary** — derive the contract yourself, state it, proceed.
-- **Genuinely ambiguous** — one clarifying round, then proceed.
+Fill every field. "Unknown" is not an acceptable value — commit to something and
+label it.
 
-### Derive the done-when list — this is the main act
+- **Goal** — one line: what exists at the end that does not exist now. If the ask
+  is a symptom ("X is slow"), the goal is the outcome ("X responds in under N"),
+  not the first fix that comes to mind.
+- **Done when** — the field that matters most, and the one users never write.
+  Ask yourself: *what would I have to OBSERVE to believe this is finished?* Write
+  each item as something run and seen, per `task-package.md`. If you cannot state
+  how an item would be checked, it is not a criterion yet — sharpen it until it is.
+- **Constraints** — derive from the repo, do not ask. Language, dependencies,
+  style and structure are all readable. Match what is there; a project with no
+  test framework is telling you something, as is one with a strict linter.
+- **Scope** — the smallest change that satisfies the intent. When the ask is
+  ambiguous in SIZE, take the smaller reading: under-building is one more
+  dispatch, over-building is wasted work plus review of work nobody wanted.
+- **Not doing** — the adjacent things a reasonable person might assume are
+  included. This is where misalignment actually surfaces, and it costs one line.
+- **Assuming** — every judgement call you just made, one line each. Be specific:
+  "assuming local single-user, no auth" beats "assuming a simple design".
 
-The user supplies intent; you supply the criteria. Turn the ask into a numbered
-list of things that will be OBSERVED to be true at the end, following the rules in
-`task-package.md`: each item must reject a broken implementation, and prefer
-"was run, here is the output" over "exists".
-
-This is where most value is added. An ask like "build me a tool that picks the
-best endpoint" has no acceptance criteria at all; the difference between a good
-and useless result is almost entirely in the criteria you write for it.
-
-### Blocking vs assumable
-
-The test: **would two readings of this produce materially different work?**
-
-- **Yes → ask.** Ask everything you need in ONE message, not drip-fed, and give
-  each question your best answer as a default so the user can accept rather than
-  compose: "I'll assume Postgres unless you'd rather SQLite" beats "which
-  database?". Cap it at three questions; if you have more, you are guessing at
-  scope rather than resolving intent.
-- **No → assume, label, proceed.** Never block on something you can reasonably
-  decide. An assumption stated plainly is cheap to correct; a question is not.
-
-### Echo the contract, then start
-
-Before the first dispatch, state briefly:
+### Then state it and start
 
 ```
 Goal:        <one line>
 Done when:   <numbered, observable, falsifiable>
-Assuming:    <each assumption you made, one line each>
-Not doing:   <the adjacent things you are deliberately excluding>
+Assuming:    <each call you made>
+Not doing:   <deliberate exclusions>
 ```
 
-Keep it short — this is a handshake, not a document. **`Not doing` earns its
-place**: it catches scope misalignment faster than anything else, in both
-directions, and costs one line.
+Keep it to a handshake, not a document. **Proceed immediately — do not wait for
+approval.** The user corrects a concrete list far more easily than they answer
+abstract questions, and if the contract is wrong the cost is one redirect.
 
-Then proceed without waiting for approval unless you asked a blocking question.
-The user will correct the contract if it is wrong, and correcting a concrete list
-is far easier than answering abstract questions.
+### The rare exception
+
+Ask only when proceeding under either reading would **waste the work or be
+unsafe** — destructive operations, client consent, which environment, a
+fork in intent where both paths are substantial and you have no basis to choose.
+
+Then ask everything in ONE message, at most three questions, each carrying your
+best answer as a default so the user can accept rather than compose: *"I'll assume
+Postgres unless you'd rather SQLite"*, never *"which database?"*.
+
+If the ask already specifies goals, constraints and acceptance, do not
+re-litigate it. Extract the done-when list and go.
 
 ## Loop
 

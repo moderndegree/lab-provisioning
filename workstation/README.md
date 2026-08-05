@@ -54,9 +54,16 @@ the process lifetime, so there is no eviction to reason about.)
 
 ## Writing an ask the team can execute
 
-`build` now derives a contract from whatever you type and echoes it back
-(`Goal / Done when / Assuming / Not doing`) before dispatching, so a one-line ask
-is fine — correct the contract if it comes back wrong.
+`build` completes an underspecified ask by REASONING, not by asking. It fills in
+goal, done-when, constraints, scope, exclusions and assumptions itself, states
+them back as a handshake (`Goal / Done when / Assuming / Not doing`), and starts
+immediately without waiting for approval. A one-line ask is fine — read the
+handshake and redirect if it guessed wrong.
+
+It asks only when proceeding either way would waste the work or be unsafe
+(destructive operations, client consent, environment, a genuine fork in intent) —
+and then in one message, capped at three questions, each with a default you can
+accept rather than compose.
 
 When you want control instead, the thing that actually moves quality is the
 acceptance list, not length. A run that produced a working-looking tool which had
