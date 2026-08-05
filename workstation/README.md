@@ -17,7 +17,7 @@ symlink into, your development machine.
 | [.moderndegree/skills/second-brain.md](.moderndegree/skills/second-brain.md) | project root | Postmortems + playbook promotion after misses (`/data/brain`) |
 | [.moderndegree/skills/loop-budget.md](.moderndegree/skills/loop-budget.md) | project root | Anti-spin circuit breakers for agents |
 | [.moderndegree/skills/tdd.md](.moderndegree/skills/tdd.md) | project root | Test-first discipline; tests sit at the public seam, not an inner helper |
-| [bin/](bin/) | **run on ser5**, not copied | Measurement harness for the agent chain — see [bin/README.md](bin/README.md) |
+| [bin/](bin/) | ser5 `~/.local/bin/` via `roles/devtools` | Measurement harness for the agent chain — see [bin/README.md](bin/README.md) |
 
 ## The split that drives everything
 
@@ -81,9 +81,29 @@ DONE WHEN — each item needs pasted evidence from a real run
   1. <ran WHAT, observed WHAT>  ... not "X works"
   2. ...
 
-PROCESS (only if you care)
+PROCESS — the ONLY way to reach planner, architect, deep or librarian
   - <role> MUST <do X> before <Y>
 ```
+
+That last block is not optional decoration, and it is the single highest-leverage
+line you can add. Measured 2026-08-05: across 65 `coder` dispatches, **`architect`
+and `deep` had never run once** and `planner` had run 3 times — while the
+orchestrator prompt asked for all of them the entire time. Adding
+
+```text
+PROCESS
+  - architect MUST design the module boundary and the error contract before any implementation starts.
+  - planner MUST produce the implementation plan before coder is dispatched.
+```
+
+produced `librarian → architect → planner → coder → [4 critics] → qa` on the
+first try, and reproduced. The reason is structural: the orchestrator decides by
+reading the text nearest the decision, and before its first dispatch the nearest
+text is your ask. Nothing in a system prompt competes with that.
+
+So: if the hard part of the task is a design question, say so in PROCESS. If you
+don't, it will go straight to `coder` — competently, and without ever having
+designed anything.
 
 Three rules, each learned by watching it go wrong:
 

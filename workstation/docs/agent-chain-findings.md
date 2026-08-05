@@ -6,7 +6,13 @@ assistant turn** — a four-way fan-out means four `task` calls sharing one
 `message_id`, not four calls spread over four turns.
 
 Success = orchestrator's own tools are only task/read/grep/glob/todowrite, the
-dispatch tree contains all four critics, and `qa` runs after them.
+dispatch tree contains all four critics, `qa` runs after them, the run exits 0,
+and no tool is left `running`.
+
+Those last two were added 2026-08-05 after a run scored PASS on all the dispatch
+criteria while having been **killed by the stall watchdog** at 34 minutes with a
+`tester` still holding a backgrounded server. A chain that delegates perfectly
+and then hangs has passed nothing; that case now reports `VERDICT: STALLED`.
 
 ## What makes the critic fan-out fire
 
@@ -23,6 +29,59 @@ at all:
 - **Put the instruction at the decision point, not in the preamble.** This is the
   same lesson as `task-package.md` rule 5 ("a role named as a gate gets invoked;
   one mentioned as advice does not"), applied one level down.
+
+## Role sequencing lives in the ASK, not in any prompt
+
+Measured 2026-08-05, and it settles a question the dispatch counts had been
+posing for a while. Across 65 `coder` dispatches lifetime, **`architect` and
+`deep` had never run once**, and `planner` only 3 times. The orchestrator prompt
+had asked for all of them the whole time — including a flat "your first `task`
+call is `librarian` (RECALL)", which had produced 4 librarian runs, ever.
+
+Adding four lines to the ask changed it on the first attempt:
+
+```text
+PROCESS
+  - architect MUST design the module boundary and the error contract before any implementation starts.
+  - planner MUST produce the implementation plan before coder is dispatched.
+```
+
+```
+turn 1: [1] librarian     ← first RECALL of the series
+turn 2: [1] architect     ← FIRST DISPATCH EVER
+turn 3: [1] planner
+turn 4: [1] coder
+turn 5: [4] reviewer, security-auditor, tester, doc-writer
+```
+
+Reproduced on the next run. So `architect` and `deep` are not dead config — they
+are unreachable from the orchestrator prompt and reachable from the user's
+prompt. This is the same principle as the `coder` handoff, at the one point in a
+run where no preceding agent exists: the last thing the orchestrator reads before
+its first decision is the ask, so that is the only place a first-dispatch rule
+can land. **Do not fix this by adding another orchestrator rule** — that has been
+tried, in writing, and the counts above are the result.
+
+## `qa` belongs on the quality endpoint
+
+Measured 2026-08-05. On `throughput/gpt-oss-20b`, `qa` spent **11 of 17 tool
+calls on `glob`/`read`** — auditing the codebase, which `qa.md` forbids by name —
+and then **emitted no text output at all**. Its session contains the incoming
+package and nothing else. The orchestrator saw an empty result, improvised an
+extra `tester` dispatch, and that tester hung the run on `setsid ... python3
+app.py` — the anti-pattern its own prompt warns about. Total cost: a 2041s run
+killed by the watchdog.
+
+Moved to `quality/qwen3.6-35b-a3b-mtp`. Same prompt, next run: `bash` 4, `read`
+3, no globbing, six text parts, a real `@@RESULT` with per-criterion evidence,
+and the run ended at `qa` with no improvised turn 12. 1078s, `VERDICT: PASS`.
+
+The routing rule already said so — "critical-path work that runs ALONE → quality;
+the split is by concurrency, not difficulty" — and `qa` was the one non-parallel
+role sitting on the parallel endpoint. Worth noting the general shape: **two
+agents ignored explicit prose in their own prompts, and both were on
+gpt-oss-20b.** Prose constraints are worth less on the smaller model; put the
+non-parallel work where the reasoning is.
 
 Two things that looked like fixes and were not:
 

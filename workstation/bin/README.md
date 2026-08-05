@@ -6,9 +6,10 @@ the whole point: the console shows what the orchestrator *said*, and the failure
 mode being watched for is an orchestrator that narrates delegation while doing
 the work itself. The db records which sessions actually spawned.
 
-They run **on ser5**, where opencode lives. Nothing copies them there yet — scp
-them over, or run them through ssh. Paths (`$HOME/.npm-global/bin`, the db
-location) assume that host.
+They run **on ser5**, where opencode lives. `roles/devtools` deploys them to
+`~/.local/bin/` (on PATH there), so a converge keeps them current — call them by
+name, no path needed. Their internals (`$HOME/.npm-global/bin`, the db location)
+assume that host.
 
 | Script | Use it for |
 |---|---|

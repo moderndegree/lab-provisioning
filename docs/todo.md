@@ -116,6 +116,28 @@ answer down; if it's "yes, drifted," that's what triggers the freeze above.
 - [ ] `mini/ansible/roles/llamacpp` — legacy llama-server unit retirement.
 - [ ] `ser5/ansible/roles/hermes` — quality-gate skill removal (confirmed removed on ser5).
 
+## Oneshot network units report success forever (found 2026-08-05)
+
+- [ ] **Add a `podman network exists` guard to `roles/observability`.** A quadlet
+      `.network` generates a oneshot unit that creates the network, exits 0, and
+      then reports `active (exited)` indefinitely. Nothing re-checks it. On
+      2026-08-05 podman's storage was reset at 22:18 the previous night — every
+      network vanished — while `obs-network.service` still showed success from
+      18:30. Prometheus, Grafana and Open WebUI were all down for ~10 hours;
+      neither `systemctl` nor a converge showed anything wrong. It surfaced only
+      because a converge happened to restart Grafana and the handler failed with
+      `unable to find network with name or ID systemd-obs`.
+
+      Fix shape: a task that runs `podman network exists systemd-obs` and
+      restarts `obs-network.service` when it does not. Same for
+      `systemd-openwebui`. This is the third variant of one pattern — see
+      "Verify running state, not converge output"; green Ansible and green
+      systemd can both sit on top of a dead service.
+
+      What caused the reset is unknown. No `prune`/`reset` in bash history, no
+      prune task in any role, no prune timer on the box. Left unattributed
+      deliberately rather than guessed at.
+
 ## Watch for
 
 - [ ] Quadlet shadowing: a stale `~/.config/systemd/user/<name>.service` silently wins over

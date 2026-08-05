@@ -179,8 +179,8 @@
     },
     "qa": {
       "mode": "subagent",
-      "model": "throughput/gpt-oss-20b",
-      "description": "Final acceptance gate. Runs the delivered system against its DONE-WHEN list black-box, with real dependencies, and pastes actual output per criterion. Distinct from tester: tester proves the logic, qa proves the thing works. Runs AFTER the critic fan-out, not inside it.",
+      "model": "quality/qwen3.6-35b-a3b-mtp",
+      "description": "Final acceptance gate. Runs the delivered system against its DONE-WHEN list black-box, with real dependencies, and pastes actual output per criterion. Distinct from tester: tester proves the logic, qa proves the thing works. Runs AFTER the critic fan-out, not inside it. On the QUALITY endpoint because it runs ALONE — the split is by concurrency, not difficulty, and qa is the one non-parallel role that was on throughput. Measured 2026-08-05: on gpt-oss-20b it spent 11 of 17 tool calls globbing and reading (which qa.md forbids) and never emitted its @@RESULT block at all, so the orchestrator improvised an extra tester dispatch that then hung the run.",
       "prompt": "{file:./.moderndegree/prompts/qa.md}",
       "permission": {
         "external_directory": "allow",

@@ -79,8 +79,25 @@ CRIT=$(sqlite3 "$DB" "select count(distinct agent) from session where parent_id=
 BATCH=$(sqlite3 "$DB" "select coalesce(max(n),0) from (select count(*) n from part where session_id='$SID' and json_extract(data,'\$.tool')='task' group by message_id);")
 QA=$(sqlite3 "$DB" "select count(*) from session where parent_id='$SID' and agent='qa';")
 BAD=$(sqlite3 "$DB" "select count(*) from part where session_id='$SID' and json_extract(data,'\$.type')='tool' and json_extract(data,'\$.tool') in ('bash','edit','write','patch');")
-echo "=== SCORE  distinct_critics=$CRIT/4  max_task_batch=$BATCH  qa=$QA  forbidden_tool_calls=$BAD  cortex_calls=$CORTEX  captures=$CAP"
-if [ "$CRIT" = 4 ] && [ "$QA" -ge 1 ] && [ "$BAD" = 0 ]; then VERDICT=PASS; else VERDICT=FAIL; fi
+# Tools still marked `running` after the run ended = something hung. Counted
+# BEFORE the verdict, because a hang has to be able to fail the run.
+STUCK=$(sqlite3 "$DB" "select count(*) from part p join session s on s.id=p.session_id where (s.id='$SID' or s.parent_id='$SID') and json_extract(p.data,'\$.state.status')='running';")
+
+echo "=== SCORE  distinct_critics=$CRIT/4  max_task_batch=$BATCH  qa=$QA  forbidden_tool_calls=$BAD  cortex_calls=$CORTEX  captures=$CAP  stuck_tools=$STUCK  exit=$RC"
+
+# The dispatch criteria alone are not enough. Measured 2026-08-05: run
+# `process1` dispatched all four critics, ran qa, called no forbidden tool — and
+# scored PASS despite being KILLED by the stall watchdog after 34 minutes with a
+# tester still holding a backgrounded server. A chain that delegates perfectly
+# and then hangs has not passed anything, so the exit code and the stuck-tool
+# count are part of the verdict now.
+if [ "$CRIT" = 4 ] && [ "$QA" -ge 1 ] && [ "$BAD" = 0 ] && [ "$RC" = 0 ] && [ "$STUCK" = 0 ]; then
+  VERDICT=PASS
+elif [ "$RC" != 0 ] || [ "$STUCK" != 0 ]; then
+  VERDICT=STALLED
+else
+  VERDICT=FAIL
+fi
 echo "=== VERDICT: $VERDICT"
 
 # Persist the score. The original version printed it to stdout only, so the run
@@ -88,10 +105,10 @@ echo "=== VERDICT: $VERDICT"
 # scrollback — the numbers could not be re-derived from the run dirs afterwards.
 # One TSV line per run, appended, so a tally is `sort | uniq -c` away.
 RESULTS="$HOME/agentprobe/results.tsv"
-[ -s "$RESULTS" ] || printf 'when\tlabel\tverdict\tcritics\tbatch\tqa\tforbidden\tcortex\tcaptures\telapsed_s\tsession\n' > "$RESULTS"
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+[ -s "$RESULTS" ] || printf 'when\tlabel\tverdict\tcritics\tbatch\tqa\tforbidden\tcortex\tcaptures\tstuck\texit\telapsed_s\tsession\n' > "$RESULTS"
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
   "$(date -Is)" "$LABEL" "$VERDICT" "$CRIT" "$BATCH" "$QA" "$BAD" "$CORTEX" "$CAP" \
-  "$(( $(date +%s) - START ))" "$SID" >> "$RESULTS"
+  "$STUCK" "$RC" "$(( $(date +%s) - START ))" "$SID" >> "$RESULTS"
 
 echo "--- tools left RUNNING (hang evidence)"
 sqlite3 "$DB" "select '  '||s.agent||' | '||json_extract(p.data,'\$.tool')||' | '||substr(replace(coalesce(json_extract(p.data,'\$.state.input.command'),json_extract(p.data,'\$.state.input.filePath'),''),char(10),' '),1,80) from part p join session s on s.id=p.session_id where (s.id='$SID' or s.parent_id='$SID') and json_extract(p.data,'\$.state.status')='running';" | grep . || echo "  none"

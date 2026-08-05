@@ -259,6 +259,23 @@
       {{ moderndegree_deployed.files | map(attribute='path')
          | map('regex_replace', '^.*/\.config/opencode/\.moderndegree/', '') | list }}
 
+# ─── Agent-chain measurement harness ─────────────────────────────────────────
+# These read opencode's sqlite db to check that the orchestrator still DELEGATES
+# rather than doing the work itself. They only run where opencode does, which is
+# why they land on ser5 and not on the workstation.
+#
+# Deployed rather than left to scp: the whole reason this harness exists is that
+# hand-placed state drifts from the repo silently. A copy on ser5 that no play
+# owns is the same bug it was written to catch.
+- name: Deploy agent-chain measurement scripts
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ user_home }}/.local/bin/{{ item | basename }}"
+    owner: "{{ username }}"
+    group: "{{ username }}"
+    mode: "0755"
+  loop: "{{ query('fileglob', playbook_dir ~ '/../../workstation/bin/*.sh') }}"
+
 # ─── Grok Build (xAI coding agent CLI) ───────────────────────────────────────
 # Official installer places the binary under ~/.grok/bin and may symlink into
 # ~/.local/bin. Auth is interactive (grok login) or XAI_API_KEY — not provisioned
