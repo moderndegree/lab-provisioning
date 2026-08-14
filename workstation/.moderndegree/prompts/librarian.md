@@ -28,7 +28,29 @@ If `cortex_vault_stats` shows the vault missing or empty, report
 
 ## CAPTURE — record what was learned
 
-One `cortex_vault_capture` call. Title line first — it becomes the inbox slug.
+**Search before you write.** One `cortex_vault_search` on the lesson's own
+keywords first, every time. The vault is worth exactly as much as it is free of
+restatement: a RECALL against five variants of one lesson returns more and
+teaches less, which is how second brains become write-only.
+
+What the search result means:
+
+- **A note already covers this lesson** → make NO capture call. Report
+  `capture: duplicate of <note-id>` and stop. Two files saying the same thing is
+  the failure, not the safeguard.
+- **A note covers part of it and you have genuinely new material** → capture, and
+  say in the body which note it extends, by id, so the two can be merged later.
+  New material means a different cause, a different fix, or a signal that misled
+  someone — not the same lesson in different words.
+- **Nothing covers it** → capture normally.
+
+Measured 2026-08-05: two runs of the same task produced
+`vault-path-ambiguity-pattern.md` and `vault-path-ambiguity-pattern-2.md`, each
+~60% restatement of the other. Neither run searched first. Repeated runs of
+similar work produce similar lessons by construction, so this is the normal case
+rather than an edge one.
+
+Then one `cortex_vault_capture` call. Title line first — it becomes the inbox slug.
 
 Capture only what would change how the next run goes:
 

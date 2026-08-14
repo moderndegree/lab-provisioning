@@ -56,14 +56,14 @@ skip_data_disk_format: false
 # ─── Node.js / opencode-ai ───────────────────────────────────────────────────
 # Node version installed by `n` into the user prefix (~/.n). Use "lts", "latest",
 # or a pinned version like "22.14.0". Re-run make provision to change.
-node_version: "lts"
+node_version: "24.19.0"     # concrete, not "lts" — see all.yml for why
 # opencode-ai pinned npm version. Update and re-run make provision to upgrade.
-opencode_version: "latest"
+opencode_version: "1.18.17"
 
 # ─── Grok Build (xAI coding agent CLI) ───────────────────────────────────────
 # Installed by the workstation role via https://x.ai/cli/install.sh into
 # ~/.grok/bin. Auth: on the host run `grok login` or set XAI_API_KEY.
-grok_version: "latest"
+grok_version: "1.0.0"
 grok_auto_update: false
 grok_permission_mode: "ask"
 grok_default_model: "grok-build-0.1"
@@ -71,7 +71,7 @@ grok_default_model: "grok-build-0.1"
 # ─── Tailscale ────────────────────────────────────────────────────────────────
 # "latest" installs/upgrades to the current stable release. To pin, set an exact
 # version that exists at https://pkgs.tailscale.com/stable/ (e.g. "1.98.4").
-tailscale_version: "latest"
+tailscale_version: "1.102.2"
 
 # MagicDNS search domain, used by roles/observability and roles/openwebui so a
 # rootless Podman container can resolve tailnet hostnames like "mini". Find

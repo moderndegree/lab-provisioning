@@ -19,6 +19,9 @@ import threading
 import time
 import urllib.request
 
+# Overridable so the same shape can be run against either endpoint — which is the
+# only way to A/B a model swap. Defaults stay on quality/:8090 for continuity with
+# the numbers already recorded in mini/AGENTS.md.
 BASE = "http://127.0.0.1:8090/v1"
 MODEL = "qwen3.6-35b-a3b-mtp"
 
@@ -35,13 +38,14 @@ JUDGE = (
 )
 
 
-def chat(prompt, max_tokens, sink):
+def chat(prompt, max_tokens, sink, base=None, model=None):
+    base = base or BASE
     body = json.dumps({
-        "model": MODEL,
+        "model": model or MODEL,
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": max_tokens, "temperature": 0.0, "stream": True,
     }).encode()
-    req = urllib.request.Request(f"{BASE}/chat/completions", data=body,
+    req = urllib.request.Request(f"{base}/chat/completions", data=body,
                                  headers={"Content-Type": "application/json"})
     t0 = time.perf_counter()
     ttft = None
@@ -77,10 +81,12 @@ def main():
     ap.add_argument("--rounds", type=int, default=2, help="qloop default 2")
     ap.add_argument("--max-tokens", type=int, default=1024,
                     help="qloop ModelSpec.output is 8192; 1024 keeps the run bounded")
+    ap.add_argument("--base", default=BASE, help="OpenAI-compatible base URL")
+    ap.add_argument("--model", default=MODEL, help="model id as the server reports it")
     args = ap.parse_args()
 
     print(f"=== qloop-shaped session: best_of_n n={args.n}, rounds={args.rounds}, "
-          f"worker=judge=qwen ===", flush=True)
+          f"model={args.model} @ {args.base} ===", flush=True)
     t_session = time.perf_counter()
     round_times = []
 
@@ -89,7 +95,8 @@ def main():
 
         cands = []
         threads = [threading.Thread(target=chat,
-                                    args=(f"[candidate {i}] {TASK}", args.max_tokens, cands))
+                                    args=(f"[candidate {i}] {TASK}", args.max_tokens, cands,
+                                          args.base, args.model))
                    for i in range(args.n)]
         t0 = time.perf_counter()
         for t in threads:
@@ -100,7 +107,7 @@ def main():
 
         judged = []
         t0 = time.perf_counter()
-        chat(JUDGE, args.max_tokens, judged)
+        chat(JUDGE, args.max_tokens, judged, args.base, args.model)
         t_judge = time.perf_counter() - t0
 
         rt = time.perf_counter() - t_r

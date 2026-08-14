@@ -16,9 +16,16 @@ hermes_home: "{{ data_mount }}/services/hermes"
 # Hermes points at mini's Ollama API over the tailnet (Tier L), NOT localhost.
 hermes_ollama_base_url: "http://mini:11434"
 
-# Version reference (installer always fetches latest; update when Hermes gains
-# a --version flag and pinning becomes possible).
-hermes_version: "0.19.0"
+# Version reference ONLY — this variable controls nothing. The NousResearch
+# installer always fetches latest, so a converge upgrades Hermes whether or not
+# this line changes. It is the one component here that cannot be pinned.
+#
+# Hermes does now report a version, and it uses DATE-based tags upstream:
+#   installed 2026-08-12: v0.19.0 (2026.7.20)   upstream latest: v2026.8.3
+# so the box is ~3 weeks behind and the next converge will move it. The
+# "+1 carried commit" in `hermes --version` is an upstream merge, not a local
+# patch — nothing to preserve across an upgrade (verified 2026-08-12).
+hermes_version: "2026.7.20"   # observed on ser5, NOT enforced
 
 # ─── OpenAI-compatible proxy (tailnet surface) ────────────────────────────────
 # `hermes proxy` exposes an OpenAI-compatible /v1 API (default 127.0.0.1:8645)

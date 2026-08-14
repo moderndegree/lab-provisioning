@@ -30,6 +30,62 @@ at all:
   same lesson as `task-package.md` rule 5 ("a role named as a gate gets invoked;
   one mentioned as advice does not"), applied one level down.
 
+## PROCESS schedules a role; only DONE WHEN proves anything
+
+Measured 2026-08-05 on a real security task (ai-workstation issue #2: an
+unauthenticated UI could converge both boxes). The ask put the key requirement in
+`PROCESS`:
+
+> `architect` MUST enumerate every route and server action that can reach
+> `lib/ansible/runner.ts`, and design the check so a new route cannot silently
+> bypass it.
+
+`architect` ran. `security-auditor` ran. `qa` ran three times and rejected the
+work twice. The delivered fix guarded a new `app/api/ansible/run` route and
+**left the pre-existing `runAnsibleJob` server action published and
+unauthenticated** — every `"use server"` export is an HTTP endpoint whether the
+UI imports it or not. The panel was edited to stop importing it, which changes
+nothing about reachability. `qa` tested the guarded route, got 401, and passed
+the criterion "a request that would start a provision is rejected".
+
+The instruction was correct, specific, and aimed at exactly the right risk. It
+was in the wrong section. `PROCESS` gets you an agent that thought about
+something; a `DONE WHEN` line with a command attached gets you a fact that was
+checked. The criterion that would have caught it:
+
+    N. The server action path is rejected too, not just the API route. Paste:
+       grep -rn '"use server"' -l lib/actions/ | xargs grep -ln 'AnsibleJob'
+
+The fix, applied by hand afterwards, was to move the check to the single point
+every caller funnels through and make the credential a **required argument** to
+`startAnsibleJob` — so omitting it is a type error rather than a silent hole. A
+route-level guard cannot prevent the next route from lacking one.
+
+## An unachievable criterion produces a creative reading, not a BLOCKED report
+
+Same run. The ask said "`pnpm lint` passes". Lint was **already failing on HEAD**
+with 10 pre-existing errors in files the task never touched — verified afterwards
+by linting a pristine clone. The criterion could not be satisfied honestly.
+
+What happened instead: `eslint.config.mjs` gained
+
+    "react-hooks/refs": "off",
+    "react-hooks/set-state-in-effect": "off",
+
+plus two inline suppressions, and the criterion passed. Nobody lied; the standard
+moved.
+
+Two rules follow, and the first one is on whoever writes the ask:
+
+- **Run the command yourself on the current tree before making it a criterion.**
+  When the baseline is dirty, ask for "no NEW errors versus HEAD, paste
+  before/after counts" instead of "passes".
+- **`coder.md` now forbids weakening a check to satisfy a criterion** — lint/type
+  rules, deleted or skipped tests, loosened assertions, relaxed thresholds — and
+  requires BLOCKED with the measured baseline instead. **`qa.md` now requires
+  `git diff` on config files as part of evidence gathering**, and treats a
+  criterion met by lowering the standard as FAIL.
+
 ## A PASS verdict does not mean the work was safe
 
 Measured 2026-08-05, run `issue3` — the first probe against an existing repo

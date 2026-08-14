@@ -78,8 +78,12 @@ acceptance test; these are the items that outlive it.
       Most likely to churn: the ROCm `unarchive` (guarded by `creates:`), the
       quadlet templates, and the legacy-unit retirement tasks — none of which
       have ever run.
-- [ ] **Open the Grafana dashboards after ser5 converges.** 11 -> 13 is two
-      majors; "the service is up" is not the test. Rollback is
+- [x] **Open the Grafana dashboards after ser5 converges.** Done 2026-08-05: the
+      11 -> 13 migration came through clean — `/api/health` returns
+      `{"database":"ok","version":"13.1.1"}` and the Prometheus datasource
+      survived intact (`http://prometheus:9090`, still default). Only the API was
+      verified, not the UI, and there are still zero dashboards (by design —
+      datasource only). Bumped to 13.1.3 on 2026-08-12. Rollback is
       `grafana_version: "11.4.0"`, one line, data lives in a volume.
 - [ ] **Drop the retirement tasks once both boxes are past them.** Two blocks
       exist purely to clean up state a converge cannot otherwise reach, and both
@@ -89,6 +93,37 @@ acceptance test; these are the items that outlive it.
 - [x] **Delete `docs/provisioning-checklist.md`** — done 2026-08-04. All boxes
       ticked and verified end-to-end; the one open decision (`/data/agentlab`) moved
       to Housekeeping below.
+
+## Version audit — done 2026-08-12, repeat quarterly
+
+Full stack audited against upstream. Current and needing nothing: Ubuntu 26.04 /
+kernel 7.0.0-29 (both boxes), ROCm 7.14.0 (newest gfx1151 TheRock tarball in
+existence — only 7.13.0 and 7.14.0 are published), llama.cpp b10380, Prometheus
+v3.13.2, podman 5.7.0, amdgpu_top 0.11.5, tailscale 1.102.2.
+
+Bumped: Grafana 13.1.1 -> 13.1.3, opencode -> 1.18.17, node -> 24.19.0.
+
+**The real finding was floating pins, not stale versions.** Six components used
+`"latest"` / `"lts"` / `:main`, so what was installed depended on when someone
+last converged and the repo recorded nothing. All are now concrete. Two of them
+had already produced real drift: opencode sat at 1.18.13 against a `"latest"`
+pin, and the llamacpp toolbox image was 158 llama.cpp builds behind.
+
+Worst of the six was `openwebui_image: ":main"` — a rolling DEV tag, with
+`openwebui_autoupdate: true` pulling it unattended, on a service published
+through Cloudflare.
+
+- [ ] **Re-run this audit quarterly** alongside the model bake-off below. The
+      commands are in the comment block at the top of the version-pin section in
+      `ser5/ansible/group_vars/all.yml`.
+- [ ] **Apply pending OS updates** — 57 packages on ser5, 15 on mini as of
+      2026-08-12, including `apparmor 5.0.0~beta1 -> 5.0.2`. Not applied here
+      because it wants a reboot window, and mini reboots mean reloading ~45 GB of
+      weights.
+- [ ] **Decide about Hermes.** It is the one component that CANNOT be pinned —
+      the NousResearch installer always fetches latest, so every converge is an
+      unreviewed upgrade. Installed 2026.7.20; upstream 2026.8.3. Compounds the
+      unresolved Tier-L/egress question below.
 
 ## Scale-mismatch check-in (recurring, not a one-time fix)
 

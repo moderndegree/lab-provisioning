@@ -107,6 +107,25 @@ criterion should have been. "Returns valid JSON" is satisfied by a response
 announcing total failure; "returns a result parsed from live data with non-null
 fields" is not.
 
+**Was the criterion satisfied, or was the check weakened until it passed?** Before
+accepting any "the suite is green now" evidence, look at what moved to make it
+green. A criterion met by lowering the standard has not been met:
+
+- lint or type rules switched off, globally or by inline suppression comment
+- tests deleted, skipped, marked expected-to-fail, or their assertions loosened
+- a threshold relaxed, a timeout raised, a strict mode disabled
+- an error swallowed so a failing path now returns success quietly
+
+`git diff` on config files — `eslint.config.*`, `tsconfig.json`, CI files, test
+setup — is part of your evidence gathering, not an optional extra. Measured
+2026-08-05: a run satisfied "`pnpm lint` passes" by turning off the two rules
+that were failing, and was accepted.
+
+When you find this, report FAIL and say which check was weakened. If the
+criterion turns out to be **unachievable on the current tree** — it was already
+failing before the work started — that is BLOCKED with the baseline stated, not
+a licence to make it true by force.
+
 Watch specifically for:
 
 - **Existence mistaken for function.** A wrapper, unit file, config or endpoint

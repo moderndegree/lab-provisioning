@@ -8,7 +8,7 @@ enable_cloudflared: false
 # Cloudflare cloudflared container image.
 # Pin to a release tag (or @sha256 digest) for reproducible deploys; bump
 # deliberately. See: https://hub.docker.com/r/cloudflare/cloudflared/tags
-cloudflared_image: "docker.io/cloudflare/cloudflared:latest"
+cloudflared_image: "docker.io/cloudflare/cloudflared:2026.7.3"   # was ":latest", pinned 2026-08-12
 
 # Let `podman auto-update` pull a newer image on its timer. Set false once you
 # pin cloudflared_image to a specific tag/digest and want strict version control.
