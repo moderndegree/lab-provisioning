@@ -210,14 +210,46 @@ the workstation opencode config.
 
 | Unit | Port | Model | Shape | Slots | Ctx/slot | MTP | Measured |
 |---|---|---|---|---|---|---|---|
-| `llama-quality` | 8090 | `qwen3.6-35b-a3b-mtp-q4_K_M` | 35B-A3B MoE (3B active), 22 GB | 2 | **262144** | on | 86-95 tok/s c=1; 91 agg c=2 |
-| `llama-throughput` | 8091 | `gpt-oss-20b-MXFP4` | 20B MoE, 12 GB | 8 | 131072 | off | 76 tok/s c=1; 202 agg c=8 |
+| `llama-quality` | 8090 | `qwen3.6-35b-a3b-mtp-q4_K_M` | 35B-A3B MoE (3B active), 22 GB | 4 | **262144** | n-max 3 | 106 tok/s c=1; 109 agg c=4 |
+| `llama-deep` | 8091 | `qwen3.8-27b-q4_K_M` | 27B DENSE hybrid, 19 GB (+3.2 GB MTP head) | 1 | **262144** | n-max 5 | ~25 tok/s sustained |
+
+`llama-quality` is the driver — every agent role runs there except `deep`.
+`llama-deep` is called deliberately, never in a loop; it is ~4x slower.
+`llama-throughput` (nemotron) was retired 2026-08-14 as dominated — quality-with-MTP
+beat it on aggregate (106.4 vs 92.1) *and* single-stream (90.8 vs 70.8).
 
 This is a bandwidth box, not a compute box: Strix Halo has ~215 GB/s theoretical
 memory bandwidth, and decode speed tracks the **active parameters read per token**.
-The quality anchor hits 86-95 tok/s at ~185 GB/s effective bandwidth; the old
-dense `qwen3.6:27b-mtp-q4_K_M` reads 17 GB/token and only manages ~11-15 tok/s.
-MoE wins enormously here; a dense model is a mistake.
+The quality anchor hits 106 tok/s at ~185 GB/s effective bandwidth; a dense 27B
+reads ~18 GB/token and decodes at **11.4 tok/s raw** — measured on Qwen3.8-27B
+2026-08-14, matching the old dense `qwen3.6:27b-mtp-q4_K_M` at ~11-15 tok/s.
+
+MoE wins enormously here, and dense is still the wrong DEFAULT. The deep endpoint
+is the deliberate exception: MTP at n-max 5 recovers **2.79x** (11.4 -> 31.8 tok/s
+short-prompt), which is the only reason a dense model is serviceable on this box.
+That multiplier is not free — it is why `mtp_draft_max` must be measured per model
+rather than copied, and why deleting the separate MTP head gguf silently drops the
+endpoint back to 11 tok/s.
+
+Re-confirmed 2026-08-12 against **Muse Glimmer 30B** (Meta Superintelligence Lab,
+dense 29.6B + 1.8B vision encoder, purpose-built for local agentic work). It is a
+genuinely strong model — Meta's card beats Qwen3.6-27B on MCP Atlas, DeepSearch
+QA, SWE-Bench Pro and AIME 2026 — and it is still the wrong shape for this box:
+
+| solo decode | qwen3.6-35b-a3b (MoE, MTP) | Muse Glimmer (dense) |
+|---|---|---|
+| tok/s | **91.3** | 12.6 |
+| + its own speculative drafter | — | 27 (DFlash, 2.1x) |
+| aggregate @ n=2 | **106.5** | 24.2 |
+
+Predicted 8-12 tok/s before measuring, from bandwidth math and from scaling
+Meta's own published RTX-5090 / M4-Max / M5-Max figures; measured 12.6. The
+prediction method works, so trust it when triaging a candidate — a dense model
+here is arithmetic, not opinion. Even with Meta's DFlash drafter working well
+(~50-60% acceptance, a real 2.1x) it lands 3.4x behind the MoE anchor.
+
+Note `--spec-draft-n-max` default 3 is optimal: raising it to 8 halved acceptance
+(50% -> 24%) and cut throughput to 14 tok/s. Longer drafts are not better drafts.
 
 **Context is per SLOT and partitioned statically at startup** (`-c` total divided
 by `-np` slots), so a single chat can never exceed its slot's window no matter how
@@ -253,8 +285,8 @@ Podman quadlets, one per entry in `llamacpp_instances`, generated into
 
 | Instance | Port | Model | Sizing |
 |----------|------|-------|--------|
-| `llama-quality` | 8090 | `qwen3.6-35b-a3b-mtp` (q4_K_M) | 262144/slot x 2, MTP on |
-| `llama-throughput` | 8091 | `gpt-oss-20b` (MXFP4) | 131072/slot x 8, MTP off |
+| `llama-quality` | 8090 | `qwen3.6-35b-a3b-mtp` (q4_K_M) | 262144/slot x 4, MTP n-max 3 |
+| `llama-deep` | 8091 | `qwen3.8-27b` (q4_K_M) | 262144/slot x 1, MTP n-max 5, f16 KV, separate `-md` head |
 
 ```bash
 systemctl --user start|stop|status llama-servers.target   # all instances

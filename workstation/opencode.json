@@ -9,7 +9,7 @@
       },
       "models": {
         "qwen3.6-35b-a3b-mtp": {
-          "name": "Qwen3.6 35B-A3B MTP (quality — 262144 ctx, 2 slots, MTP +21% solo)",
+          "name": "Qwen3.6 35B-A3B MTP (driver — 262144 ctx, 4 slots, 106 t/s solo)",
           "limit": {
             "context": 262144,
             "output": 8192
@@ -17,17 +17,17 @@
         }
       }
     },
-    "throughput": {
+    "deep": {
       "npm": "@ai-sdk/openai-compatible",
       "options": {
         "baseURL": "http://mini:8091/v1",
         "apiKey": "llamacpp"
       },
       "models": {
-        "gpt-oss-20b": {
-          "name": "gpt-oss 20B (throughput — 33 t/s x4 parallel, 114 agg)",
+        "qwen3.8-27b": {
+          "name": "Qwen3.8 27B (deep — 262144 ctx, 1 slot, ~25 t/s, reasoning_effort=medium server-side)",
           "limit": {
-            "context": 131072,
+            "context": 262144,
             "output": 8192
           }
         }
@@ -37,7 +37,7 @@
     "xai": {}
   },
   "model": "quality/qwen3.6-35b-a3b-mtp",
-  "small_model": "throughput/gpt-oss-20b",
+  "small_model": "quality/qwen3.6-35b-a3b-mtp",
   "compaction": {
     "auto": true,
     "prune": true,
@@ -99,8 +99,8 @@
     },
     "architect": {
       "mode": "subagent",
-      "model": "quality/qwen3.6-35b-a3b-mtp",
-      "description": "Designs structure and interfaces from provided context. Reasoning only.",
+      "model": "deep/qwen3.8-27b",
+      "description": "Designs structure and interfaces from provided context. Reasoning only. On the DEEP endpoint (:8091) deliberately — architecture errors are the most expensive to find late, and this agent runs ONCE per task, so its ~4x latency (59s -> 247s on a measured design task) is paid once rather than in a loop. Measured 2026-08-14 head-to-head on the same brief: 3.8 specified FOR UPDATE SKIP LOCKED as the work-queue primitive while 3.6 specified a polling worker pool with no concurrency control (a double-delivery bug), and quantified its trade-offs where 3.6 argued them generically. Shares :8091's SINGLE slot with `deep`, so a concurrent architect+deep dispatch queues.",
       "permission": {
         "*": "deny",
         "read": "allow",
@@ -131,8 +131,8 @@
     },
     "reviewer": {
       "mode": "subagent",
-      "model": "throughput/gpt-oss-20b",
-      "description": "Critiques diffs handed to it. Reasoning only. FAN-OUT agent — runs on :8091 so it can go in parallel with the other critics.",
+      "model": "quality/qwen3.6-35b-a3b-mtp",
+      "description": "Critiques diffs handed to it. Reasoning only. FAN-OUT agent — dispatched in parallel with the other critics. Since 2026-08-14 the critics share :8090 with the orchestrator (4 slots), so a 4-wide fan-out fully occupies the endpoint and the orchestrator queues behind it.",
       "permission": {
         "*": "deny",
         "read": "allow",
@@ -144,7 +144,7 @@
     },
     "security-auditor": {
       "mode": "subagent",
-      "model": "throughput/gpt-oss-20b",
+      "model": "quality/qwen3.6-35b-a3b-mtp",
       "description": "Audits provided diffs for security issues. Reasoning only. FAN-OUT agent.",
       "permission": {
         "*": "deny",
@@ -157,7 +157,7 @@
     },
     "tester": {
       "mode": "subagent",
-      "model": "throughput/gpt-oss-20b",
+      "model": "quality/qwen3.6-35b-a3b-mtp",
       "description": "Writes and runs tests, reads results. FAN-OUT agent.",
       "prompt": "{file:./.moderndegree/prompts/tester.md}",
       "permission": {
@@ -166,7 +166,7 @@
     },
     "doc-writer": {
       "mode": "subagent",
-      "model": "throughput/gpt-oss-20b",
+      "model": "quality/qwen3.6-35b-a3b-mtp",
       "description": "Writes docs from provided material. Reasoning only. FAN-OUT agent.",
       "permission": {
         "*": "deny",
@@ -180,7 +180,7 @@
     "qa": {
       "mode": "subagent",
       "model": "quality/qwen3.6-35b-a3b-mtp",
-      "description": "Final acceptance gate. Runs the delivered system against its DONE-WHEN list black-box, with real dependencies, and pastes actual output per criterion. Distinct from tester: tester proves the logic, qa proves the thing works. Runs AFTER the critic fan-out, not inside it. On the QUALITY endpoint because it runs ALONE — the split is by concurrency, not difficulty, and qa is the one non-parallel role that was on throughput. Measured 2026-08-05: on gpt-oss-20b it spent 11 of 17 tool calls globbing and reading (which qa.md forbids) and never emitted its @@RESULT block at all, so the orchestrator improvised an extra tester dispatch that then hung the run.",
+      "description": "Final acceptance gate. Runs the delivered system against its DONE-WHEN list black-box, with real dependencies, and pastes actual output per criterion. Distinct from tester: tester proves the logic, qa proves the thing works. Runs AFTER the critic fan-out, not inside it. Runs ALONE, after the fan-out has drained. There is no longer a second endpoint to split across: the throughput endpoint was retired 2026-08-14 because :8090 with MTP beat it on BOTH aggregate and single-stream. Measured 2026-08-05: on gpt-oss-20b it spent 11 of 17 tool calls globbing and reading (which qa.md forbids) and never emitted its @@RESULT block at all, so the orchestrator improvised an extra tester dispatch that then hung the run.",
       "prompt": "{file:./.moderndegree/prompts/qa.md}",
       "permission": {
         "external_directory": "allow",
@@ -191,7 +191,7 @@
     },
     "librarian": {
       "mode": "subagent",
-      "model": "throughput/gpt-oss-20b",
+      "model": "quality/qwen3.6-35b-a3b-mtp",
       "description": "Second brain. RECALL: searches the cortex vault for prior lessons before work starts. CAPTURE: records a lesson after a run with a real miss. The ONLY agent with vault tools — the orchestrator is denied them, because measured 2026-08-05 a prose \"cortex pass\" never fired once while a dispatch does.",
       "permission": {
         "*": "deny",
@@ -211,8 +211,8 @@
     },
     "deep": {
       "mode": "subagent",
-      "model": "quality/qwen3.6-35b-a3b-mtp",
-      "description": "Hard-reasoning escalation on the QUALITY endpoint with thinking left ON. Replaces the old `heavy` agent, which pointed at gpt-oss:120b via Ollama and no longer resolves. Costs a quality slot — do not call in a loop.",
+      "model": "deep/qwen3.8-27b",
+      "description": "Hard-reasoning escalation on its OWN endpoint (:8091, Qwen3.8-27B) with thinking left ON. This is the only agent that leaves :8090. It is ~4x SLOWER than every other agent (~25 t/s vs ~106) because it is a dense 27B, not a 3B-active MoE — a call that takes 40s elsewhere takes ~150s here. Dispatch it for problems that are genuinely hard, never in a loop and never for volume. Server pins reasoning_effort=medium; the model's own default (xhigh) returns an EMPTY answer after 400s.",
       "permission": {
         "*": "deny",
         "read": "allow",

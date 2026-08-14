@@ -21,16 +21,50 @@ symlink into, your development machine.
 
 ## The split that drives everything
 
-Two `llama-server` endpoints on mini, and the agents are split across them by
-CONCURRENCY rather than by difficulty. Roles live in the agent prompts rather
-than baked model variants.
+Two `llama-server` endpoints on mini. **As of 2026-08-14 the split is by
+DIFFICULTY, not by concurrency** — that inverts the previous design, and the
+reason is measurement, not taste. Roles live in the agent prompts rather than
+baked model variants.
 
 - **`quality` — `http://mini:8090/v1`** — `qwen3.6-35b-a3b-mtp` (MoE 35B-A3B,
-  3B active), **2 slots**, MTP on, 88 t/s solo. Critical-path work that runs
-  largely alone: `build`, `planner`, `architect`, `coder`, `devops`, `deep`.
-- **`throughput` — `http://mini:8091/v1`** — `gpt-oss-20b` (MoE 20B), 8 slots,
-  33 t/s per stream at 4-way (114 aggregate). The parallel fan-out:
-  `reviewer`, `security-auditor`, `tester`, `doc-writer`.
+  3B active), **4 slots**, MTP n-max 3, **262144 ctx per slot**, 106 t/s solo /
+  109 aggregate at 4-way. THE DRIVER: every agent except `deep` — `build`,
+  `planner`, `coder`, `devops`, `qa`, and the whole critic fan-out
+  (`reviewer`, `security-auditor`, `tester`, `doc-writer`, `librarian`).
+- **`deep` — `http://mini:8091/v1`** — `qwen3.8-27b` (DENSE 27B hybrid),
+  **1 slot**, **262144 ctx**, ~25 t/s. Two agents: `deep` and `architect`.
+  They share the single slot, so a concurrent dispatch of both queues.
+
+  **`architect` was promoted here 2026-08-14 on measured evidence**, not on the
+  published benchmarks (which compare 3.8 to the DENSE Qwen3.6-27B, not to the
+  35B-A3B we run). Head-to-head on one design brief: 3.8 specified
+  `FOR UPDATE SKIP LOCKED` as its work-queue primitive; 3.6 specified a polling
+  worker pool with no concurrency control — a double-delivery bug in an
+  at-least-once system. 3.8 also quantified its trade-offs (throughput ceiling,
+  migration path, when it would choose differently) where 3.6 argued generically.
+  Cost: 59s -> 247s for that call. Paid ONCE per task, not per loop, which is why
+  architecture is the right role to spend it on and `coder` is not.
+
+  Caveat: that is ONE task under greedy decoding. It is evidence, not proof.
+  Reverting is a one-line model change in `opencode.json`. The `deep` agent alone. ~4x slower
+  than everything else; dispatch it for genuinely hard problems, never in a loop.
+
+**Why the concurrency split was abandoned.** It existed to keep the critic
+fan-out off the interactive endpoint. Measured 2026-08-14 at n=4, back-to-back:
+`qwen3.6` with MTP did 106.4 aggregate / 90.8 solo, while the throughput model
+(`nemotron-3.5-lightning`) did 92.1 / 70.8 at the same ctx/slot. The dedicated
+throughput endpoint was **losing on both axes**, so it was retired rather than
+resized, and the critics moved onto the driver's 4 slots.
+
+The cost is real and accepted: a dedicated `gpt-oss-20b` endpoint still measures
+140.8 aggregate against 109.4 for this design — **~22% slower fan-out** — in
+exchange for critics that reason on 35B-A3B instead of a 20B, one fewer endpoint,
+and ~40 GiB of headroom. `gpt-oss-20b` stays staged on mini, so restoring a third
+endpoint is a config edit, not a download.
+
+Consequence to know: a 4-wide fan-out now fully occupies `:8090` and the
+orchestrator queues behind it. MTP's aggregate cost is structural — raising
+`parallel` does not buy it back (np 2 → 8 moved n=4 by 3 tok/s).
 
 Why this split: `:8090` peaks at 2 concurrent streams and is SLOWER at 4, while
 MTP is worth +21% at one stream but -18% at two. `:8091` peaks at 4 and is
@@ -112,6 +146,28 @@ Four rules, each learned by watching it go wrong:
   data" cannot.
 - **Say "was run", not "exists".** A wrapper script that exists satisfies
   "a wrapper exists" and still crashes on import.
+- **`PROCESS` schedules a role; only `DONE WHEN` proves anything.** If it matters
+  that something is true at the end, it is a criterion — putting it in `PROCESS`
+  gets you an agent that thought about it, not a fact that was checked.
+
+  Measured 2026-08-05. An ask said *"`architect` MUST enumerate every route and
+  server action that can reach the runner, and design the check so a new route
+  cannot silently bypass it."* `architect` ran, `security-auditor` ran, and the
+  delivered fix guarded a new API route while leaving the pre-existing server
+  action published and unauthenticated — a complete bypass. `qa` passed the work
+  having tested only the guarded route. The requirement needed to be a criterion
+  with a command attached, not a design instruction.
+
+- **Check every criterion is achievable on the CURRENT tree before you ask for
+  it.** An impossible criterion does not produce a BLOCKED report; it produces a
+  creative reading of the criterion.
+
+  Same run: the ask said "`pnpm lint` passes". Lint was already failing on
+  `HEAD` with 10 pre-existing errors in untouched files. The team satisfied the
+  criterion by switching the offending rules off project-wide. Ask for "no NEW
+  lint errors versus HEAD, paste the before/after counts" when the baseline is
+  dirty — and run the command yourself first if you do not know.
+
 - **A criterion that asserts a NON-event must name its verification command.**
   "Wrote no file outside the project", "left no process running", "made no
   network call" — state the check, do not leave the instrument to the agent.

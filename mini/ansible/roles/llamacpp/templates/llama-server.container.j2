@@ -58,8 +58,26 @@ Exec=-m {{ item.model }} \
 {% if item.cache_reuse | default(llamacpp_cache_reuse) %}
      --cache-reuse {{ item.cache_reuse | default(llamacpp_cache_reuse) }} \
 {% endif %}
+{% if item.cache_type_k | default('') %}
+     --cache-type-k {{ item.cache_type_k }} \
+{% endif %}
+{% if item.cache_type_v | default('') %}
+     --cache-type-v {{ item.cache_type_v }} \
+{% endif %}
 {% if item.mtp | default(false) | bool %}
+{#   The MTP head lives INSIDE the model GGUF for some models (qwen3.6-35b-a3b-mtp)
+     and as a SEPARATE file for others (ggml-org's Qwen3.8 conversions ship
+     mtp-*.gguf alongside). Bare --spec-type only works for the former: with a
+     separate head and no -md, llama.cpp logs "unused tensor ... -- ignoring" and
+     runs at raw speed while LOOKING like MTP is on. Set draft_model when the
+     head is a separate file. #}
+{% if item.draft_model | default('') %}
+     -md {{ item.draft_model }} \
+{% endif %}
      --spec-type draft-mtp --spec-draft-n-max {{ item.mtp_draft_max | default(1) }} \
+{% endif %}
+{% if item.chat_template_kwargs | default('') %}
+     --chat-template-kwargs '{{ item.chat_template_kwargs | to_json if item.chat_template_kwargs is mapping else item.chat_template_kwargs }}' \
 {% endif %}
 {% if item.extra_args | default('') %}
      {{ item.extra_args }} \

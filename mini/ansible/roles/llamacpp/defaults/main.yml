@@ -26,14 +26,30 @@ enable_llamacpp: false
 # ─────────────────────────────────────────────────────────────────────────────
 # Defaults shared by every instance (override per-instance where it matters)
 # ─────────────────────────────────────────────────────────────────────────────
-# The container image every instance runs. This is the same image roles/toolboxes
-# uses for the interactive llama-vulkan-radv shell, and it is the ONLY special
-# ingredient here: Fedora 43 carrying a gfx1151-patched Mesa/RADV userspace and a
-# llama.cpp built against it. It is an ordinary OCI image (empty entrypoint,
-# Cmd=/bin/bash) — distrobox was never required to run it, only to make an
-# interactive shell pleasant. Override per instance with `image:` to A/B a
-# different backend (e.g. the rocm-7.2.4 tag) without touching the others.
-llamacpp_image: "docker.io/kyuz0/amd-strix-halo-toolboxes:vulkan-radv"
+# The container image every instance runs. It is the ONLY special ingredient
+# here: Fedora 43 carrying a gfx1151-patched Mesa/RADV userspace and a llama.cpp
+# built against it. An ordinary OCI image (empty entrypoint, Cmd=/bin/bash) —
+# distrobox was never required to run it, only to make an interactive shell
+# pleasant, which is why roles/toolboxes could be folded in here and deleted.
+# Override per instance with `image:` to A/B a different backend (e.g. the
+# rocm-7.2.4 tag) without touching the others.
+#
+# PINNED TO A TIMESTAMPED TAG, DELIBERATELY. Upstream rebuilds the moving
+# `vulkan-radv` tag several times a DAY, so that tag makes the llama.cpp version
+# an accident of when someone last pulled — with nothing in the repo recording
+# which build is live. Found 2026-08-11: the box had been sitting on b10222 while
+# upstream was at b10380, and the gap was invisible until a model needed a newer
+# build. The llama.cpp version is a real dependency; declare it like one.
+#
+# To upgrade: pick a newer tag from
+#   https://hub.docker.com/v2/repositories/kyuz0/amd-strix-halo-toolboxes/tags
+# bump the line below, converge, and confirm with
+#   podman run --rm <tag> /usr/bin/llama-server --version
+#
+# vulkan-radv_20260811T205316 == llama.cpp b10380 (0b1bad14f). Chosen because
+# Nemotron-3.5 needs it: base nemotron_h support is old, but MTP (#26725,
+# 2026-08-10) and DFlash (#26905, 2026-08-11) are days old and absent from b10222.
+llamacpp_image: "docker.io/kyuz0/amd-strix-halo-toolboxes:vulkan-radv_20260811T205316"
 
 # Group handle: `systemctl --user {start,stop,status} llama-servers.target`.
 llamacpp_target: "llama-servers.target"
@@ -46,6 +62,40 @@ llamacpp_images: >-
 # Where GGUFs live, bind-mounted read-only into every instance. Deliberately NOT
 # hardlinks into /data/ollama/blobs: that would hide the dependency and pin a
 # blob alive after an `ollama rm`.
+#
+# NOTHING PRUNES THIS DIRECTORY. Ansible never deletes from it, so every model
+# ever downloaded stays until someone removes it by hand. Audit with
+# `du -sh /data/models/*.gguf` after any model evaluation.
+#
+# Contents as of 2026-08-14, and why each is there:
+#   qwen3.6-35b-a3b-mtp-q4_K_M   21 GB  LIVE  :8090 quality (the driver)
+#   qwen3.8-27b-q4_K_M           19 GB  LIVE  :8091 deep
+#   qwen3.8-27b-mtp-q8_0        3.2 GB  LIVE  its MTP head — a SEPARATE file,
+#                                       passed with -md. Deleting this does not
+#                                       break startup, it silently drops :8091
+#                                       from ~32 to ~11 tok/s.
+#   qwen3.8-27b-mmproj-q8_0     0.6 GB  vision projector. NOT wired up; staged
+#                                       because the model is natively
+#                                       multimodal and it is cheap to keep.
+#   gpt-oss-20b-MXFP4            12 GB  KEPT ON PURPOSE — rollback, and still
+#                                       the FASTEST aggregate measured on this
+#                                       box (140.8 tok/s at n=4 on 2026-08-14,
+#                                       vs 109.4 for the current single-endpoint
+#                                       design). If fan-out throughput ever
+#                                       becomes the bottleneck, restoring a
+#                                       third endpoint is a config edit and the
+#                                       weights are already here. Do not "tidy"
+#                                       this away.
+#   nemotron-3.5-lightning...    24 GB  RETIRED 2026-08-14, kept pending the
+#                                       unexplained 119.1 -> 92.1 regression
+#                                       noted in the backend ledger below.
+#                                       Delete once that is closed out.
+#
+# Deleted 2026-08-12 after evaluation, all re-downloadable, none worth the disk:
+#   muse-glimmer-30b-q4_K_M      17 GB  dense; 12.6 tok/s here vs qwen's 91.3
+#   muse-dflash-draft           1.6 GB  its drafter (worked — 2.1x — still 3.4x
+#                                       behind the MoE anchor)
+#   nemotron...-nvfp4            21 GB  no gfx1151 NVFP4 kernel; -38% vs q4_K_M
 llamacpp_models_dir: "{{ data_mount }}/models"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -166,6 +216,16 @@ llamacpp_health_start_period: "600s"
 # run side by side at ~70 GiB combined with no trouble. What wedges is one
 # process asking for too much at once.
 #
+# THE CEILING IS KV BYTES, NOT CELLS — and the table above is all qwen3.6, at
+# 20 KB/token. Read it that way or it will mislead you: nemotron ran ctx
+# 2097152 / np 8 here for days without wedging, because at ~6 KB/token that is
+# only ~12 GiB of KV, against ~40 GiB for the same cell count on qwen3.6.
+# Convert before comparing. Per-token KV = full_attention_layers x kv_heads x
+# head_dim x 2 x bytes_per_element; qwen3.6 = 10 x 2 x 256 x 2 x 2 = 20 KB,
+# qwen3.8-27b = 16 x 4 x 256 x 2 x 2 = 64 KB, and cache_type q8_0 roughly halves
+# whichever you get. The current `quality` instance sits at 1048576 cells x
+# 20 KB = ~20 GiB, the largest total measured safe.
+#
 # The failure is driven by TOTAL KV, not per-slot size — 262144/slot is fine at
 # 524288 total and wedges at 2097152. And it does not fail cleanly: the process
 # sticks in uninterruptible sleep (state Ds, wchan drm_suballoc_new), immune to
@@ -178,22 +238,77 @@ llamacpp_health_start_period: "600s"
 llamacpp_ctx_warn: 1048576
 
 # ─────────────────────────────────────────────────────────────────────────────
+# THE OTHER CEILING — HOST RAM, AND IT KILLS THE WRONG PROCESS
+# ─────────────────────────────────────────────────────────────────────────────
+# Distinct from the DRM/GPU wedge above. GTT is backed by host RAM, so total
+# residency across ALL instances is bounded by the 122 GiB the box has, and the
+# practical ceiling is ~95 GB — not 122, because the kernel needs slack.
+#
+# Hit 2026-08-14 while benchmarking Qwen3.8 alongside both live servers
+# (32.6 + ~35 + 38 GiB ~= 105 GB). The KERNEL OOM KILLER fired and killed
+# llama-quality — a LIVE SERVICE — with status=137 / global_oom. It did NOT kill
+# the process that asked for the memory. Restart=on-failure recovered it in
+# ~50s, so this self-heals, but every in-flight request was lost.
+#
+# Two rules follow:
+#   1. Before benchmarking a large model by hand, STOP one of the live
+#      llama-servers. Do not assume a failed allocation only harms the newcomer.
+#   2. Keep the sum of configured instances under ~95 GB. The current pair was
+#      REHEARSED together 2026-08-14 before committing: quality alone 43.6 GB,
+#      both up 83.3 GB, host 85/122 GiB. That leaves ~12 GB — enough to survive,
+#      NOT enough to bench a third model beside them. Stop one first.
+#
+# BUDGET THE DRAFT MODEL'S KV TOO — it is easy to miss and it is not small. Each
+# MTP instance allocates a SECOND kv_cache for the draft head on top of the main
+# one: quality 20,480 MiB main + 2,048 MiB draft, deep 16,384 + 1,024. That is
+# ~3 GB across the pair that a weights+KV calculation does not predict. The
+# `-lv 4` load prints both lines; read both.
+#
+# Measure residency with the llama.cpp load lines (`llama_kv_cache: size = ...`
+# plus the model buffer sizes), NOT with mem_info_gtt_used — GTT tracks TOUCHED
+# pages and drifts (the same two servers read 68.3 GB warm and 54.6 GB idle).
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Instances
 # ─────────────────────────────────────────────────────────────────────────────
 # Each entry: name (unit suffix), model, alias (the id clients address — keep it
 # stable, renaming breaks whatever referenced the old one), port, ctx, parallel,
-# and optionally mtp / mtp_draft_max / toolbox / host / base_args / extra_args.
+# and optionally mtp / mtp_draft_max / draft_model / cache_type_k / cache_type_v
+# / chat_template_kwargs / toolbox / host / base_args / extra_args.
+#
+#   draft_model           path to a SEPARATE MTP head gguf. Only needed when the
+#                         head is not embedded in the model file — see `deep`.
+#   cache_type_k/v        KV quantisation, e.g. q8_0. Halves KV bytes.
+#   chat_template_kwargs  mapping, rendered to JSON and single-quoted into
+#                         Exec=. Verified 2026-08-14 that quadlet passes
+#                         '{"reasoning_effort":"medium"}' through as ONE argv
+#                         element — unlike HealthCmd=, which splits on quotes.
 #
 # Two instances must not share a model file: ExecStopPost matches on the model
 # path to reap the in-container process, so a shared path would kill both.
 #
-# MTP IS A PER-WORKLOAD TRADE, NOT A FREE WIN. Measured single-stream /
-# aggregate@8:  off 75.1/168.6, n=1 86.7/120.7, n=3 82.5/119.4. It buys ~15%
-# interactive latency and costs ~29% batched throughput. Acceptance is fine
-# (50-58%, mean 2.5 of 3 drafted accepted) — the ceiling is structural, not a
-# tuning failure: verifying n+1 tokens routes to up to 8*(n+1) experts instead of
-# 8, so a longer draft costs most of what it saves. Hence n=1 beating n=3.
-# Enable it on interactive instances, leave it off on throughput instances.
+# MTP IS A PER-WORKLOAD TRADE, NOT A FREE WIN. It buys single-stream latency and
+# costs aggregate throughput. On qwen3.6-35b-a3b at n=4 (2026-08-14): MTP on
+# 106.4 agg / 90.8 solo, MTP off 134.1 agg / 73.9 solo. Since agent loops are
+# mostly single-stream, on is right for THIS box's driver endpoint.
+#
+# THE COST IS STRUCTURAL, NOT QUEUING. Raising `parallel` does not buy the
+# aggregate back — at n-max 3, np 8: n=2 112.2, n=4 109.4, n=8 125.5. Going
+# np 2 -> 8 moved n=4 by 3 tok/s. Verifying n+1 tokens routes to up to 8*(n+1)
+# experts instead of 8, so a longer draft costs much of what it saves.
+#
+# DRAFT DEPTH IS PER-MODEL AND MUST BE MEASURED — the old default of 1 was
+# wrong for both models now configured:
+#   qwen3.6-35b-a3b  n=1 93.2 | n=2 103.5 | n=3 106.4 <- peak | n=5 102.0
+#   qwen3.8-27b      n=1 18.9 | n=3 28.2  | n=5 31.8  <- peak | n=8 collapses
+# An earlier note here recorded "n=1 beating n=3" (86.7 vs 82.5) for qwen3.6.
+# That predates b10380 and no longer reproduces; the MTP path has improved.
+# Re-measure on any llama.cpp bump rather than trusting either figure.
+#
+# Confirm MTP is actually live before believing a number: grep the journal for
+# "MTP draft context". Without the flag — or with a SEPARATE head gguf and no
+# -md — the loader silently logs "unused tensor ...nextn.* -- ignoring" and
+# serves at raw speed while the config still reads mtp: true.
 #
 # Confirm MTP is live by grepping the journal for "MTP draft context"; without
 # the flag the loader silently logs "unused tensor blk.40.nextn.* -- ignoring".
@@ -220,68 +335,181 @@ llamacpp_instances:
   # instance: append an entry with a free port — it joins llama-servers.target
   # automatically. To A/B a backend: set `image:` on one instance only.
 
-  # Interactive / quality. Full context per request, MTP on for latency.
+  # THE DRIVER. Serves every agent role except `deep` — orchestrator, planner,
+  # architect, coder, devops, qa AND the critic fan-out that used to live on a
+  # second endpoint. MTP on, because agent loops are mostly SINGLE-STREAM and
+  # that is exactly what MTP buys.
   #
-  # parallel 4 was measured against a 3-4 candidate fan-out (the quality-loop
-  # that drove this box, removed 2026-08). At parallel 2 the third candidate
-  # queued behind the first two; on an n=3 rounds=2 session:
-  #   parallel 2 -> 71.1s session, generate 30.6s, 100.5 tok/s aggregate
-  #   parallel 4 -> 58.6s session, generate 24.5s, 125.6 tok/s aggregate  (-18%)
+  # WHY ONE ENDPOINT NOW (measured 2026-08-14, fanoutsim -n 4, all back-to-back
+  # on b10380 so they are directly comparable — aggregate / per-stream / solo):
   #
-  # CAVEAT: nothing currently dispatches that fan-out. 4 remains a sane default
-  # for interactive chat plus a small parallel dispatch, but it is sized to a
-  # workload that no longer exists — re-measure with
-  # packages/inference-bench/fanoutsim.py against whatever replaces it.
+  #   gpt-oss-20b MXFP4          140.8 / 37.2 / 76.6    session  64.5s
+  #   qwen3.6-35b-a3b NO MTP     134.1 / 35.6 / 73.9    session  76.5s
+  #   qwen3.6-35b-a3b MTP n=1    106.4 / 54.5 / 90.8    session  88.7s
+  #   nemotron-3.5-lightning      92.1 / 23.5 / 70.8    session 104.2s
   #
-  # 524288/2 = 262144 per slot — the model's FULL native window
-  # (qwen35moe.context_length = 262144 in the GGUF). At parallel: 4 this served
-  # 131072, i.e. half the model, for slots that measured actively harmful.
+  # Nemotron was DOMINATED — this model with MTP beat it on aggregate (106.4 vs
+  # 92.1) AND single-stream (90.8 vs 70.8) at the same 262144/slot. It was
+  # retired rather than resized. gpt-oss stays on disk as the rollback.
   #
-  # Total KV is unchanged: ctx x parallel is the budget, and 524288 either way.
-  # This repartitions it rather than spending more.
+  # Dropping the second endpoint costs ~22% fan-out aggregate (109.4 vs 140.8)
+  # and buys critics that reason on 35B-A3B instead of a 20B, one fewer moving
+  # part, and ~40 GiB of headroom. Accepted deliberately.
   #
-  # Three findings agree on 2 (measured 2026-08-04, packages/inference-bench):
-  #   - aggregate throughput PEAKS at 2 concurrent (91.2 t/s) and drops to 62.1
-  #     at 4 — the extra slots were slower, not just no faster
-  #   - 2 slots = 262144 per chat, the full model window
-  #   - the opencode split puts ~2 streams here (orchestrator + one subagent),
-  #     with the 4-way critic fan-out on :8091
+  # MTP's aggregate cost is STRUCTURAL, not queuing — raising parallel does not
+  # buy it back. At n-max 3, np 8: n=2 -> 112.2, n=4 -> 109.4, n=8 -> 125.5
+  # aggregate. Going np 2 -> 8 moved n=4 by 3 tok/s. Do not "fix" it with slots.
   #
-  # Consequence to accept: a THIRD simultaneous request to :8090 now queues.
-  # That is deliberate — at 4-way this endpoint was slower for everyone.
+  # mtp_draft_max: 3 — MEASURED PEAK, and it replaced 1. Greedy, 3 reps:
+  #   n-max 1 -> 93.2 t/s   n-max 2 -> 103.5   n-max 3 -> 106.4   n-max 5 -> 102.0
+  # This CONTRADICTS the older note above ("n=1 beating n=3", from 82.5 vs 86.7).
+  # That measurement predates b10380; the MTP path has since improved. +14%
+  # single-stream for a one-line change.
+  #
+  # ctx 1048576 / parallel 4 = 262144 per slot, the model's FULL native window
+  # (qwen35moe.context_length = 262144). 1048576 total is the LARGEST value
+  # measured safe in one process — see THE KV CEILING above and do not raise it
+  # without re-reading that section. At 20 KB/token this is ~20 GiB of KV.
+  #
+  # Consequence to accept: a 4-wide critic fan-out fully occupies this endpoint
+  # and the orchestrator queues behind it. parallel 6 would leave two slots
+  # clear but needs ctx 1572864 (~30 GiB KV), past anything measured safe here.
   - name: "quality"
     alias: "qwen3.6-35b-a3b-mtp"
     model: "{{ llamacpp_models_dir }}/qwen3.6-35b-a3b-mtp-q4_K_M.gguf"
     port: 8090
-    ctx: 524288
-    parallel: 2
-    mtp: true
-    mtp_draft_max: 1
-
-  # Batch / throughput. MXFP4 is gpt-oss's native format, so no requantisation
-  # loss — and it is only viable here because llama.cpp supports MXFP4 on gfx1151
-  # while vLLM has no kernel for it. MTP deliberately off: this instance exists
-  # for aggregate throughput, which is exactly what MTP costs (-29%).
-  #
-  # Concurrency curve at fixed ctx 1048576 — changing `parallel` alone
-  # repartitions the SAME KV allocation, so none of these carries extra
-  # allocation risk (aggregate / per-stream / TTFT):
-  #   parallel  8 -> 190.5 / 26.4 / 0.75s   (131072/slot)  <- chosen
-  #   parallel 16 -> 238.2 / 16.1 / 0.90s   ( 65536/slot)
-  #   parallel 32 -> 399.9 / 13.9 / 1.48s   ( 32768/slot)
-  #   parallel 64 -> 477.8 /  8.4 / 2.66s   ( 16384/slot)
-  #
-  # THOSE ARE LONG-GENERATION NUMBERS AND DO NOT TRANSFER. Re-measured with
-  # agent-shaped traffic (short multi-turn answers) at 32 concurrent clients,
-  # parallel 8 gave 98.5 tok/s aggregate and parallel 32 gave 83.4 — more slots
-  # made it WORSE. Real-traffic aggregate is ~85-100 tok/s either way, roughly
-  # half the 190.7 headline. 131072/slot is also the model's own ceiling
-  # (max_position_embeddings), so lowering parallel further only reserves KV the
-  # model cannot attend over.
-  - name: "throughput"
-    alias: "gpt-oss-20b"
-    model: "{{ llamacpp_models_dir }}/gpt-oss-20b-MXFP4.gguf"
-    port: 8091
     ctx: 1048576
-    parallel: 8
-    mtp: false
+    parallel: 4
+    mtp: true
+    mtp_draft_max: 3
+
+  # DEEP — the complex-problem-solver, called DELIBERATELY, never in a loop.
+  # Qwen3.8-27B since 2026-08-14, replacing nemotron-3.5-lightning on this port.
+  # Port reused on purpose: Open WebUI's openwebui_openai_base_urls already reads
+  # "8090;8091", so the swap needs no change on ser5.
+  #
+  # WHY: it is ~3.8x slower than :8090 and worth it for hard problems only.
+  # Same prompt, both endpoints (2026-08-14): :8090 88.5 t/s / 39.7s wall;
+  # this 24.6 t/s / 151.8s, for a materially more thorough answer. Published
+  # benchmarks against Qwen3.6-27B: QwenSWEBench 79.0 vs 49.3, DeepSWE 42.2 vs
+  # 13.3, SWE-bench Pro 61.7 vs 53.5, LiveCodeBench 90.3 vs 83.9. NOTE those
+  # compare to the DENSE 27B, not to the 35B-A3B on :8090 — there is no
+  # published head-to-head against what we actually run. Do not assume.
+  #
+  # ARCHITECTURE. Dense 27B but hybrid: 64 layers = 16 x (3 x GatedDeltaNet ->
+  # 1 x Gated Attention). Only 16 layers do full attention, but head_dim 256 x 4
+  # KV heads still gives 64 KB/token — 3.2x the 20 KB/token of :8090 and 10x
+  # nemotron's ~6 KB. KV, not weights, is what constrains this instance.
+  # Authoritative footprint from a `-lv 4` load at 262144 x 1, f16 KV:
+  #   weights 18,084 MiB | KV 16,384 MiB | recurrent 150 MiB | compute 666 MiB
+  # It is also natively MULTIMODAL (image+video); the mmproj is staged but not
+  # wired up — serving vision needs --mmproj and is untested here.
+  #
+  # cache_type q8_0 IS NOT USED HERE, AND THE REASON IS A CORRECTED MEASUREMENT.
+  # It halves KV (64 -> 34 KB/token; 262144 drops 16,384 -> 8,192 MiB) and on a
+  # SHORT 622-token generation it looked free — 31.95 t/s q8_0 vs 31.27 f16.
+  # On a real long generation it is not. Re-measured 2026-08-14 with only one
+  # other server resident, ~2.5k tokens out:
+  #
+  #   262144 x 1  f16    25.30 t/s   GTT 71.7   <- CHOSEN
+  #   262144 x 1  q8_0   22.58 t/s   GTT 64.2      -11%
+  #   524288 x 2  q8_0   22.19 t/s   GTT 74.6      slots are free, quant is not
+  #
+  # It also CHANGES THE OUTPUT. Under greedy decoding (temp 0, top_k 1) the f16
+  # and q8_0 runs diverged hard — 11,112 vs 1,664 characters of reasoning on an
+  # identical prompt. Quantised KV perturbs the logits enough to take a different
+  # path. For an endpoint whose entire job is careful reasoning, that is the
+  # wrong trade at any speed, let alone a negative one.
+  #
+  # Slot count, by contrast, IS free (22.58 vs 22.19 for 1 vs 2 slots). The
+  # single slot below is a MEMORY decision, not a speed one: f16 at 2 slots
+  # needs ~32 GiB of KV and pushes the box to ~94 GB total, which is where the
+  # host OOM killer starts taking live services (see the ceiling note above).
+  # A second concurrent `deep` call therefore QUEUES. Accepted — this endpoint
+  # is dispatched deliberately and never in a loop.
+  #
+  # An earlier reading of 14.6 t/s for this config was an artefact of measuring
+  # while the retired nemotron endpoint was still resident (~105 GB total). It
+  # was memory pressure, not the configuration. Do not re-derive it.
+  #
+  # mtp_draft_max: 5 — MEASURED PEAK, and far deeper than :8090 wants. Greedy:
+  #   off 11.39 | n=2 24.57 | n=3 28.16 | n=4 30.38 | n=5 31.78 | n=6 31.82
+  #   | n=8 COLLAPSES to ~20
+  # 2.79x over raw. Left at the repo's old default of 1 this would run 18.9 t/s
+  # and give up 40%. On real long-context work the rate settles to ~23-25 t/s;
+  # 31.8 is a short-prompt figure.
+  #
+  # draft_model IS REQUIRED. ggml-org ships the MTP head as a SEPARATE gguf, not
+  # embedded like qwen3.6's. Without -md, llama.cpp logs "unused tensor ...
+  # -- ignoring" and runs at raw 11 t/s while the config still says mtp: true.
+  #
+  # chat_template_kwargs IS NOT OPTIONAL. reasoning_effort defaults to `xhigh`,
+  # and at xhigh this model burned 8192 tokens of thinking and returned an EMPTY
+  # answer after 408s. Supported: xhigh (default) / medium / low. `medium` is
+  # chosen here as the deep endpoint's job is thoroughness; `low` still produced
+  # a correct, well-structured answer ~20% faster.
+  #
+  # CONTEXT CANNOT BE EXTENDED past 262144. --rope-scaling yarn is SILENTLY
+  # IGNORED (log still reads "rope scaling = linear") because the model uses
+  # mrope (mrope_section [11,11,10]). -c 524288 on ONE slot is accepted via
+  # LINEAR scaling with freq_scale 0.5 and a "n_ctx_seq > n_ctx_train -- possible
+  # training context overflow" warning, and measured 17.9 t/s against 31.9 at
+  # native. ctx below is 262144 on a single slot — the native window, and there
+  # is nothing above it worth having. Do not raise it.
+  - name: "deep"
+    alias: "qwen3.8-27b"
+    model: "{{ llamacpp_models_dir }}/qwen3.8-27b-q4_K_M.gguf"
+    draft_model: "{{ llamacpp_models_dir }}/qwen3.8-27b-mtp-q8_0.gguf"
+    port: 8091
+    ctx: 262144
+    parallel: 1
+    mtp: true
+    mtp_draft_max: 5
+    chat_template_kwargs:
+      reasoning_effort: "medium"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BACKEND / QUANT LEDGER — box-level, survives model swaps
+# ─────────────────────────────────────────────────────────────────────────────
+# Hard-won and expensive to re-derive. Each line cost a model load and a bench.
+#
+#   NVFP4 quant          -38%   no gfx1151 kernel; it dequantises. Same lesson
+#                               as the vLLM bake-off: "native format" is not
+#                               fast here.
+#   DFlash spec decode   -30%   on nemotron at n=1, where speculative decoding
+#                               is supposed to WIN. Acceptance was ~45% against
+#                               MTP's ~93% on qwen, and the only published draft
+#                               is NVFP4 — slow AND usually wrong. It DOES work
+#                               when the drafter is good (2.1x on Muse Glimmer),
+#                               so this is a drafter-quality result, not a
+#                               verdict on DFlash.
+#
+# ROCm vs VULKAN CROSSES OVER AT n=4 — measure at YOUR concurrency, not one
+# point. Measured 2026-08-12 on nemotron (c 2097152, np 8), aggregate tok/s:
+#
+#        n=1(judge)   n=4      n=8      n=16
+#   Vulkan   70.8    119.1    136.1    131.1
+#   ROCm     65.7    119.7    155.3    146.5
+#            -----   -----    -----    -----
+#   ROCm      -7%      tie     +14%     +12%
+#
+# The first ROCm test was run ONLY at n=4 and concluded "no gain" — n=4 happens
+# to be the exact crossover, so a single data point produced a confidently wrong
+# answer. Both backends peak at n=8 and fall off by n=16. Vulkan is retained
+# because the single-endpoint design puts most traffic at n<=4, where Vulkan
+# leads. Revisit if sustained concurrency rises past 8.
+#
+# Switching is NOT just an `image:` override: the ROCm image ships llama-server
+# at /usr/local/bin, while the quadlet template hardcodes
+# Entrypoint=/usr/bin/llama-server. That template needs a per-instance
+# entrypoint first, or the unit fails with "executable file not found".
+#
+# RETIRED 2026-08-14 — nemotron-3.5-lightning-30b-a3b (was :8091, ctx 2097152,
+# np 8, no MTP). Dominated: :8090 with MTP beat it on BOTH aggregate (106.4 vs
+# 92.1) and single-stream (90.8 vs 70.8) at the same 262144/slot.
+#
+# OPEN, and it predates this swap: nemotron measured 92.1 t/s at n=4 under a
+# clean 2-server control on 2026-08-14, against the 119.1 recorded here on
+# 2026-08-11 — same build, same flags. gpt-oss reproduced fine (140.8 vs 146.2),
+# so this is nemotron-specific, not a method shift. ~23% unexplained. The GGUF
+# is still on disk if anyone wants to chase it.

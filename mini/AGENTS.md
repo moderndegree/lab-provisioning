@@ -98,20 +98,31 @@ Serving is `llama-server`, not Ollama. Two instances run as Podman quadlets, def
 in `roles/llamacpp` (`llamacpp_instances`), named by ROLE rather than by model so the
 model can be swapped without renaming the unit:
 
-| Unit | Port | Model | Slots | Ctx/slot | MTP |
-|---|---|---|---|---|---|
-| `llama-quality` | 8090 | `qwen3.6-35b-a3b-mtp-q4_K_M` | 2 | **262144** | on |
-| `llama-throughput` | 8091 | `gpt-oss-20b-MXFP4` | 8 | 131072 | off |
+| Unit | Port | Model | Slots | Ctx/slot | MTP | Speed |
+|---|---|---|---|---|---|---|
+| `llama-quality` | 8090 | `qwen3.6-35b-a3b-mtp-q4_K_M` | 4 | **262144** | n-max 3 | 106 t/s solo |
+| `llama-deep` | 8091 | `qwen3.8-27b-q4_K_M` | 1 | **262144** | n-max 5 | ~25 t/s |
 
-Both are MoE with ~3B active parameters, because Strix Halo decode speed tracks active
-parameters read per token, not headline size. A dense model of the same size is a
-mistake here: the old dense `qwen3.6:27b-mtp-q4_K_M` measured ~11-15 t/s.
+`llama-quality` is THE DRIVER — every agent role runs there except `deep`. It is MoE
+with ~3B active parameters, because Strix Halo decode speed tracks active parameters
+read per token, not headline size.
+
+`llama-deep` is a deliberate exception to that rule: a DENSE 27B, ~4x slower, called
+only for hard problems. Dense is still the wrong default — raw it decodes at 11.4 t/s,
+matching the old dense `qwen3.6:27b-mtp-q4_K_M` at ~11-15 t/s — but MTP recovers 2.79x
+(to 31.8 t/s short-prompt, ~25 sustained), which is what makes it usable at all. Do not
+generalise this into "dense is fine now"; it is fine HERE because the endpoint is
+low-volume and MTP-assisted.
+
+`llama-throughput` (nemotron-3.5-lightning) was RETIRED 2026-08-14. It was dominated:
+quality-with-MTP beat it on aggregate (106.4 vs 92.1) AND single-stream (90.8 vs 70.8)
+at the same ctx/slot. The critic fan-out moved onto `:8090`'s 4 slots.
 
 Context is per SLOT and partitioned statically at startup (`-c` total / `-np` slots),
-so a single chat can never exceed its slot's window no matter how idle the box
-is — 262144 on quality, 131072 on throughput. Raising
-ctx/slot means lowering slot count or raising total, and total has a hard ceiling —
-see the context warning below.
+so a single chat can never exceed its slot's window no matter how idle the box is —
+262144 on both endpoints now (`:8090` 4 slots, `:8091` 1). Raising ctx/slot means lowering slot count or raising
+total, and total has a hard ceiling measured in KV BYTES, not cells — see the context
+warning below.
 
 Ollama is installed but `stopped`/`disabled` (`ollama_service_*` in group_vars). It is
 for trying a model by hand, not for serving; it cannot hold weights at the same time as
@@ -163,11 +174,17 @@ Benchmarked axes (2026-08-04, `llama-benchy-suite`, results in `/data/bench/llam
   | 4 | 62.1 | **114.5** |
   | 8 | — | 80.8 |
 
-  Quality peaks at 2, throughput at 4. Since slots divide the context window,
-  `-np 2` on quality would give 262144 per chat AND better throughput — and at
-  c=2 MTP is costing 18%, so `-np 2` + `llamacpp_mtp: false` is the configuration
-  the numbers point at. Not applied: it trades away two slots, which is a capacity
-  decision, not a tuning one.
+  > **SUPERSEDED 2026-08-14.** The table above and its conclusion (`-np 2` +
+  > `llamacpp_mtp: false`) no longer reproduce on b10380. Re-measured with
+  > `fanoutsim.py` at MTP n-max 3: quality does 112.2 aggregate at c=2, 109.4 at
+  > c=4, 125.5 at c=8 — it does NOT collapse past 2, and MTP is now worth keeping
+  > ON because agent loops are mostly single-stream (106.4 solo with MTP vs 73.9
+  > without). The endpoint runs `-np 4` with MTP on. Treat the numbers above as a
+  > record of the old build, not as guidance.
+  >
+  > The general lesson survives and is the reason this note exists: MTP's cost is
+  > structural, not queuing — going `-np 2` to `-np 8` moved c=4 aggregate by
+  > 3 tok/s. Do not try to tune it away with slots.
 
 - **Context depth is expensive COLD and cheap WARM — this is the big one.**
   Decode degrades with depth (quality 91.7 -> 62.0 t/s from depth 0 to 65536;
@@ -232,7 +249,7 @@ The things that bite:
   worst-case single request: `ctx 32768` with `parallel 8` gives each caller only
   4096 tokens, which an ordinary Open WebUI chat overruns — that exact mistake
   produced `request (5945 tokens) exceeds the available context size (4096
-  tokens)` in Open WebUI. quality runs 262144/slot (2 slots), throughput 131072/slot (8).
+  tokens)` in Open WebUI. quality runs 262144/slot (4 slots), deep 262144/slot (1).
 - **DO NOT raise context blind — it can hang the box.** `-c 2097152` (262144/slot)
   does not fail cleanly: it wedges the amdgpu DRM suballocator with the process
   stuck in uninterruptible sleep (`state Ds`, `wchan drm_suballoc_new`),

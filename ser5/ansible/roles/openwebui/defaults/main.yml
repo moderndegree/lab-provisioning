@@ -3,9 +3,16 @@
 # instances over the tailnet. Disabled by default — flip enable_openwebui: true in group_vars/all.yml.
 enable_openwebui: false
 
-# Pin to a release tag for reproducible deploys; "main" tracks upstream latest.
+# Pinned to a release tag for reproducible deploys.
 # https://github.com/open-webui/open-webui/pkgs/container/open-webui
-openwebui_image: "ghcr.io/open-webui/open-webui:main"
+#
+# Was ":main" until 2026-08-12 — a ROLLING DEV TAG, not a release, and
+# openwebui_autoupdate below has podman pulling it on a timer. That combination
+# meant an unattended dev build could land on a service published through
+# Cloudflare, with nothing in the repo recording what was running. The pin below
+# is the version that was already live at the time of the change, so it is a
+# no-op deploy, not an upgrade.
+openwebui_image: "ghcr.io/open-webui/open-webui:v0.11.0"
 
 # Data (accounts, chat history, uploaded docs for RAG) persists on the data disk.
 openwebui_data_dir: "{{ data_mount }}/services/openwebui/data"
@@ -63,13 +70,37 @@ openwebui_ollama_base_url: "http://mini:11434"
 # at. Those were dropped because vLLM measured ~3x slower single-stream
 # (25 vs 87 tok/s); add them back only for a bench.
 #
-# Measured 2026-08-03, after the ROCm 7.14 / quadlet rebuild:
-#   :8090  qwen3.6-35b-a3b-mtp  quality  — 86 tok/s single-stream, 142 tok/s at
-#          4-way; MTP accepts ~95% of drafts (1.95 tokens per decode step vs 0.99
-#          on :8091). 262144 ctx per chat = 524288 total / 2 slots — the model's
-#          full native window.
-#   :8091  gpt-oss-20b          quantity — 76 tok/s single-stream, 202 tok/s at
-#          8-way. 131072 ctx per chat = 1048576 total / 8 slots.
+# Both models are discovered dynamically from each endpoint's /v1/models, so a
+# model swap on mini needs NO change here — the new alias simply appears in the
+# picker after the llama-server restart. These notes exist so the picker's two
+# entries are legible; keep them true.
+#
+#   :8090  qwen3.6-35b-a3b-mtp  THE DRIVER — 106 tok/s single-stream, 109 at
+#          4-way. 262144 ctx per chat = 1048576 total / 4 slots, the model's
+#          full native window. Pick this by default for chat.
+#   :8091  qwen3.8-27b          DEEP — ~25 tok/s. 262144 ctx per chat on a
+#          SINGLE slot, the full native window. A second concurrent request
+#          QUEUES rather than running beside it. FOUR TIMES SLOWER than
+#          :8090 and worth it only for hard problems. A long answer here is a
+#          two-to-three MINUTE wait; that is expected, not a hang.
+#
+# Measured 2026-08-14 on llama.cpp b10380 with fanoutsim.py. Earlier figures in
+# this file came from long-generation synthetics and read about twice as fast as
+# real traffic; these do not.
+#
+# :8091 replaced nemotron-3.5-lightning on 2026-08-14, which had in turn replaced
+# gpt-oss-20b. Nemotron was retired because :8090 with MTP beat it on BOTH
+# aggregate (106.4 vs 92.1) and single-stream (90.8 vs 70.8) — it was dominated,
+# not merely slower.
+#
+# Qwen3.8-27B is a reasoning model: expect a collapsed "thinking" section before
+# the answer. llama.cpp separates that into reasoning_content, so it will not
+# contaminate the visible reply. The server pins reasoning_effort=medium; the
+# model's own default (xhigh) spends 8192 tokens thinking and returns NOTHING.
+#
+# It is also natively multimodal (image + video), but the vision projector is
+# staged on mini WITHOUT being wired into the server, so image uploads to :8091
+# will NOT work until --mmproj is added there.
 #
 # Context is per SLOT and statically partitioned at startup, so a single chat can
 # never exceed the per-slot figure no matter how idle the box is.
@@ -78,6 +109,11 @@ openwebui_openai_base_urls: "http://mini:8090/v1;http://mini:8091/v1"
 openwebui_openai_api_keys: "llamacpp;llamacpp"
 
 # Let `podman auto-update` pull a newer image on its timer.
+#
+# Now that openwebui_image is a fixed release tag this is nearly inert — it can
+# only pick up a re-push of that exact tag, not a new version. Left ON so a
+# security re-tag still lands; set false for strict control. It was genuinely
+# dangerous while the image tracked ":main".
 openwebui_autoupdate: true
 
 # Open WebUI's own signup flow (separate from Cloudflare Access). Leave true for

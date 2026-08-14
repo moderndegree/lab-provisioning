@@ -32,16 +32,16 @@ This lab is three things: the dev environment for a solo AI consulting practice,
 
 ## Models on mini
 
-Strix Halo is memory-bandwidth-bound, not compute-bound. Decode speed tracks active parameters read per token, not total parameter count. The measured anchor is `qwen3.6-35b-a3b-mtp-q4_K_M` on `:8090`: 22 GB, MoE, 3B active, **86-95 tok/s single-stream and 142 tok/s aggregate at 4-way** (re-measured 2026-08-04 on ROCm 7.14; the older 70-80 t/s figure was the Ollama serving path). `:8091` runs `gpt-oss-20b` at 76 tok/s single-stream, 202 tok/s aggregate at 8-way. Consequence: MoE models win enormously here, and a dense model is a mistake.
+Strix Halo is memory-bandwidth-bound, not compute-bound. Decode speed tracks active parameters read per token, not total parameter count. The measured anchor is `qwen3.6-35b-a3b-mtp-q4_K_M` on `:8090`: 22 GB, MoE, 3B active, **106 tok/s single-stream and 109 tok/s aggregate at 4-way** (re-measured 2026-08-14 at MTP n-max 3, which is +14% over the n-max 1 used previously). `:8091` runs `qwen3.8-27b` — a DENSE 27B, deliberately — at ~25 tok/s sustained (replaced `nemotron-3.5-lightning` 2026-08-14, which was dominated on both axes). Consequence: MoE wins enormously here and dense is still the wrong default; `:8091` is the deliberate exception, viable only because MTP recovers 2.79x on it.
 
 **What is actually served** (llama-server, measured 2026-08-04 on ROCm 7.14):
 
 | Endpoint | Model | Size / shape | Speed | Use |
 |---|---|---:|---:|---|
-| `:8090` quality | `qwen3.6-35b-a3b-mtp-q4_K_M` | 22 GB, MoE 35B-A3B, 3B active | 86-95 tok/s c=1; 142 agg c=4 | Everything client-confidential; the default. MTP on. |
-| `:8091` throughput | `gpt-oss-20b-MXFP4` | 12 GB, MoE 20B | 76 tok/s c=1; 202 agg c=8 | Bulk fan-out, worker agents, high concurrency. |
+| `:8090` quality | `qwen3.6-35b-a3b-mtp-q4_K_M` | 22 GB, MoE 35B-A3B, 3B active | 106 tok/s c=1; 109 agg c=4 | THE DRIVER — every agent role except `deep`, plus all chat. MTP n-max 3. 262144 ctx/slot x 4. |
+| `:8091` deep | `qwen3.8-27b-q4_K_M` | 19 GB + 3.2 GB MTP head, DENSE 27B hybrid | ~25 tok/s sustained | Hard problems only, called deliberately, never in a loop. ~4x slower. 262144 ctx/slot x 1; a second concurrent call queues. |
 
-Context per slot: **262144 on `:8090`** (2 slots, the model's full native window) and 131072 on `:8091` (8 slots). Swap a model by editing `llamacpp_instances`
+Context per slot: **262144 on BOTH endpoints** — each model's full native window (`:8090` 4 slots, `:8091` 1 slot). Swap a model by editing `llamacpp_instances`
 in mini's `roles/llamacpp` — the units are named by role, not by model.
 
 The table that used to live here listed `qwen3-coder-next`, `gpt-oss:120b`, the
@@ -62,14 +62,16 @@ stopping an instance.
 
 What actually serves (measured 2026-08-04, ROCm 7.14):
 
-- `:8090` quality — `qwen3.6-35b-a3b-mtp-q4_K_M`, 4 slots, MTP on. 86-95 tok/s
-  single-stream, 142 tok/s aggregate at 4-way.
-- `:8091` throughput — `gpt-oss-20b-MXFP4`, 8 slots, no MTP. 76 tok/s
-  single-stream, 202 tok/s aggregate at 8-way.
-- **262144 context per slot on `:8090`, 131072 on `:8091`**, partitioned
-  statically at startup (`-c` total / `-np` slots). A single chat can never exceed
-  its endpoint's figure no matter how idle the box is; there is no per-request
-  `num_ctx`.
+- `:8090` quality — `qwen3.6-35b-a3b-mtp-q4_K_M`, 4 slots, MTP n-max 3. 106 tok/s
+  single-stream, 109 tok/s aggregate at 4-way.
+- `:8091` deep — `qwen3.8-27b-q4_K_M`, 1 slot, MTP n-max 5 with a SEPARATE draft
+  gguf (`-md`), f16 KV (q8_0 measured 11% SLOWER on long generations). ~25 tok/s sustained. Server pins
+  `reasoning_effort=medium`; the model's own default (`xhigh`) returns an empty
+  answer after ~400s.
+- **262144 context per slot on BOTH endpoints** — each model's full native
+  window — partitioned statically at startup (`-c` total / `-np` slots). A single
+  chat can never exceed its endpoint's figure no matter how idle the box is;
+  there is no per-request `num_ctx`.
 - Prefill DEGRADES with depth: 1025 t/s at depth 0, 652 at 65536, 486 t/s
   measured on a real 137622-token request. A packed 262144 prompt therefore
   costs roughly 9-12 minutes before the first token. (The old "~205 t/s" figure
@@ -103,7 +105,7 @@ Why this: the workstation is the cockpit, not the model host; 32 GB RAM and a 16
 
 ### opencode
 
-What it is: the sovereign coding harness on the workstation, pointed at BOTH of mini's llama-server endpoints. The 10-agent team is split by concurrency: `build`, `planner`, `architect`, `coder` and `devops` on `:8090` (quality, MTP, critical path), and `reviewer`, `security-auditor`, `tester` and `doc-writer` on `:8091` (throughput, the parallel fan-out). `qa` also runs on `:8091` but sequentially, after the batch — it is the final acceptance gate, validating the delivered system black-box against the done-when list rather than reviewing the diff. That split is sized to measurement — `:8090` peaks at 2 concurrent streams, `:8091` at 4 — see `../mini/AGENTS.md`. The `deep` escalation is hard reasoning on `:8090` with thinking left on; it replaces the old `heavy` agent, which pointed at `gpt-oss:120b` via Ollama and no longer resolves. The `research` escalation (xAI, Tier X, never client-confidential) needs `opencode auth login`, so the sovereign path is the failure-safe default.
+What it is: the sovereign coding harness on the workstation, pointed at BOTH of mini's llama-server endpoints. The 10-agent team is split by concurrency: `build`, `planner`, `architect`, `coder` and `devops` on `:8090` (quality, MTP, critical path), and `reviewer`, `security-auditor`, `tester`, `doc-writer` and `librarian` on `:8091` (throughput, the parallel fan-out). `qa` runs on `:8090` (quality) and sequentially, after the batch — it is the final acceptance gate, validating the delivered system black-box against the done-when list rather than reviewing the diff. That split is sized to measurement — `:8090` peaks at 2 concurrent streams, `:8091` at 4 — see `../mini/AGENTS.md`. The `deep` escalation is hard reasoning on `:8090` with thinking left on; it replaces the old `heavy` agent, which pointed at `gpt-oss:120b` via Ollama and no longer resolves. The `research` escalation (xAI, Tier X, never client-confidential) needs `opencode auth login`, so the sovereign path is the failure-safe default.
 
 Reach for it when: the task is client-confidential, the repo is local, and the answer must stay Tier L. Config lives in `../workstation/opencode.json`; delivery contract is in [`../workstation/AGENTS.md`](../workstation/AGENTS.md).
 
@@ -189,7 +191,7 @@ Start it: run AI Workstation with `CORTEX_VAULT_DIR=/data/brain`, or open `/data
 
 | Symptom | Likely cause | Check | Fix |
 |---|---|---|---|
-| First request is suddenly slow | Instance restarted and is reloading weights | `systemctl --user status llama-quality llama-throughput` on mini | Wait out the load; llama-server holds weights for the process lifetime, so this is a restart, not eviction. |
+| First request is suddenly slow | Instance restarted and is reloading weights | `systemctl --user status llama-quality llama-deep` on mini | Wait out the load; llama-server holds weights for the process lifetime, so this is a restart, not eviction. |
 | Nothing streams for minutes | Prefill wall, or thinking | Prompt size versus the slot window (262144 on :8090, 131072 on :8091); check whether `reasoning_content` is filling instead of `content` | Cut context, or disable thinking with `chat_template_kwargs: {enable_thinking: false}`. |
 | A model is missing from the list | That instance is down, or Ollama got started and is contending | `curl mini:8090/v1/models`, `curl mini:8091/v1/models`, `systemctl is-active ollama` on mini | Restart the instance; stop Ollama — it and llama-server cannot both hold weights in 122 GiB. |
 | Jobs queue behind each other | More concurrent requests than slots (4 on `:8090`, 8 on `:8091`) | `llamacpp:requests_deferred` and `llamacpp:requests_processing` in Prometheus | Let it queue, or send bulk fan-out to `:8091`. Raising slots lowers ctx/slot. |

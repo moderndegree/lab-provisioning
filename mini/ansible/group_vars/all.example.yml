@@ -80,15 +80,17 @@ auto_reboot: true
 
 # ─── llama.cpp serving path (roles/llamacpp) ───
 # Podman quadlets, one per entry in llamacpp_instances: llama-quality on :8090
-# (interactive, MTP) and llama-throughput on :8091 (batch). 87 tok/s
-# single-stream against vLLM's 25 on the same model and hardware — see that
-# role's defaults for why the gap is the checkpoint, not the runtime.
+# (THE DRIVER — 4 slots, MTP n-max 3, 105 tok/s single-stream) and llama-deep on
+# :8091 (Qwen3.8-27B, 1 slot, ~30 tok/s, called deliberately for hard problems).
+# 105 tok/s against vLLM's 25 on the same model and hardware — see that role's
+# defaults for why the gap is the checkpoint, not the runtime.
 #
 #   systemctl --user start|stop|status llama-servers.target
 #
 # Needs the GGUFs staged first (the role asserts they exist) — see
-# docs/provisioning-checklist.md. Holds ~73 GiB resident across both instances,
-# hence the two Ollama lines below.
+# docs/provisioning-checklist.md. Holds ~83 GiB resident across both instances
+# (measured together 2026-08-14), hence the two Ollama lines below. The old
+# llama-throughput/nemotron instance was retired 2026-08-14 as dominated.
 # enable_llamacpp: true
 
 # ─── Ollama service lifecycle (roles/ollama/defaults/main.yml) ───
