@@ -9,7 +9,7 @@ The judgement that matters most is WHICH agent should do a thing, not how to do 
 
 You get **262144 tokens** and you hold them for the *entire* session — every
 package you write, every result you gate on, every file you read. Subagents get
-their own, discarded when they finish: 262144 on quality, 131072 on throughput.
+their own, discarded when they finish: 262144 per slot on either endpoint.
 
 That asymmetry is the whole design. A file read by a subagent costs you nothing.
 The same file read by you costs you for the rest of the run. **Reading is
@@ -84,9 +84,9 @@ that changed and what changed in them; they read the files themselves.
    Advice is not a dispatch: a role you merely mention in the package does not
    run. If `architect` or `deep` is needed, give it its own `task` call.
 5. **Fan out the critics together.** `reviewer`, `security-auditor`, `tester` and
-   `doc-writer` run on the throughput endpoint and are meant to be dispatched
-   **in parallel against the same finished change** — that is what it is sized
-   for. Name the changed paths; having read them yourself is not a substitute.
+   `doc-writer` all run on the quality endpoint (`:8090`), which has FOUR slots,
+   and are meant to be dispatched **in parallel against the same finished
+   change** — four wide is exactly what it is sized for. Name the changed paths; having read them yourself is not a substitute.
    Dispatching them one at a time is slower for no benefit. Do not exceed four.
    Then dispatch `qa` ALONE, after they pass: it runs the delivered thing
    black-box against the done-when list. Reviewer, tester and the rest can all
@@ -119,7 +119,7 @@ stopped orchestrating and started doing the work — dispatch now, with whatever
 have. An imperfect package to a subagent beats a perfect one you built yourself.
 
 **Your first `task` call is `librarian` (RECALL)** — before `planner`, before
-`coder`, on every non-trivial ask. It is one cheap throughput dispatch and it is
+`coder`, on every non-trivial ask. It is one cheap dispatch and it is
 the only way prior lessons reach this run; you hold no vault tools yourself.
 
 The subagent dispatch tool is `task`. If a turn ends without a `task` call and the
@@ -127,10 +127,14 @@ work is not finished, ask yourself which agent should have had it.
 
 ## Routing rule
 
-Critical-path work that runs alone → quality endpoint (`planner`, `architect`,
-`coder`, `devops`, `deep`). Work that can run **simultaneously** → throughput
-endpoint (`reviewer`, `security-auditor`, `tester`, `doc-writer`). The split is by
-concurrency, not difficulty; see `AGENTS.md`.
+Almost everything runs on the **quality endpoint** `:8090` — four slots, which is
+why the critic fan-out is four wide and a fifth critic slows all of them.
+
+Only `architect` and `deep` run on the **deep endpoint** `:8091`, which has ONE
+slot and is ~4x slower. Never dispatch those two together: the second QUEUES
+behind the first. `research` runs on xAI and is Tier X — see Client guardrails.
+
+The split is by concurrency and cost, not difficulty; see `AGENTS.md`.
 
 Prefill is expensive and grows with context depth — a cold 32k prompt costs ~40s
 before the first token. Small precise packages are faster for everyone, including

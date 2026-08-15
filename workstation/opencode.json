@@ -9,7 +9,7 @@
       },
       "models": {
         "qwen3.6-35b-a3b-mtp": {
-          "name": "Qwen3.6 35B-A3B MTP (driver — 262144 ctx, 4 slots, 106 t/s solo)",
+          "name": "Qwen3.6 35B-A3B MTP (driver \u2014 262144 ctx, 4 slots, 106 t/s solo)",
           "limit": {
             "context": 262144,
             "output": 8192
@@ -25,7 +25,7 @@
       },
       "models": {
         "qwen3.8-27b": {
-          "name": "Qwen3.8 27B (deep — 262144 ctx, 1 slot, ~25 t/s, reasoning_effort=medium server-side)",
+          "name": "Qwen3.8 27B (deep \u2014 262144 ctx, 1 slot, ~25 t/s, reasoning_effort=medium server-side)",
           "limit": {
             "context": 262144,
             "output": 8192
@@ -81,7 +81,7 @@
         "read_mcp_resource": "deny",
         "list_mcp_resource_templates": "deny"
       },
-      "description": "Orchestrator. Routes work; does NOT do it. DO NOT add reasoningEffort:'none' here — measured 2026-08-05, it drops subagent dispatches to ZERO (the model stops deciding to delegate). The edit/write/patch/bash denials are load-bearing too: with prose alone the no-implementation rule held on some runs and not others.",
+      "description": "Orchestrator. Routes work; does NOT do it. DO NOT add reasoningEffort:'none' here \u2014 measured 2026-08-05, it drops subagent dispatches to ZERO (the model stops deciding to delegate). The edit/write/patch/bash denials are load-bearing too: with prose alone the no-implementation rule held on some runs and not others.",
       "prompt": "{file:./.moderndegree/prompts/orchestrator.md}"
     },
     "planner": {
@@ -89,6 +89,7 @@
       "model": "quality/qwen3.6-35b-a3b-mtp",
       "description": "Produces an implementation plan from context provided in-prompt. Reasoning only.",
       "permission": {
+        "task": "deny",
         "*": "deny",
         "read": "allow",
         "grep": "allow",
@@ -100,8 +101,9 @@
     "architect": {
       "mode": "subagent",
       "model": "deep/qwen3.8-27b",
-      "description": "Designs structure and interfaces from provided context. Reasoning only. On the DEEP endpoint (:8091) deliberately — architecture errors are the most expensive to find late, and this agent runs ONCE per task, so its ~4x latency (59s -> 247s on a measured design task) is paid once rather than in a loop. Measured 2026-08-14 head-to-head on the same brief: 3.8 specified FOR UPDATE SKIP LOCKED as the work-queue primitive while 3.6 specified a polling worker pool with no concurrency control (a double-delivery bug), and quantified its trade-offs where 3.6 argued them generically. Shares :8091's SINGLE slot with `deep`, so a concurrent architect+deep dispatch queues.",
+      "description": "Designs structure and interfaces from provided context. Reasoning only. On the DEEP endpoint (:8091) deliberately \u2014 architecture errors are the most expensive to find late, and this agent runs ONCE per task, so its ~4x latency (59s -> 247s on a measured design task) is paid once rather than in a loop. Measured 2026-08-14 head-to-head on the same brief: 3.8 specified FOR UPDATE SKIP LOCKED as the work-queue primitive while 3.6 specified a polling worker pool with no concurrency control (a double-delivery bug), and quantified its trade-offs where 3.6 argued them generically. Shares :8091's SINGLE slot with `deep`, so a concurrent architect+deep dispatch queues.",
       "permission": {
+        "task": "deny",
         "*": "deny",
         "read": "allow",
         "grep": "allow",
@@ -113,9 +115,10 @@
     "coder": {
       "mode": "subagent",
       "model": "quality/qwen3.6-35b-a3b-mtp",
-      "description": "Implements changes. Edits files, verifies they parse/build. Runs on the QUALITY endpoint — code correctness is worth more than parallelism here.",
+      "description": "Implements changes. Edits files, verifies they parse/build. Runs on the QUALITY endpoint \u2014 code correctness is worth more than parallelism here.",
       "prompt": "{file:./.moderndegree/prompts/coder.md}",
       "permission": {
+        "task": "deny",
         "external_directory": "allow"
       }
     },
@@ -126,14 +129,16 @@
       "description": "Infra and shell operations. Deterministic, no reasoning.",
       "prompt": "{file:./.moderndegree/prompts/devops.md}",
       "permission": {
+        "task": "deny",
         "external_directory": "allow"
       }
     },
     "reviewer": {
       "mode": "subagent",
       "model": "quality/qwen3.6-35b-a3b-mtp",
-      "description": "Critiques diffs handed to it. Reasoning only. FAN-OUT agent — dispatched in parallel with the other critics. Since 2026-08-14 the critics share :8090 with the orchestrator (4 slots), so a 4-wide fan-out fully occupies the endpoint and the orchestrator queues behind it.",
+      "description": "Critiques diffs handed to it. Reasoning only. FAN-OUT agent \u2014 dispatched in parallel with the other critics. Since 2026-08-14 the critics share :8090 with the orchestrator (4 slots), so a 4-wide fan-out fully occupies the endpoint and the orchestrator queues behind it.",
       "permission": {
+        "task": "deny",
         "*": "deny",
         "read": "allow",
         "grep": "allow",
@@ -147,6 +152,7 @@
       "model": "quality/qwen3.6-35b-a3b-mtp",
       "description": "Audits provided diffs for security issues. Reasoning only. FAN-OUT agent.",
       "permission": {
+        "task": "deny",
         "*": "deny",
         "read": "allow",
         "grep": "allow",
@@ -161,6 +167,7 @@
       "description": "Writes and runs tests, reads results. FAN-OUT agent.",
       "prompt": "{file:./.moderndegree/prompts/tester.md}",
       "permission": {
+        "task": "deny",
         "external_directory": "allow"
       }
     },
@@ -169,6 +176,7 @@
       "model": "quality/qwen3.6-35b-a3b-mtp",
       "description": "Writes docs from provided material. Reasoning only. FAN-OUT agent.",
       "permission": {
+        "task": "deny",
         "*": "deny",
         "read": "allow",
         "grep": "allow",
@@ -183,6 +191,7 @@
       "description": "Final acceptance gate. Runs the delivered system against its DONE-WHEN list black-box, with real dependencies, and pastes actual output per criterion. Distinct from tester: tester proves the logic, qa proves the thing works. Runs AFTER the critic fan-out, not inside it. Runs ALONE, after the fan-out has drained. There is no longer a second endpoint to split across: the throughput endpoint was retired 2026-08-14 because :8090 with MTP beat it on BOTH aggregate and single-stream. Measured 2026-08-05: on gpt-oss-20b it spent 11 of 17 tool calls globbing and reading (which qa.md forbids) and never emitted its @@RESULT block at all, so the orchestrator improvised an extra tester dispatch that then hung the run.",
       "prompt": "{file:./.moderndegree/prompts/qa.md}",
       "permission": {
+        "task": "deny",
         "external_directory": "allow",
         "cortex_vault_capture": "allow",
         "cortex_vault_search": "allow",
@@ -192,8 +201,9 @@
     "librarian": {
       "mode": "subagent",
       "model": "quality/qwen3.6-35b-a3b-mtp",
-      "description": "Second brain. RECALL: searches the cortex vault for prior lessons before work starts. CAPTURE: records a lesson after a run with a real miss. The ONLY agent with vault tools — the orchestrator is denied them, because measured 2026-08-05 a prose \"cortex pass\" never fired once while a dispatch does.",
+      "description": "Second brain. RECALL: searches the cortex vault for prior lessons before work starts. CAPTURE: records a lesson after a run with a real miss. The ONLY agent with vault tools \u2014 the orchestrator is denied them, because measured 2026-08-05 a prose \"cortex pass\" never fired once while a dispatch does.",
       "permission": {
+        "task": "deny",
         "*": "deny",
         "read": "allow",
         "grep": "allow",
@@ -212,24 +222,26 @@
     "deep": {
       "mode": "subagent",
       "model": "deep/qwen3.8-27b",
-      "description": "Hard-reasoning escalation on its OWN endpoint (:8091, Qwen3.8-27B) with thinking left ON. This is the only agent that leaves :8090. It is ~4x SLOWER than every other agent (~25 t/s vs ~106) because it is a dense 27B, not a 3B-active MoE — a call that takes 40s elsewhere takes ~150s here. Dispatch it for problems that are genuinely hard, never in a loop and never for volume. Server pins reasoning_effort=medium; the model's own default (xhigh) returns an EMPTY answer after 400s.",
+      "description": "Hard problems only. qwen3.8-27b on :8091 \u2014 ONE slot, ~4x slower; a second dispatch queues behind it.",
       "permission": {
+        "task": "deny",
         "*": "deny",
         "read": "allow",
         "grep": "allow",
         "glob": "allow",
         "list": "allow"
       },
-      "prompt": "{file:./.moderndegree/prompts/planner.md}"
+      "prompt": "{file:./.moderndegree/prompts/deep.md}"
     },
     "research": {
       "mode": "subagent",
       "model": "xai/grok-build-0.1",
       "description": "Tier X. Live web research via xAI. NEVER give this agent client-confidential material.",
       "permission": {
+        "task": "deny",
         "*": "deny"
       },
-      "prompt": "{file:./.moderndegree/prompts/planner.md}"
+      "prompt": "{file:./.moderndegree/prompts/research.md}"
     }
   }
 }
