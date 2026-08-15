@@ -89,8 +89,63 @@ Defaults to the `build` orchestrator, which is what you want. Do not pass
 Scope every session to one repo. **Never point it at a working checkout you care
 about** — `coder` has edit rights. Clone to a throwaway directory first.
 
-Long runs are normal: a full chain on a small task is ~10 minutes, and real work
-has taken 30+. Poll with `process(action="log")` rather than assuming a hang.
+## Long runs: dispatch detached, then check back
+
+A full chain is **10–20 minutes**, and real work has taken 30+. Your terminal
+tool cannot supervise that: `terminal.timeout` and `TERMINAL_TIMEOUT` cap a
+single call at seconds, and the persistent shell is reaped at
+`lifetime_seconds`. Measured 2026-08-15: a foreground attempt gave up at ~421s
+and told the user it would "wait for the completion notification" — the chain
+was fine and finished normally, but the result was never collected.
+
+Use the terminal tool's OWN backgrounding. Do not reach for `setsid`, `nohup` or
+a trailing `&`: `approvals.mode` is `manual` with a 60s timeout, so a
+shell-backgrounding command sits waiting for a human, is auto-DENIED when none
+answers, and the run never starts (measured 2026-08-15 — the denial then got
+reported to the user as "OpenCode is running in the background", which it was
+not).
+
+1. **Launch in the background, redirecting into a log file in the work dir:**
+
+       terminal(command="opencode run '<TASK PACKAGE>' > opencode.log 2>&1",
+                workdir="<dir>", background=true)
+
+   The redirect is load-bearing. `process(action="log", …)` handles are scoped to
+   ONE chat session: ask about a handle in a later turn and you get "no process
+   with that ID exists", even though the run finished perfectly (measured
+   2026-08-15). A file in the work directory survives; a handle does not.
+
+2. **Tell the user the work directory** and that a full chain takes 10–20
+   minutes. The directory is the durable reference, not the handle.
+3. **End your turn.** Do not poll in a loop; you will exhaust your turn budget
+   long before the chain finishes.
+4. **Read the result back** when you next act or are asked:
+
+       tail -80 <dir>/opencode.log
+
+   Find the `@@RESULT` block and report its `status` and `evidence` verbatim.
+
+## Never conclude "no result" from a glance
+
+When the same run above was checked back, the report was "there are no other
+files beyond those two" and "status: unknown/no result available". Both were
+false: `app.py` and `test_app.py` were already on disk, and the chain had run a
+complete two-round critic cycle. A complete success was reported as a failure.
+
+So before saying a run produced nothing:
+
+- **Run `ls -la <dir>` and paste the real output.** Not your recollection of it.
+- **Check whether it is still running** — `pgrep -f "opencode ru[n]"`. Still
+  running is not failure.
+- **Treat the deliverable as the evidence.** The `@@RESULT` block is
+  self-reported by an agent; the files, and the tests actually passing, are not.
+  If the package had a done-when list, run those checks yourself and paste the
+  output. That is the difference between reporting a result and repeating a
+  claim.
+
+**Never report a delegation as failed because your terminal call timed out.**
+A timed-out call says nothing about the run. Check `pgrep` first: still running
+means still working.
 
 ## Read the result back
 

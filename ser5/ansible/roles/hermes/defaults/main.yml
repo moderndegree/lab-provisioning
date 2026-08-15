@@ -34,6 +34,25 @@ hermes_home: "{{ data_mount }}/services/hermes"
 # `hermes config set` instead.
 hermes_manage_model: true
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Runtime settings that delegation depends on
+# ─────────────────────────────────────────────────────────────────────────────
+# All three were found by running a real delegation end-to-end on 2026-08-15,
+# and none of them is discoverable by asking Hermes whether it can use OpenCode.
+#
+# terminal.timeout — the default 60s (via TERMINAL_TIMEOUT) is fine for ordinary
+# commands but the LAUNCH call for a backgrounded run still has to return inside
+# it. 300 leaves room without letting a genuinely hung foreground command sit for
+# minutes.
+#
+# command_allowlist — `approvals.mode` is `manual` with a 60s timeout, so any
+# command needing consent is AUTO-DENIED when nobody answers (gateway, Discord,
+# cron). The denial then tends to be reported as success. Allowlisting `opencode`
+# specifically keeps manual approval for everything else.
+hermes_terminal_timeout: 300
+hermes_command_allowlist:
+  - opencode
+
 # :8090 is the "quality" llama-server instance from mini/ansible/roles/llamacpp —
 # qwen3.6-35b-a3b with MTP, ~106 tok/s single-stream, THE driver model.
 # The name must match the server's --alias exactly; Hermes sends it as the model

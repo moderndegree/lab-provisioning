@@ -195,6 +195,56 @@
         - hermes_manage_model | bool
         - item.skipped is not defined
 
+    # ─── Runtime settings delegation depends on ───────────────────────────────
+    # terminal.timeout is a scalar, so it rides the same `hermes config set`
+    # path as the model keys above.
+    - name: Set the terminal timeout Hermes needs to launch a background run
+      ansible.builtin.command:
+        cmd: "{{ hermes_bin }} config set terminal.timeout {{ hermes_terminal_timeout }}"
+      environment:
+        HOME: "{{ user_home }}"
+        HERMES_HOME: "{{ hermes_home }}"
+        PATH: "{{ hermes_path }}"
+      become: true
+      become_user: "{{ username }}"
+      register: hermes_terminal_set
+      changed_when: hermes_terminal_set.rc == 0
+      when:
+        - hermes_manage_model | bool
+        - ((hermes_config_raw.content | default('') | b64decode | from_yaml) or {}).get('terminal', {}).get('timeout')
+          | default(0) | int != (hermes_terminal_timeout | int)
+      notify:
+        - restart hermes-gateway
+
+    # command_allowlist is a LIST, and `hermes config set` does not parse JSON —
+    # it stores the literal string '["opencode"]', which Hermes then does not
+    # match against. Verified 2026-08-15. So this one is written as real YAML.
+    # Read-compare-write rather than templating: Hermes owns config.yaml and
+    # keeps session, auth and skill state in it.
+    - name: Ensure the command allowlist contains what delegation needs
+      ansible.builtin.command:
+        cmd: >-
+          python3 -c "
+          import yaml,sys,pathlib;
+          p=pathlib.Path('{{ hermes_home }}/config.yaml');
+          c=yaml.safe_load(p.read_text()) or {};
+          want={{ hermes_command_allowlist | to_json }};
+          cur=c.get('command_allowlist');
+          cur=cur if isinstance(cur,list) else [];
+          new=sorted(set(cur)|set(want));
+          sys.exit(0) if new==sorted(cur) else (c.__setitem__('command_allowlist',new),
+          p.write_text(yaml.safe_dump(c,sort_keys=False,default_flow_style=False,allow_unicode=True)),
+          sys.exit(10))
+          "
+      become: true
+      become_user: "{{ username }}"
+      register: hermes_allowlist_set
+      changed_when: hermes_allowlist_set.rc == 10
+      failed_when: hermes_allowlist_set.rc not in [0, 10]
+      when: hermes_manage_model | bool
+      notify:
+        - restart hermes-gateway
+
     # ─── Optional web.backend: xai ────────────────────────────────────────────
     # Only patches config.yaml when hermes_web_backend is non-empty. Does not
     # change model.provider — default inference stays Ollama / Tier L.
