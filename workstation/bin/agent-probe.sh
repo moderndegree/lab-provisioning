@@ -121,6 +121,22 @@ BAD=$(sqlite3 "$DB" "select count(*) from part where session_id='$SID' and json_
 # BEFORE the verdict, because a hang has to be able to fail the run.
 STUCK=$(sqlite3 "$DB" "select count(*) from part p join session s on s.id=p.session_id where (s.id='$SID' or s.parent_id='$SID') and json_extract(p.data,'\$.state.status')='running';")
 
+# Per-subagent agentic iterations. `steps` in opencode.json caps these, and
+# hitting the cap is NOT an error: the agent is told to summarise what it has and
+# stop, so it returns a plausible partial result and every dispatch criterion
+# still passes. Measured 2026-08-15 (run `agentfix1`): one doc-writer session ran
+# 168 steps calling `read` 164 times before being killed by hand at ~18 minutes,
+# while the busiest HEALTHY session in the passing run used 28. Without this line
+# the next such loop is invisible in the score.
+#
+# Reported, not auto-failed: 40 is a chosen ceiling, not a measured law, and
+# failing runs on a guessed threshold would manufacture false regressions. If a
+# run reports a capped subagent, read that session before trusting its result.
+STEPCAP=${STEPCAP:-40}
+MAXSTEPS=$(sqlite3 "$DB" "select coalesce(max(n),0) from (select count(*) n from part p join session s on s.id=p.session_id where s.parent_id='$SID' and json_extract(p.data,'\$.type')='step-start' group by p.session_id);")
+echo "--- subagents at or over the step cap ($STEPCAP) (want: none)"
+sqlite3 "$DB" "select '  '||s.agent||' '||count(*)||' steps'from part p join session s on s.id=p.session_id where s.parent_id='$SID' and json_extract(p.data,'\$.type')='step-start' group by p.session_id having count(*) >= $STEPCAP;" | grep . || echo "  none"
+
 echo "--- guarded paths modified during the run (want: none)"
 GUARD_HITS=0
 for g in $GUARD_PATHS; do
@@ -133,7 +149,7 @@ for g in $GUARD_PATHS; do
 done
 [ "$GUARD_HITS" = 0 ] && echo "  none"
 
-echo "=== SCORE  distinct_critics=$CRIT/4  max_task_batch=$BATCH  qa=$QA  forbidden_tool_calls=$BAD  cortex_calls=$CORTEX  captures=$CAP  stuck_tools=$STUCK  guard_hits=$GUARD_HITS  exit=$RC"
+echo "=== SCORE  distinct_critics=$CRIT/4  max_task_batch=$BATCH  qa=$QA  forbidden_tool_calls=$BAD  cortex_calls=$CORTEX  captures=$CAP  stuck_tools=$STUCK  max_subagent_steps=$MAXSTEPS  guard_hits=$GUARD_HITS  exit=$RC"
 
 # The dispatch criteria alone are not enough. Measured 2026-08-05: run
 # `process1` dispatched all four critics, ran qa, called no forbidden tool — and

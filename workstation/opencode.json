@@ -96,7 +96,8 @@
         "glob": "allow",
         "list": "allow"
       },
-      "prompt": "{file:./.moderndegree/prompts/planner.md}"
+      "prompt": "{file:./.moderndegree/prompts/planner.md}",
+      "steps": 40
     },
     "architect": {
       "mode": "subagent",
@@ -110,7 +111,8 @@
         "glob": "allow",
         "list": "allow"
       },
-      "prompt": "{file:./.moderndegree/prompts/architect.md}"
+      "prompt": "{file:./.moderndegree/prompts/architect.md}",
+      "steps": 40
     },
     "coder": {
       "mode": "subagent",
@@ -120,7 +122,8 @@
       "permission": {
         "task": "deny",
         "external_directory": "allow"
-      }
+      },
+      "steps": 40
     },
     "devops": {
       "mode": "subagent",
@@ -131,7 +134,8 @@
       "permission": {
         "task": "deny",
         "external_directory": "allow"
-      }
+      },
+      "steps": 40
     },
     "reviewer": {
       "mode": "subagent",
@@ -145,7 +149,8 @@
         "glob": "allow",
         "list": "allow"
       },
-      "prompt": "{file:./.moderndegree/prompts/reviewer.md}"
+      "prompt": "{file:./.moderndegree/prompts/reviewer.md}",
+      "steps": 40
     },
     "security-auditor": {
       "mode": "subagent",
@@ -159,7 +164,8 @@
         "glob": "allow",
         "list": "allow"
       },
-      "prompt": "{file:./.moderndegree/prompts/security.md}"
+      "prompt": "{file:./.moderndegree/prompts/security.md}",
+      "steps": 40
     },
     "tester": {
       "mode": "subagent",
@@ -169,7 +175,8 @@
       "permission": {
         "task": "deny",
         "external_directory": "allow"
-      }
+      },
+      "steps": 40
     },
     "doc-writer": {
       "mode": "subagent",
@@ -183,7 +190,8 @@
         "glob": "allow",
         "list": "allow"
       },
-      "prompt": "{file:./.moderndegree/prompts/docs.md}"
+      "prompt": "{file:./.moderndegree/prompts/docs.md}",
+      "steps": 40
     },
     "qa": {
       "mode": "subagent",
@@ -196,7 +204,8 @@
         "cortex_vault_capture": "allow",
         "cortex_vault_search": "allow",
         "cortex_vault_stats": "allow"
-      }
+      },
+      "steps": 40
     },
     "librarian": {
       "mode": "subagent",
@@ -217,7 +226,8 @@
         "cortex_vault_backlinks": "allow",
         "cortex_vault_local_graph": "allow"
       },
-      "prompt": "{file:./.moderndegree/prompts/librarian.md}"
+      "prompt": "{file:./.moderndegree/prompts/librarian.md}",
+      "steps": 40
     },
     "deep": {
       "mode": "subagent",
@@ -231,7 +241,8 @@
         "glob": "allow",
         "list": "allow"
       },
-      "prompt": "{file:./.moderndegree/prompts/deep.md}"
+      "prompt": "{file:./.moderndegree/prompts/deep.md}",
+      "steps": 40
     },
     "research": {
       "mode": "subagent",
@@ -241,7 +252,8 @@
         "task": "deny",
         "*": "deny"
       },
-      "prompt": "{file:./.moderndegree/prompts/research.md}"
+      "prompt": "{file:./.moderndegree/prompts/research.md}",
+      "steps": 40
     }
   }
 }
