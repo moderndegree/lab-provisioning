@@ -261,6 +261,60 @@ including after the tools were live and the step was marked mandatory.
 The general rule this produced: **an instruction only lands if the agent that
 receives it still has a turn left in which to act.**
 
+## Nine of thirteen prompts described hardware that no longer existed
+
+Found 2026-08-14 by diffing each prompt's H1 against the model `opencode.json`
+actually assigns it. Six critics — `reviewer`, `security`, `tester`, `docs`,
+`qa`, `librarian` — opened with "throughput endpoint :8091 — FAN-OUT". There is
+no throughput instance: `llama-throughput`/nemotron was retired 2026-08-14 and
+`:8091` is now `llama-deep`, **1 slot at ~25 t/s**. A four-wide fan-out against
+that would serialise at 4x the latency.
+
+It never did, because `opencode.json` routes those six to `:8090` (4 slots). The
+config was right and the prompts were lying — so the cost was not wrong
+behaviour, it was six agents each told they were on hardware with different
+concurrency and speed than they actually had. `architect` had the inverse error
+(claimed `:8090`, runs on `:8091 deep`), and `planner.md` is shared by the
+`planner`, `deep` and `research` agents across three different models, so it
+cannot name one endpoint truthfully at all.
+
+`planner.md` also carried a straight self-contradiction: it opened with "You have
+**no tools** — do not ask to read files or run commands" and then included the
+standard "## You can read for yourself — You have `read`, `grep`, `glob` and
+`list`" section. `opencode.json` sets no per-agent tool restrictions, so the
+second was true and the first had been stale long enough to survive a prompt
+hardening pass.
+
+Re-ran the `rebaseline1` prompt, recovered verbatim from opencode's db so the
+comparison is against the same task rather than a paraphrase:
+
+| label | verdict | critics | batch | qa | forbidden | stuck | exit | elapsed |
+|---|---|---|---|---|---|---|---|---|
+| `rebaseline1` (2026-08-05) | PASS | 4 | 4 | 1 | 0 | 0 | 0 | 724s |
+| `hdrfix1` (2026-08-14) | PASS | 4 | 4 | 1 | 0 | 0 | 0 | 596s |
+
+Orchestrator tool histogram was `task: 12` and **nothing else** — no `read`,
+`grep`, `bash` or `edit`, which is stricter than the pass bar. Two four-wide
+rounds, each in a single assistant turn, with `coder` between them: the critics
+changed the outcome rather than rubber-stamping. `security-auditor` caught a
+`0.0.0.0` default bind (the shipped service binds `127.0.0.1` with a `--bind`
+flag *because of that finding*) and `doc-writer` caught the flag going
+undocumented.
+
+**Do not read the 128s as the fix working.** It is n=1 against n=1, nine days
+apart, with other changes in between. Nothing here isolates the header edit, and
+the score line was already perfect before it. What is established is that the
+chain still passes after the edit — not that the edit made it faster.
+
+The general shape, and the reason this went unnoticed for nine days: **a prompt
+that describes infrastructure has no validator.** Every other coupling in this
+lab that drifted silently — a quadlet shadowed by a stale unit, a GRUB cmdline
+that never got its reboot, `hermes_ollama_base_url` pointing at a stopped Ollama
+— was caught by asking the running system. A prompt asserting ":8091 throughput"
+is just text; nothing compares it to `llamacpp_instances`. Worth a check that
+cross-references each prompt's header against the model `opencode.json` assigns
+it, in the same spirit as `make verify`.
+
 ## Measurement traps that cost time here
 
 - `pgrep -f 'opencode run'` matches its own command line; use `opencode ru[n]`.
