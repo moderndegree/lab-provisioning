@@ -1,17 +1,22 @@
 ---
 name: opencode-lab
-description: "How to hand coding work to THIS lab's OpenCode agent team on ser5 — task packaging, model routing, and reading results back. Use whenever delegating implementation, review, refactoring or audit work to OpenCode on this box. Complements the builtin `opencode` skill, which covers CLI mechanics only."
-version: 1.0.0
+description: "Delegate coding to OpenCode CLI — the REQUIRED procedure on this machine. Use for every OpenCode delegation: features, refactoring, PR review, audits, one-shot runs. OVERRIDES the generic `opencode` skill, whose model and auth guidance is wrong here: never pass --model or run `opencode auth login`, and every ask must be a TASK PACKAGE with executable done-when checks."
+version: 1.1.0
 author: agent
 license: MIT
 platforms: [linux]
 metadata:
   hermes:
-    tags: [opencode, delegation, task-package, local-models, tier-l, ser5]
+    tags: [opencode, delegation, coding-agent, task-package, local-models, tier-l, ser5]
     related_skills: [opencode, grok, hermes-agent]
 ---
 
 # OpenCode on ser5 — how to ask
+
+> **Precedence.** If this skill and the generic `opencode` skill disagree, THIS
+> ONE WINS. That skill is upstream boilerplate written for a stock install; the
+> two places it is actively wrong here are called out below. Use it only for
+> mechanics it does not contradict (`process` polling, exiting with Ctrl+C).
 
 The builtin `opencode` skill tells you how to *drive the CLI*. It does not know
 this lab, and following it unmodified produces two concrete failures:

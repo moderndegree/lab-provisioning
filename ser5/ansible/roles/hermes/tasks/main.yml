@@ -274,6 +274,33 @@
           (mini's llama-server). Verify it actually took with `make verify` — a
           wrong route here does not error, it falls through to another provider.
 
+    # ─── Always-on lab rules ──────────────────────────────────────────────────
+    # HERMES_HOME/AGENTS.md is auto-injected into every system prompt (it is one
+    # of the project-context files `skip_context_files` suppresses, alongside
+    # SOUL.md and CLAUDE.md). That makes it the right home for PRECEDENCE, and
+    # the reason it is needed is measured, not theoretical:
+    #
+    # Both the builtin `opencode` skill and our `opencode-lab` skill are
+    # installed and both load fine. Asked a lab-specific question, Hermes
+    # answered from ours (":8090, four slots, task-package.md"). Asked a question
+    # phrased like the BUILTIN's description ("delegate a coding task to
+    # OpenCode... which model flag?"), it answered from the builtin and
+    # recommended `--model openrouter/anthropic/claude-sonnet-4` — the exact
+    # anti-pattern ours exists to prevent. Rewriting our description to win the
+    # match did not change that (tried 2026-08-14).
+    #
+    # A skill is RETRIEVED and so competes on phrasing; AGENTS.md is always in
+    # context and cannot lose. Keep it short for that same reason.
+    - name: Install always-on lab rules for Hermes
+      ansible.builtin.copy:
+        src: AGENTS.md
+        dest: "{{ hermes_home }}/AGENTS.md"
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0644"
+      notify:
+        - restart hermes-gateway
+
     # ─── Local skills owned by this repo ──────────────────────────────────────
     # The builtin `opencode` skill covers CLI mechanics and knows nothing about
     # this lab: it documents --agent build|plan as OpenCode's stock pair (here
