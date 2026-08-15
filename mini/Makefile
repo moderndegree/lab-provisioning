@@ -2,6 +2,7 @@ SHELL       := /bin/bash
 ANSIBLE_DIR := ansible
 INVENTORY   := $(ANSIBLE_DIR)/inventory.ini
 PLAYBOOK    := $(ANSIBLE_DIR)/site.yml
+VERIFY_PLAYBOOK := $(ANSIBLE_DIR)/verify.yml
 VAULT_FILE  := $(ANSIBLE_DIR)/group_vars/vault.yml
 REQS_FILE   := $(ANSIBLE_DIR)/requirements.yml
 BOOTSTRAP   := .bootstrap.env
@@ -24,7 +25,7 @@ else
   VAULT_ARG_RO := --vault-password-file $(VAULT_PASS_FILE)
 endif
 
-.PHONY: provision preview ping syntax-check lint vault-edit vault-encrypt install-deps init render help
+.PHONY: provision preview verify show-config ping syntax-check lint vault-edit vault-encrypt install-deps init render help
 
 ## help: List available targets
 help:
@@ -69,18 +70,50 @@ provision:
 preview:
 	ansible-playbook -i $(INVENTORY) $(PLAYBOOK) $(VAULT_ARG) -e @$(VAULT_FILE) --check --diff
 
+## verify: Assert what mini is RUNNING matches what is committed (read-only)
+# `preview` compares files on disk against what Ansible would write. It cannot
+# see the gap between a correct file and a correct running system: a quadlet
+# systemd never reloaded, a stale unit in ~/.config/systemd/user shadowing the
+# generated one, a kernel cmdline that needs the reboot that never happened, an
+# ollama that came back and is now fighting llama-server for 122 GiB.
+#
+# This asks the box — and the llama-servers themselves — what is actually true.
+# It changes nothing, and it reports every finding at once rather than stopping
+# at the first. Run it after every provision, and before believing any benchmark.
+verify:
+	ansible-playbook -i $(INVENTORY) $(VERIFY_PLAYBOOK) $(VAULT_ARG) -e @$(VAULT_FILE)
+
+## show-config: Print the values Ansible will actually apply, after precedence
+# Role defaults are the lowest-precedence vars, so a key copied into the
+# gitignored group_vars/all.yml pins that value forever and silently shadows
+# every later `git pull`. This is how you find out that happened.
+# SECRETS ARE FILTERED HERE, NOT BY THE READER. This loads the decrypted vault
+# (it has to — half the interesting values template off it), so dumping hostvars
+# raw would print vault_restic_password, vault_tailscale_authkey,
+# vault_cloudflared_token and every var that resolves from them, in plaintext, to
+# a terminal and whatever is scrolling it back. The rejectattr below drops any key
+# whose NAME looks secret, which also covers derived keys like restic_password
+# and llamacpp_hf_token. Widen the pattern before adding a secret with a new name.
+show-config:
+	@ansible -i $(INVENTORY) mini $(VAULT_ARG_RO) -e @$(VAULT_FILE) \
+	  -m ansible.builtin.debug -a "msg={{ hostvars[inventory_hostname] \
+	    | dict2items \
+	    | rejectattr('key', 'search', 'vault_|password|passwd|token|authkey|secret|psk|_key$$') \
+	    | rejectattr('key', 'match', 'ansible_(env|facts|.*_interfaces)') \
+	    | items2dict }}"
+
 ## ping: Verify SSH connectivity to mini
 ping:
 	ansible -i $(INVENTORY) mini -m ping
 
 ## syntax-check: Validate playbook syntax (uses .vault_pass if present)
 syntax-check:
-	ansible-playbook --syntax-check -i $(INVENTORY) $(PLAYBOOK) $(VAULT_ARG_RO) \
-	  -e @/dev/null --skip-tags never
+	ansible-playbook --syntax-check -i $(INVENTORY) $(PLAYBOOK) $(VERIFY_PLAYBOOK) $(VAULT_ARG_RO) \
+	  --skip-tags never
 
 ## lint: Run ansible-lint and yamllint
 lint:
-	ansible-lint $(PLAYBOOK)
+	ansible-lint $(PLAYBOOK) $(VERIFY_PLAYBOOK)
 	yamllint $(ANSIBLE_DIR)
 
 ## vault-edit: Open vault.yml in your $EDITOR (decrypts/re-encrypts)

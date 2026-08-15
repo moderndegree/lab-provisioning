@@ -1,0 +1,97 @@
+---
+# Assert what mini is ACTUALLY running — not what a converge said it applied.
+# Run: make verify
+#
+# WHY THIS EXISTS. `make provision` going green proves Ansible wrote the files it
+# meant to write. It does not prove the box is serving what those files describe.
+# Every drift we have actually hit lives in that gap:
+#
+#   - a quadlet is rewritten, but systemd never reloaded, so the running unit is
+#     still generated from the previous revision
+#   - a hand-written unit in ~/.config/systemd/user/ shadows the quadlet-generated
+#     one (that directory outranks the quadlet generator), so a green converge
+#     edits a file that systemd is not using
+#   - the GRUB cmdline is correct on disk and absent from /proc/cmdline because
+#     the reboot never happened
+#   - ollama and llama-server both hold weights; 122 GiB does not fit both, and
+#     the symptom is an OOM under load, not a failed task
+#   - a container is up and the port is answering, but with the ctx/slots from
+#     whatever was configured two edits ago
+#
+# None of those are visible to `--check --diff`. All of them are visible here.
+#
+# This playbook NEVER changes anything: every task is a probe with
+# changed_when: false. It also does not stop at the first failure — probes run to
+# completion, append to `problems`, and the play fails once at the end with the
+# whole report. A single bad instance should not hide the other four findings.
+
+- name: Verify mini's running state
+  hosts: mini
+  become: true
+  gather_facts: true
+
+  vars:
+    # Probes are cheap and local; a hung service should fail the check, not hang
+    # the play behind Ansible's default (no) timeout.
+    verify_http_timeout: 5
+
+  tasks:
+    - name: Start with an empty problem list
+      ansible.builtin.set_fact:
+        problems: []
+
+    # The user-level systemd manager is only reachable with XDG_RUNTIME_DIR and a
+    # DBus address pointing at the node user's session bus. Lingering (checked in
+    # roles/containers/tasks/verify.yml) is what keeps /run/user/<uid> alive
+    # without a login, so a missing runtime dir here is itself a finding.
+    - name: Look up the node user's uid
+      ansible.builtin.getent:
+        database: passwd
+        key: "{{ node_user }}"
+
+    - name: Build the rootless user environment
+      ansible.builtin.set_fact:
+        node_uid: "{{ getent_passwd[node_user][1] }}"
+        user_systemd_env:
+          XDG_RUNTIME_DIR: "/run/user/{{ getent_passwd[node_user][1] }}"
+          DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ getent_passwd[node_user][1] }}/bus"
+
+    - name: Verify host and kernel state
+      ansible.builtin.include_role:
+        name: base
+        tasks_from: verify
+
+    - name: Verify rootless container prerequisites
+      ansible.builtin.include_role:
+        name: containers
+        tasks_from: verify
+
+    - name: Verify the ollama service matches policy
+      ansible.builtin.include_role:
+        name: ollama
+        tasks_from: verify
+
+    - name: Verify the llama.cpp serving path
+      ansible.builtin.include_role:
+        name: llamacpp
+        tasks_from: verify
+      when: enable_llamacpp | bool
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Report
+    # ─────────────────────────────────────────────────────────────────────────
+    - name: Report a clean box
+      ansible.builtin.debug:
+        msg: "mini verified — running state matches the committed configuration."
+      when: problems | length == 0
+
+    - name: Fail with every finding at once
+      ansible.builtin.fail:
+        msg: |-
+          mini's running state does not match the committed configuration.
+
+          {{ problems | map('regex_replace', '^', '  ✗ ') | join('\n') }}
+
+          These are drift, not converge failures — `make provision` may well be
+          green. Re-read each line before re-running it.
+      when: problems | length > 0

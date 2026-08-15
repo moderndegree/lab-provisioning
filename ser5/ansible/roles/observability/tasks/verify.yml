@@ -1,0 +1,126 @@
+---
+# Read-only probes for roles/observability. Appends to `problems`; changes nothing.
+#
+# THIS IS THE ROLE THE WHOLE VERIFY LAYER EXISTS FOR. Prometheus 2.55.1 and
+# Grafana 11.4.0 ran here for ~6 weeks against quadlets that said 3.13.2 and
+# 13.1.1. The generated units were correct. Ansible was green. The only signal
+# that would have caught it is the one below: asking each service what version it
+# believes it is.
+#
+# So the version checks here deliberately do NOT read the quadlet, the image tag,
+# or the unit — all three were correct throughout the incident. They read the
+# HTTP endpoint of the process that is actually serving.
+
+- name: Check the observability units are active
+  ansible.builtin.command: "systemctl --user is-active {{ item }}.service"
+  become: true
+  become_user: "{{ username }}"
+  environment: "{{ user_systemd_env }}"
+  loop: [prometheus, grafana]
+  register: verify_obs_units
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Flag inactive observability units
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [item.item ~ '.service is ' ~ (item.stdout | default('unknown')) ~ '.'] }}
+  loop: "{{ verify_obs_units.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item.stdout | default('') != 'active'
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Ask each service its own version
+# ─────────────────────────────────────────────────────────────────────────────
+# Prometheus reports the version WITHOUT the leading "v" that the image tag
+# carries, so strip it before comparing rather than pinning the var to a bare
+# number — the tag has to keep the v to be pullable.
+- name: Ask Prometheus what it is running
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ prometheus_port }}/api/v1/status/buildinfo"
+    timeout: "{{ verify_http_timeout }}"
+    return_content: true
+  register: verify_prom_build
+  failed_when: false
+  check_mode: false
+
+- name: Flag Prometheus serving a different version than the quadlet pins
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'Prometheus is SERVING ' ~ verify_prom_build.json.data.version ~ ' but the quadlet pins '
+        ~ prometheus_version ~ '. The unit and the image tag are probably both correct — '
+        ~ 'check for a shadowing unit or a container that never restarted.'
+      ] }}
+  when:
+    - verify_prom_build.status | default(0) == 200
+    - verify_prom_build.json.data.version | default('') != (prometheus_version | regex_replace('^v', ''))
+
+- name: Flag Prometheus not answering
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + ['Prometheus is not answering on :' ~ prometheus_port ~ '.'] }}
+  when: verify_prom_build.status | default(0) != 200
+
+- name: Ask Grafana what it is running
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ grafana_port }}/api/health"
+    timeout: "{{ verify_http_timeout }}"
+    return_content: true
+  register: verify_grafana_health
+  failed_when: false
+  check_mode: false
+
+- name: Flag Grafana serving a different version than the quadlet pins
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'Grafana is SERVING ' ~ verify_grafana_health.json.version ~ ' but the quadlet pins '
+        ~ grafana_version ~ '. Same failure shape as the 2026-06 incident — suspect a '
+        ~ 'shadowing unit before suspecting the quadlet.'
+      ] }}
+  when:
+    - verify_grafana_health.status | default(0) == 200
+    - verify_grafana_health.json.version | default('') != grafana_version
+
+- name: Flag Grafana not answering or unhealthy
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'Grafana on :' ~ grafana_port ~ ' is not healthy (database: '
+        ~ (verify_grafana_health.json.database | default('no response')) ~ ').'
+      ] }}
+  when: >-
+    verify_grafana_health.status | default(0) != 200
+    or verify_grafana_health.json.database | default('') != 'ok'
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Scrape targets
+# ─────────────────────────────────────────────────────────────────────────────
+# A Prometheus that is up but scraping nothing produces flat dashboards, not
+# alerts — the exact failure mode where you only find out when you go looking.
+# mini's node exporter is reached over the tailnet, so this doubles as a check
+# that MagicDNS still resolves and the wifi link is actually carrying traffic.
+- name: Ask Prometheus about its scrape targets
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ prometheus_port }}/api/v1/targets?state=active"
+    timeout: "{{ verify_http_timeout }}"
+    return_content: true
+  register: verify_prom_targets
+  failed_when: false
+  check_mode: false
+
+- name: Flag every down scrape target
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'Prometheus target ' ~ (item.labels.job | default('?')) ~ ' at '
+        ~ (item.labels.instance | default('?')) ~ ' is down: '
+        ~ (item.lastError | default('no error reported')) ~ '.'
+      ] }}
+  loop: "{{ verify_prom_targets.json.data.activeTargets | default([]) }}"
+  loop_control:
+    label: "{{ item.labels.instance | default('?') }}"
+  when: item.health | default('') != 'up'

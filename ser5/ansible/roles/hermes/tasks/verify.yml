@@ -1,0 +1,264 @@
+---
+# Read-only probes for roles/hermes. Appends to `problems`; changes nothing.
+#
+# Hermes is the least reproducible thing on ser5: installed by a vendor script
+# into $HOME rather than from a pinned image, with hermes_version recorded as
+# "observed on ser5, NOT enforced". That means version drift here is expected
+# rather than prevented — so this role's job is to make the drift VISIBLE, and
+# the version check below reports rather than assumes.
+
+- name: Check the Hermes user units are active
+  ansible.builtin.command: "systemctl --user is-active {{ item }}.service"
+  become: true
+  become_user: "{{ username }}"
+  environment: "{{ user_systemd_env }}"
+  loop: >-
+    {{ ['hermes-gateway']
+       + (['hermes-proxy'] if enable_hermes_proxy | bool else [])
+       + (['hermes-dashboard'] if enable_hermes_dashboard | bool else []) }}
+  register: verify_hermes_units
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Flag inactive Hermes units
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [item.item ~ '.service is ' ~ (item.stdout | default('unknown')) ~ '.'] }}
+  loop: "{{ verify_hermes_units.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item.stdout | default('') != 'active'
+
+- name: Check the Hermes binary is where the units expect it
+  ansible.builtin.stat:
+    path: "{{ hermes_bin }}"
+  register: verify_hermes_bin
+
+- name: Flag a missing Hermes binary
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        hermes_bin ~ ' does not exist — the units reference a binary the installer '
+        ~ 'did not leave behind.'
+      ] }}
+  when: not verify_hermes_bin.stat.exists
+
+# hermes_version is documentation, not a pin — the installer takes whatever is
+# current. Reporting a mismatch is still worth it: it is the only record of when
+# the box moved, and updating the var is the intended response.
+- name: Read the installed Hermes version
+  ansible.builtin.command: "{{ hermes_bin }} --version"
+  become: true
+  become_user: "{{ username }}"
+  environment:
+    PATH: "{{ hermes_path }}"
+    HERMES_HOME: "{{ hermes_home }}"
+  register: verify_hermes_version
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: verify_hermes_bin.stat.exists
+
+- name: Flag a Hermes version that no longer matches what is recorded
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'Hermes reports ' ~ (verify_hermes_version.stdout | trim) ~ ' but hermes_version records '
+        ~ hermes_version ~ '. The installer is unpinned, so this is drift to RECORD '
+        ~ '(update the var), not necessarily to fix.'
+      ] }}
+  when:
+    - verify_hermes_bin.stat.exists
+    - verify_hermes_version.rc | default(1) == 0
+    - hermes_version not in (verify_hermes_version.stdout | default(''))
+
+- name: Check the Hermes proxy answers
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ hermes_proxy_port }}/v1/models"
+    timeout: "{{ verify_http_timeout }}"
+    return_content: true
+  register: verify_hermes_proxy
+  failed_when: false
+  check_mode: false
+  when: enable_hermes_proxy | bool
+
+- name: Flag a Hermes proxy that is not answering
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'the Hermes proxy is not answering on :' ~ hermes_proxy_port ~ '. It is a NOUS PORTAL '
+        ~ 'proxy and exits 2 with "Not logged into Nous Portal" unless `hermes auth add nous` '
+        ~ 'has been run — an interactive OAuth flow Ansible cannot do. Stopped on the box '
+        ~ '2026-08-14 to end a 15s restart loop; still enabled, so it returns on reboot.'
+      ] }}
+  when:
+    - enable_hermes_proxy | bool
+    - verify_hermes_proxy.status | default(0) != 200
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Where Hermes actually routes
+# ─────────────────────────────────────────────────────────────────────────────
+# DO NOT infer routing from the proxy. `hermes proxy` is a NOUS PORTAL proxy —
+# it forwards to a Nous subscription ("resolved per-request", any bearer token
+# accepted) and has nothing to do with model.provider/base_url. An earlier
+# version of this file inferred the route from its /v1/models list; that was
+# wrong, and it is the same mistake docs/todo.md made when it read "292
+# OpenRouter models" as evidence about the default model route.
+#
+# Verified on the box 2026-08-14: with provider=custom AND with provider=xai-oauth
+# the proxy behaves identically, because it reads neither.
+#
+# What actually proves the route is the pair below — config.yaml holds the
+# intent, and mini's endpoint advertises the exact model id that intent names.
+# For end-to-end proof, run a one-shot and watch mini's counters move:
+#   ssh ser5 'hermes chat -q "Reply with exactly: ROUTE-OK" -Q'
+#   curl -s http://mini:8090/metrics | grep llamacpp:tokens_predicted_total
+- name: Flag hosted providers that Hermes can still egress to
+  ansible.builtin.command: "{{ hermes_bin }} auth list"
+  become: true
+  become_user: "{{ username }}"
+  environment:
+    HOME: "{{ user_home }}"
+    HERMES_HOME: "{{ hermes_home }}"
+    PATH: "{{ hermes_path }}"
+  register: verify_hermes_auth
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+# A configured default model is not a boundary. Every provider holding a live
+# credential is somewhere Hermes can route — on fallback, on an explicit
+# `--provider`, or on a `-m` naming a hosted model. mini is wifi-only with a
+# known powersave problem, so "mini unreachable" is routine, not hypothetical.
+- name: Flag each hosted provider still holding credentials
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'Hermes still holds credentials for "' ~ item ~ '" — a default model does not '
+        ~ 'remove a route. Until this is gone, Hermes is not a Tier L surface.'
+      ] }}
+  loop: >-
+    {{ verify_hermes_auth.stdout | default('')
+       | regex_findall('^(\S+) \(\d+ credentials?\):', multiline=True)
+       | reject('eq', 'nous') | list }}
+  when:
+    - hermes_manage_model | bool
+    - verify_hermes_auth.rc | default(1) == 0
+
+# config.yaml is not proof of routing, but a mismatch here means the converge
+# did not apply — a different failure than falling through, and worth separating.
+- name: Read the Hermes config
+  ansible.builtin.slurp:
+    src: "{{ hermes_home }}/config.yaml"
+  register: verify_hermes_config
+  failed_when: false
+  when: hermes_manage_model | bool
+
+# Rebuilt here rather than reused from tasks/main.yml — verify.yml runs from its
+# own playbook, where main.yml never executed.
+- name: Build the expected model routing
+  ansible.builtin.set_fact:
+    hermes_model_desired_check:
+      provider: "{{ hermes_model_provider }}"
+      base_url: "{{ hermes_model_base_url }}"
+      default: "{{ hermes_model_default }}"
+      context_length: "{{ hermes_model_context_length }}"
+  when: hermes_manage_model | bool
+
+- name: Flag config.yaml not matching the configured routing
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'Hermes config.yaml has model.' ~ item.key ~ ' = '
+        ~ (verify_hermes_conf_model[item.key] | default('unset')) ~ ' but the role configures '
+        ~ item.value ~ ' — the converge did not apply.'
+      ] }}
+  vars:
+    verify_hermes_conf_model: >-
+      {{ ((verify_hermes_config.content | default('') | b64decode | from_yaml) or {}).get('model', {}) or {} }}
+  loop: "{{ hermes_model_desired_check | dict2items }}"
+  loop_control:
+    label: "model.{{ item.key }}"
+  when:
+    - hermes_manage_model | bool
+    - verify_hermes_config.content is defined
+    - (verify_hermes_conf_model[item.key] | default('') | string) != (item.value | string)
+
+# mini's :8090 must be reachable FROM ser5. When it is not, Hermes keeps working
+# perfectly — on someone else's hardware — which is the whole problem.
+- name: Check mini's llama-server is reachable from ser5
+  ansible.builtin.uri:
+    url: "{{ hermes_model_base_url }}/models"
+    timeout: "{{ verify_http_timeout }}"
+    return_content: true
+  register: verify_hermes_upstream
+  failed_when: false
+  check_mode: false
+  when: hermes_manage_model | bool
+
+- name: Flag an unreachable upstream
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        hermes_model_base_url ~ ' is not reachable from ser5 — Hermes will silently route '
+        ~ 'to whatever hosted provider still has credentials rather than failing.'
+      ] }}
+  when:
+    - hermes_manage_model | bool
+    - verify_hermes_upstream.status | default(0) != 200
+
+- name: Flag mini not serving the model Hermes is configured for
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'mini serves ' ~ (verify_hermes_upstream.json.data | map(attribute='id') | join(', '))
+        ~ ' on ' ~ hermes_model_base_url ~ ' but Hermes is configured for '
+        ~ hermes_model_default ~ ' — llama-server rejects a model name it does not have.'
+      ] }}
+  when:
+    - hermes_manage_model | bool
+    - verify_hermes_upstream.status | default(0) == 200
+    - hermes_model_default not in (verify_hermes_upstream.json.data | default([]) | map(attribute='id') | list)
+
+- name: Check the Hermes dashboard answers
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ hermes_dashboard_port }}/"
+    timeout: "{{ verify_http_timeout }}"
+    status_code: [200, 301, 302, 401, 403]
+  register: verify_hermes_dash
+  failed_when: false
+  check_mode: false
+  when: enable_hermes_dashboard | bool
+
+- name: Flag a Hermes dashboard that is not answering
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + ['the Hermes dashboard is not answering on :' ~ hermes_dashboard_port ~ '.'] }}
+  when:
+    - enable_hermes_dashboard | bool
+    - verify_hermes_dash.status | default(0) not in [200, 301, 302, 401, 403]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Exposure
+# ─────────────────────────────────────────────────────────────────────────────
+# Both services bind 0.0.0.0 and rely ENTIRELY on UFW scoping them to tailscale0.
+# ser5 has no blanket tailnet allow, so those two rules are the whole boundary —
+# if they are missing, the proxy and dashboard are on the wifi LAN.
+- name: Read the UFW rule list
+  ansible.builtin.command: ufw status
+  register: verify_hermes_ufw
+  changed_when: false
+  check_mode: false
+
+- name: Flag a Hermes port not scoped to the tailnet
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'Hermes port ' ~ item ~ ' binds 0.0.0.0 but has no UFW rule on '
+        ~ hermes_tailnet_interface ~ ' — it is exposed to the wifi LAN, not just the tailnet.'
+      ] }}
+  loop: >-
+    {{ ([hermes_proxy_port] if enable_hermes_proxy | bool else [])
+       + ([hermes_dashboard_port] if enable_hermes_dashboard | bool else []) }}
+  when: (item | string) not in verify_hermes_ufw.stdout

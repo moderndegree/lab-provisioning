@@ -1,0 +1,207 @@
+---
+# Read-only probes for roles/llamacpp. Appends to `problems`; changes nothing.
+#
+# tasks/main.yml validates the DESIRED state well — it stats every GGUF, rejects
+# duplicate ports and names, and warns on an unsafe ctx. All of that runs against
+# variables. Nothing in it asks the running server what it actually loaded.
+#
+# These probes do, and they ask the server rather than systemd wherever possible.
+# `systemctl is-active` returning "active" is the weakest useful signal here: the
+# unit can be active while the container serves the previous revision's ctx, the
+# previous image, or — because Network=host puts every instance on real ports —
+# the wrong model entirely on the right port.
+
+- name: Check each llama-server unit is active
+  ansible.builtin.command: "systemctl --user is-active llama-{{ item.name }}.service"
+  become: true
+  become_user: "{{ node_user }}"
+  environment: "{{ user_systemd_env }}"
+  loop: "{{ llamacpp_instances }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: verify_units
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Flag inactive instances
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'llama-' ~ item.item.name ~ '.service is ' ~ (item.stdout | default('unknown')) ~
+        ' — configured to serve ' ~ item.item.alias ~ ' on :' ~ item.item.port ~ '.'
+      ] }}
+  loop: "{{ verify_units.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: item.stdout | default('') != 'active'
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Image drift
+# ─────────────────────────────────────────────────────────────────────────────
+# llamacpp_image is pinned to a dated tag because the gfx1151 Mesa/RADV userspace
+# in it is the whole reason the image exists. A container started before a pin
+# bump keeps running the old layer forever — podman never restarts it for you,
+# and the unit stays happily active. This is the check that catches "we bumped
+# the image three weeks ago and the box never picked it up".
+- name: Read the image each running container was started from
+  ansible.builtin.command: >-
+    podman inspect --format {{ '{{.ImageName}}' }} llama-{{ item.name }}
+  become: true
+  become_user: "{{ node_user }}"
+  environment: "{{ user_systemd_env }}"
+  loop: "{{ llamacpp_instances }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: verify_images
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Flag containers running a stale image
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'llama-' ~ item.item.name ~ ' is running image ' ~ (item.stdout | trim) ~
+        ' but the quadlet pins ' ~ (item.item.image | default(llamacpp_image)) ~
+        ' — restart it to pick the pinned image up.'
+      ] }}
+  loop: "{{ verify_images.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when:
+    - item.rc | default(1) == 0
+    - (item.stdout | trim) != (item.item.image | default(llamacpp_image))
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Models on disk
+# ─────────────────────────────────────────────────────────────────────────────
+# main.yml stats these at converge time. Re-checked here because the models dir
+# is a bind mount from the data disk: if that disk does not come back, the
+# already-running servers keep serving from page cache and mapped pages while the
+# path underneath them is gone. Everything looks healthy until a restart.
+- name: Stat every configured GGUF
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop: >-
+    {{ (llamacpp_instances | map(attribute='model') | list)
+       + (llamacpp_instances | selectattr('draft_model', 'defined')
+          | map(attribute='draft_model') | list) }}
+  register: verify_ggufs
+
+- name: Flag missing model files
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + ['model file is gone from disk: ' ~ item.item ~
+        ' — running instances will not survive a restart.'] }}
+  loop: "{{ verify_ggufs.results }}"
+  loop_control:
+    label: "{{ item.item | basename }}"
+  when: not item.stat.exists
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Ask the servers what they actually loaded
+# ─────────────────────────────────────────────────────────────────────────────
+- name: Fetch /health from each instance
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ item.port }}/health"
+    timeout: "{{ verify_http_timeout }}"
+    status_code: [200]
+  loop: "{{ llamacpp_instances }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: verify_health
+  failed_when: false
+  check_mode: false
+
+- name: Flag instances that are not answering
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        item.item.alias ~ ' is not serving on :' ~ item.item.port ~
+        ' (' ~ (item.msg | default('no response')) ~ ').'
+      ] }}
+  loop: "{{ verify_health.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: item.status | default(0) != 200
+
+# Network=host means every instance binds a real port on mini. Nothing stops a
+# stray process — or the wrong instance after a port edit — from holding the port
+# an alias is supposed to be on. /v1/models is the server's own answer to "who am
+# I", so it catches a swap that a port check never would.
+- name: Ask each port which model it is serving
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ item.port }}/v1/models"
+    timeout: "{{ verify_http_timeout }}"
+    return_content: true
+  loop: "{{ llamacpp_instances }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: verify_models
+  failed_when: false
+  check_mode: false
+
+- name: Flag a port serving the wrong model
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        ':' ~ item.item.port ~ ' should be serving ' ~ item.item.alias ~ ' but reports ' ~
+        (item.json.data[0].id | default('nothing')) ~ '.'
+      ] }}
+  loop: "{{ verify_models.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when:
+    - item.status | default(0) == 200
+    - (item.json.data[0].id | default('')) != item.item.alias
+
+# The serving-policy check. ctx and parallel multiply into the KV budget, and a
+# quiet reduction is invisible from the outside — the endpoint answers, just with
+# a fraction of the context it is documented to have. total_slots is the server's
+# own count and maps directly to -np.
+- name: Fetch /props from each instance
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ item.port }}/props"
+    timeout: "{{ verify_http_timeout }}"
+    return_content: true
+  loop: "{{ llamacpp_instances }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: verify_props
+  failed_when: false
+  check_mode: false
+
+- name: Flag a slot-count mismatch
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        item.item.alias ~ ' is serving ' ~ (item.json.total_slots | default('?')) ~
+        ' slots but the quadlet configures -np ' ~ item.item.parallel ~ '.'
+      ] }}
+  loop: "{{ verify_props.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when:
+    - item.status | default(0) == 200
+    - (item.json.total_slots | default(-1) | int) != (item.item.parallel | int)
+
+# llama.cpp reports n_ctx per slot in some builds and total in others, so accept
+# either rather than pinning to one convention and generating a false positive on
+# the next image bump. Matching NEITHER is real drift.
+- name: Flag a context-window mismatch
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        item.item.alias ~ ' reports n_ctx ' ~ (item.json.default_generation_settings.n_ctx | default('?')) ~
+        ', which is neither the configured ' ~ item.item.ctx ~ ' nor that split across ' ~
+        item.item.parallel ~ ' slots (' ~ (item.item.ctx | int // (item.item.parallel | int)) ~ ').'
+      ] }}
+  loop: "{{ verify_props.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when:
+    - item.status | default(0) == 200
+    - item.json.default_generation_settings.n_ctx is defined
+    - (item.json.default_generation_settings.n_ctx | int) not in
+      [item.item.ctx | int, (item.item.ctx | int // (item.item.parallel | int))]

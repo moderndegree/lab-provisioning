@@ -1,0 +1,55 @@
+---
+# Read-only probes for roles/storage. Appends to `problems`; changes nothing.
+#
+# Everything stateful on ser5 lives under {{ data_mount }}: the restic repo, the
+# brain vault, Grafana's dashboards, Prometheus's TSDB, Open WebUI's accounts and
+# chat history, and the frozen agentlab runs.db that cannot be regenerated. If
+# the SATA SSD does not come back after a reboot, /data silently becomes an empty
+# directory on the root filesystem and every one of those services starts fresh —
+# writing new state to the wrong disk while the real data sits unmounted.
+#
+# That failure is completely invisible to a converge: the paths all exist,
+# because Ansible creates them.
+
+- name: Flag a data mount that is not a real mount
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        data_mount ~ ' is NOT a mount point — it is a plain directory on the root disk. '
+        ~ 'Every service under it (restic repo, brain, Grafana, Open WebUI) is writing to '
+        ~ 'the OS disk while the real data sits on an unmounted volume.'
+      ] }}
+  when: data_mount not in (ansible_mounts | map(attribute='mount') | list)
+
+- name: Warn when the data disk is nearly full
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        data_mount ~ ' is ' ~ (100 - (100 * verify_data_mount.size_available / verify_data_mount.size_total)) | round(1)
+        ~ '% full — restic prune and Prometheus retention both fail badly out of space.'
+      ] }}
+  vars:
+    verify_data_mount: >-
+      {{ ansible_mounts | selectattr('mount', 'eq', data_mount) | first }}
+  when:
+    - data_mount in (ansible_mounts | map(attribute='mount') | list)
+    - (ansible_mounts | selectattr('mount', 'eq', data_mount) | first).size_available
+      < (0.1 * (ansible_mounts | selectattr('mount', 'eq', data_mount) | first).size_total)
+
+# fstab is what makes the mount survive a reboot. A disk mounted by hand after a
+# failed boot looks identical to a correctly configured one until the next
+# restart, which is exactly when nobody is watching.
+- name: Read fstab
+  ansible.builtin.slurp:
+    src: /etc/fstab
+  register: verify_fstab
+
+- name: Flag a data mount missing from fstab
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        data_mount ~ ' is mounted but has no fstab entry — it will not come back after a reboot.'
+      ] }}
+  when:
+    - data_mount in (ansible_mounts | map(attribute='mount') | list)
+    - data_mount not in (verify_fstab.content | b64decode)

@@ -1,0 +1,53 @@
+---
+# Read-only probes for roles/ollama. Appends to `problems`; changes nothing.
+#
+# The check that matters here is not "is ollama healthy" — it is "is ollama
+# running when policy says it must not be". Ollama and llama-server cannot both
+# hold weights in 122 GiB (llamacpp alone is ~83 GiB resident across both
+# instances, measured 2026-08-14). group_vars/all.yml pins ollama_service_state
+# to stopped for exactly that reason. If something starts it — a manual `ollama
+# run` for hand testing, a package upgrade re-enabling the unit, a converge with
+# the override removed — the box does not fail. It degrades under load, and the
+# symptom is an OOM or an eviction storm that looks like a llama.cpp problem.
+
+- name: Read the ollama unit state
+  ansible.builtin.service_facts:
+
+- name: Record what ollama is actually doing
+  ansible.builtin.set_fact:
+    verify_ollama: "{{ ansible_facts.services['ollama.service'] | default({}) }}"
+
+- name: Flag ollama running against policy
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'ollama is running but ollama_service_state is "' ~ ollama_service_state ~ '". '
+        ~ 'It and llama-server cannot both hold weights in 122 GiB — expect OOM under load.'
+      ] }}
+  when:
+    - ollama_service_state == 'stopped'
+    - verify_ollama.state | default('') == 'running'
+
+- name: Flag ollama stopped when it is supposed to serve
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'ollama_service_state is "started" but the unit is ' ~ (verify_ollama.state | default('absent')) ~ '.'
+      ] }}
+  when:
+    - ollama_service_state == 'started'
+    - verify_ollama.state | default('absent') != 'running'
+
+# enabled/disabled is separate from running/stopped, and only the former survives
+# a reboot. A disabled-but-running ollama is fine until you restart; an
+# enabled-but-stopped one is a time bomb that arms itself on the next boot.
+- name: Flag an ollama unit that will start itself on the next boot
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'ollama.service is enabled but ollama_service_enabled is false — it is stopped now '
+        ~ 'and will start on the next reboot, into a box already serving llama-server.'
+      ] }}
+  when:
+    - not (ollama_service_enabled | bool)
+    - verify_ollama.status | default('') == 'enabled'

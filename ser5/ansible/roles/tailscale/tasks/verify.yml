@@ -1,0 +1,67 @@
+---
+# Read-only probes for roles/tailscale. Appends to `problems`; changes nothing.
+#
+# The tailnet is the only path between ser5 and mini that matters: Open WebUI's
+# OpenAI backends, Prometheus's scrape of mini's node exporter, and Hermes's
+# upstream all address mini by MagicDNS name. tailscaled being "running" is not
+# enough — the backend can be running and logged out, in which case the daemon is
+# healthy and every cross-box call fails DNS.
+
+- name: Query the Tailscale backend state
+  ansible.builtin.command: tailscale status --json
+  register: verify_ts
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Flag a tailnet that is not up
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'Tailscale backend state is ' ~ (verify_ts.stdout | from_json).BackendState | default('unknown')
+        ~ ' (needs Running) — mini is unreachable by MagicDNS, so Open WebUI has no models '
+        ~ 'and Prometheus cannot scrape it.'
+      ] }}
+  when: >-
+    verify_ts.rc != 0
+    or (verify_ts.stdout | from_json).BackendState | default('') != 'Running'
+
+# The installed version is pinned in group_vars precisely because it drifted
+# before. apt upgrading it out from under the pin is silent.
+- name: Read the installed Tailscale version
+  ansible.builtin.command: tailscale version
+  register: verify_ts_version
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Flag a Tailscale version that drifted off the pin
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'tailscale is ' ~ (verify_ts_version.stdout_lines[0] | trim) ~ ' but group_vars pins '
+        ~ tailscale_version ~ '.'
+      ] }}
+  when:
+    - tailscale_version | default('latest') | trim not in ['', 'latest']
+    - verify_ts_version.rc == 0
+    - (verify_ts_version.stdout_lines[0] | trim) != tailscale_version
+
+# mini must be resolvable AND reachable. Wifi powersave on mini (400 ms DTIM) has
+# produced exactly this shape before: the tailnet is up, the name resolves, and
+# every request eats a multi-hundred-millisecond stall.
+- name: Check mini answers over the tailnet
+  ansible.builtin.command: "tailscale ping --c 1 --timeout 5s {{ mini_host | default('mini') }}"
+  register: verify_ts_mini
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Flag mini being unreachable over the tailnet
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        (mini_host | default('mini')) ~ ' does not answer over the tailnet: '
+        ~ (verify_ts_mini.stdout | default(verify_ts_mini.stderr) | trim)
+      ] }}
+  when: verify_ts_mini.rc != 0

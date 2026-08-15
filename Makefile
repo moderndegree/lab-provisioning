@@ -1,8 +1,8 @@
 SHELL := /bin/bash
 
 .PHONY: help \
-        mini-provision mini-preview mini-ping mini-syntax-check mini-lint mini-install-deps \
-        ser5-init ser5-render ser5-provision ser5-preview ser5-ping ser5-syntax-check ser5-lint ser5-install-deps
+        mini-provision mini-preview mini-verify mini-ping mini-syntax-check mini-lint mini-install-deps \
+        ser5-init ser5-render ser5-provision ser5-preview ser5-verify ser5-ping ser5-syntax-check ser5-lint ser5-install-deps
 
 ## help               Show available targets
 help:
@@ -11,6 +11,7 @@ help:
 	@echo "  Mini targets:"
 	@echo "    mini-provision       Converge mini end-to-end"
 	@echo "    mini-preview         Dry-run: show what would change (check + diff)"
+	@echo "    mini-verify          Assert mini is RUNNING what is committed (read-only)"
 	@echo "    mini-ping            SSH connectivity check"
 	@echo "    mini-syntax-check    Validate mini playbook syntax"
 	@echo "    mini-lint            ansible-lint + yamllint for mini"
@@ -21,6 +22,7 @@ help:
 	@echo "    ser5-render          Generate autoinstall/user-data and inventory.ini"
 	@echo "    ser5-provision       Converge ser5 end-to-end"
 	@echo "    ser5-preview         Dry-run: show what would change (check + diff)"
+	@echo "    ser5-verify          Assert ser5 is RUNNING what is committed (read-only)"
 	@echo "    ser5-ping            SSH connectivity check"
 	@echo "    ser5-syntax-check    Validate ser5 playbook syntax"
 	@echo "    ser5-lint            ansible-lint + yamllint for ser5"
@@ -36,6 +38,9 @@ mini-provision:
 
 mini-preview:
 	$(MAKE) -C mini preview
+
+mini-verify:
+	$(MAKE) -C mini verify
 
 mini-ping:
 	$(MAKE) -C mini ping
@@ -60,6 +65,9 @@ ser5-provision:
 
 ser5-preview:
 	$(MAKE) -C ser5 preview
+
+ser5-verify:
+	$(MAKE) -C ser5 verify
 
 ser5-ping:
 	$(MAKE) -C ser5 ping

@@ -1,0 +1,65 @@
+---
+# Read-only probes for roles/cloudflared. Appends to `problems`; changes nothing.
+#
+# cloudflared is the one service here that publishes to the public internet, so
+# an unpinned or drifted image matters more than anywhere else on the box.
+# The role default pins a dated tag for exactly that reason.
+
+- name: Check the cloudflared unit is active
+  ansible.builtin.command: systemctl --user is-active cloudflared.service
+  become: true
+  become_user: "{{ username }}"
+  environment: "{{ user_systemd_env }}"
+  register: verify_cf_unit
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Flag an inactive tunnel
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + ['cloudflared.service is ' ~ (verify_cf_unit.stdout | default('unknown')) ~ '.'] }}
+  when: verify_cf_unit.stdout | default('') != 'active'
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The pin itself
+# ─────────────────────────────────────────────────────────────────────────────
+# roles/cloudflared/defaults/main.yml pins a dated tag; group_vars/all.yml is
+# gitignored and higher precedence, so a ":latest" copied down there silently
+# defeats the pin and never shows up in a diff of tracked files. Combined with
+# cloudflared_autoupdate, that puts an unattended image on a public tunnel.
+#
+# This flags the CONFIGURATION, not the running state — the check above and below
+# would both pass while this is true.
+- name: Flag a floating image tag on the public tunnel
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'cloudflared_image is ' ~ cloudflared_image ~ ' — a floating tag on the one service '
+        ~ 'exposed to the public internet, with cloudflared_autoupdate '
+        ~ (cloudflared_autoupdate | bool) ~ '. Check group_vars/all.yml: it is gitignored and '
+        ~ 'outranks the dated pin in roles/cloudflared/defaults/main.yml.'
+      ] }}
+  when: cloudflared_image | regex_search(':(latest|main|edge)$')
+
+- name: Read the image the running tunnel was started from
+  ansible.builtin.command: >-
+    podman inspect --format {{ '{{.ImageName}}' }} cloudflared
+  become: true
+  become_user: "{{ username }}"
+  environment: "{{ user_systemd_env }}"
+  register: verify_cf_image
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Flag a tunnel running a different image than configured
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'cloudflared is running ' ~ (verify_cf_image.stdout | trim) ~ ' but the quadlet configures '
+        ~ cloudflared_image ~ '.'
+      ] }}
+  when:
+    - verify_cf_image.rc == 0
+    - (verify_cf_image.stdout | trim) != cloudflared_image

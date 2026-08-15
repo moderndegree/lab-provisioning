@@ -1,0 +1,150 @@
+---
+# Read-only probes for roles/containers. Appends to `problems`; changes nothing.
+# Generic to every quadlet on ser5 — observability, openwebui, cloudflared, and
+# whatever comes next. Service-specific checks live in those roles.
+
+- name: Check the linger marker exists
+  ansible.builtin.stat:
+    path: "/var/lib/systemd/linger/{{ username }}"
+  register: verify_linger
+
+- name: Flag missing lingering
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'user lingering is off for ' ~ username ~ ' — every rootless quadlet dies '
+        ~ 'when the last session ends, and nothing comes back after a reboot.'
+      ] }}
+  when: not verify_linger.stat.exists
+
+- name: Check the user runtime directory is live
+  ansible.builtin.stat:
+    path: "/run/user/{{ user_uid }}"
+  register: verify_runtime_dir
+
+- name: Flag a missing user runtime directory
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        '/run/user/' ~ user_uid ~ ' does not exist — the user systemd manager is not '
+        ~ 'running, so no rootless container is up regardless of what the units say.'
+      ] }}
+  when: not verify_runtime_dir.stat.exists
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Shadowed quadlets
+# ─────────────────────────────────────────────────────────────────────────────
+# THE SIX-WEEK BUG, GENERALISED. ~/.config/systemd/user/ outranks the quadlet
+# generator at /run/user/<uid>/systemd/generator/, so a same-named .service there
+# wins outright and every converge edits a file systemd is not reading.
+#
+# roles/observability/tasks/main.yml retires the two units that caused the known
+# incident by name. This catches the case nobody has hit yet — including units
+# left behind by a role that was deleted rather than migrated.
+- name: List quadlet source files
+  ansible.builtin.find:
+    paths: "{{ user_home }}/.config/containers/systemd"
+    patterns: "*.container"
+  register: verify_quadlets
+
+- name: List hand-placed user service units
+  ansible.builtin.find:
+    paths: "{{ user_home }}/.config/systemd/user"
+    patterns: "*.service"
+  register: verify_user_units
+
+- name: Flag every shadowed quadlet
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'quadlet ' ~ item ~ '.container is shadowed by ' ~ user_home ~ '/.config/systemd/user/'
+        ~ item ~ '.service — that path outranks the quadlet generator, so systemd is '
+        ~ 'running the stale unit and every converge silently edits the wrong file.'
+      ] }}
+  loop: >-
+    {{
+      verify_quadlets.files | map(attribute='path') | map('basename')
+        | map('regex_replace', '\.container$', '') | list
+      | intersect(
+          verify_user_units.files | map(attribute='path') | map('basename')
+            | map('regex_replace', '\.service$', '') | list
+        )
+    }}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pending daemon-reload
+# ─────────────────────────────────────────────────────────────────────────────
+# A .container newer than the unit generated from it means the generator has not
+# re-run since the file changed — the running service is built from the previous
+# revision. This is the second way a version bump lands on disk and nowhere else.
+- name: Stat the generated unit for each quadlet
+  ansible.builtin.stat:
+    path: "/run/user/{{ user_uid }}/systemd/generator/{{ item | basename | regex_replace('\\.container$', '.service') }}"
+  loop: "{{ verify_quadlets.files | map(attribute='path') | list }}"
+  loop_control:
+    label: "{{ item | basename }}"
+  register: verify_generated
+
+- name: Flag quadlets that never generated a unit
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        item.item | basename ~ ' has no generated unit — it was written but the user '
+        ~ 'systemd manager never ran the quadlet generator over it (daemon-reload missing).'
+      ] }}
+  loop: "{{ verify_generated.results }}"
+  loop_control:
+    label: "{{ item.item | basename }}"
+  when: not item.stat.exists
+
+- name: Flag quadlets edited since their unit was generated
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        item.item | basename ~ ' is newer than the unit generated from it — systemd is '
+        ~ 'running the previous revision of this container. Needs: systemctl --user daemon-reload.'
+      ] }}
+  loop: "{{ verify_generated.results }}"
+  loop_control:
+    label: "{{ item.item | basename }}"
+  when:
+    - item.stat.exists
+    - (verify_quadlets.files | selectattr('path', 'eq', item.item) | first).mtime > item.stat.mtime
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The authoritative shadow check
+# ─────────────────────────────────────────────────────────────────────────────
+# The intersect above only looks in the two directories this repo writes to.
+# FragmentPath is systemd's own answer to "which file did I actually load", so it
+# catches shadowing from anywhere in the unit search path — /etc/systemd/user/,
+# ~/.local/share/systemd/user/, a package drop-in, a path added since this was
+# written. For a quadlet-managed service the answer must be under
+# .../systemd/generator/; anything else means the generator lost.
+- name: Ask systemd which file each quadlet service was loaded from
+  ansible.builtin.command: >-
+    systemctl --user show {{ item }}.service -p FragmentPath --value
+  become: true
+  become_user: "{{ username }}"
+  environment: "{{ user_systemd_env }}"
+  loop: >-
+    {{ verify_quadlets.files | map(attribute='path') | map('basename')
+       | map('regex_replace', '\.container$', '') | list }}
+  register: verify_fragments
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Flag any quadlet service loaded from outside the generator
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        item.item ~ '.service is loaded from ' ~ (item.stdout | trim) ~ ', not from the '
+        ~ 'quadlet generator — systemd is running a unit this repo does not manage.'
+      ] }}
+  loop: "{{ verify_fragments.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when:
+    - item.rc | default(1) == 0
+    - (item.stdout | trim) | length > 0
+    - "'/systemd/generator/' not in (item.stdout | trim)"

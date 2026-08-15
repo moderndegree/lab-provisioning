@@ -1,0 +1,112 @@
+---
+# Read-only probes for roles/openwebui. Appends to `problems`; changes nothing.
+
+- name: Check the Open WebUI unit is active
+  ansible.builtin.command: systemctl --user is-active openwebui.service
+  become: true
+  become_user: "{{ username }}"
+  environment: "{{ user_systemd_env }}"
+  register: verify_owui_unit
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Flag an inactive Open WebUI
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + ['openwebui.service is ' ~ (verify_owui_unit.stdout | default('unknown')) ~ '.'] }}
+  when: verify_owui_unit.stdout | default('') != 'active'
+
+# openwebui_autoupdate leaves `podman auto-update` running on a timer. That is
+# nearly inert against a fixed release tag — but "nearly" is the point: a re-push
+# of the same tag lands a different image with the pin unchanged, and this is the
+# only place that would show it. The image tag matching is not the check; the
+# running container's image is.
+- name: Read the image the running container was started from
+  ansible.builtin.command: >-
+    podman inspect --format {{ '{{.ImageName}}' }} openwebui
+  become: true
+  become_user: "{{ username }}"
+  environment: "{{ user_systemd_env }}"
+  register: verify_owui_image
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Flag Open WebUI running a stale image
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'openwebui is running ' ~ (verify_owui_image.stdout | trim) ~ ' but the quadlet pins '
+        ~ openwebui_image ~ '.'
+      ] }}
+  when:
+    - verify_owui_image.rc == 0
+    - (verify_owui_image.stdout | trim) != openwebui_image
+
+- name: Check Open WebUI answers
+  ansible.builtin.uri:
+    url: "http://{{ openwebui_host }}:{{ openwebui_port }}/health"
+    timeout: "{{ verify_http_timeout }}"
+  register: verify_owui_health
+  failed_when: false
+  check_mode: false
+
+- name: Flag Open WebUI not answering
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'Open WebUI is not answering on ' ~ openwebui_host ~ ':' ~ openwebui_port ~ '.'
+      ] }}
+  when: verify_owui_health.status | default(0) != 200
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Upstream reachability
+# ─────────────────────────────────────────────────────────────────────────────
+# The model picker is populated from each backend's /v1/models at request time.
+# When mini's llama-server is down the UI still loads perfectly and simply offers
+# no models — a failure that looks like a UI bug from the browser and produces no
+# error anywhere on ser5. Checked from ser5's own netns rather than inside the
+# container, so a DNSSearch regression in openwebui.network shows up as this
+# check passing while the picker stays empty; that narrowing is the useful part.
+- name: Check each configured OpenAI backend answers
+  ansible.builtin.uri:
+    url: "{{ item }}/models"
+    timeout: "{{ verify_http_timeout }}"
+    return_content: true
+  loop: "{{ openwebui_openai_base_urls | split(';') | map('trim') | reject('eq', '') | list }}"
+  register: verify_owui_backends
+  failed_when: false
+  check_mode: false
+  when: openwebui_enable_openai_api | bool
+
+- name: Flag an unreachable model backend
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'Open WebUI backend ' ~ item.item ~ ' is not answering — the model picker will be '
+        ~ 'empty for it, with no error shown in the UI.'
+      ] }}
+  loop: "{{ verify_owui_backends.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item | default('') }}"
+  when:
+    - item.skipped is not defined
+    - item.status | default(0) != 200
+
+# Positional pairing of URLs to keys is load-bearing: Open WebUI silently SKIPS
+# any endpoint whose key is empty, so a list-length mismatch removes a backend
+# from the picker without erroring anywhere.
+- name: Flag a URL/key list-length mismatch
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'openwebui_openai_base_urls has ' ~ (openwebui_openai_base_urls | split(';') | length)
+        ~ ' entries but openwebui_openai_api_keys has '
+        ~ (openwebui_openai_api_keys | split(';') | length)
+        ~ ' — the lists are positional and an unpaired endpoint is silently skipped.'
+      ] }}
+  when:
+    - openwebui_enable_openai_api | bool
+    - (openwebui_openai_base_urls | split(';') | length)
+      != (openwebui_openai_api_keys | split(';') | length)

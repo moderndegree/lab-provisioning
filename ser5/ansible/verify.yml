@@ -1,0 +1,127 @@
+---
+# Assert what ser5 is ACTUALLY running — not what a converge said it applied.
+# Run: make verify
+#
+# WHY THIS EXISTS. ser5 is where the lesson was learned. Prometheus 2.55.1 and
+# Grafana 11.4.0 served here for roughly six weeks against quadlets that said
+# 3.13.2 and 13.1.1: a leftover ~/.config/systemd/user/<name>.service outranked
+# the quadlet generator, so Ansible kept rewriting a file systemd was not using.
+# Every converge was green. `systemctl restart` "worked" — it restarted the
+# shadowing unit. Nothing short of asking the running Prometheus its own version
+# would have caught it.
+#
+# roles/observability/tasks/main.yml now retires the specific units it knows
+# about, but that is a fix for one incident, not a detector for the next one.
+# This playbook is the detector, and it prefers the service's own answer to
+# systemd's: Grafana's /api/health, Prometheus's /api/v1/status/buildinfo, the
+# restic repo's own snapshot list.
+#
+# It changes nothing — every task is a probe with changed_when: false — and it
+# collects findings rather than stopping at the first, so one dead service does
+# not hide the other four.
+#
+# The `when: enable_*` gates below mirror site.yml exactly. Keep them in step:
+# a role that provisions but is never verified is worse than one that does
+# neither, because it looks covered.
+
+- name: Verify ser5's running state
+  hosts: ser5_host
+  become: true
+  gather_facts: true
+
+  vars:
+    verify_http_timeout: 5
+
+  tasks:
+    - name: Start with an empty problem list
+      ansible.builtin.set_fact:
+        problems: []
+
+    - name: Look up the provisioned user's uid
+      ansible.builtin.getent:
+        database: passwd
+        key: "{{ username }}"
+
+    - name: Build the rootless user environment
+      ansible.builtin.set_fact:
+        user_uid: "{{ getent_passwd[username][1] }}"
+        user_systemd_env:
+          XDG_RUNTIME_DIR: "/run/user/{{ getent_passwd[username][1] }}"
+          DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ getent_passwd[username][1] }}/bus"
+
+    - name: Collect the unit state once for every role that needs it
+      ansible.builtin.service_facts:
+
+    - name: Verify host basics
+      ansible.builtin.include_role:
+        name: base
+        tasks_from: verify
+
+    - name: Verify the data disk
+      ansible.builtin.include_role:
+        name: storage
+        tasks_from: verify
+
+    - name: Verify rootless container prerequisites
+      ansible.builtin.include_role:
+        name: containers
+        tasks_from: verify
+
+    - name: Verify the tailnet
+      ansible.builtin.include_role:
+        name: tailscale
+        tasks_from: verify
+
+    - name: Verify pinned developer tooling
+      ansible.builtin.include_role:
+        name: devtools
+        tasks_from: verify
+
+    - name: Verify the Cloudflare tunnel
+      ansible.builtin.include_role:
+        name: cloudflared
+        tasks_from: verify
+      when: enable_cloudflared | bool
+
+    - name: Verify Hermes
+      ansible.builtin.include_role:
+        name: hermes
+        tasks_from: verify
+      when: enable_hermes | bool
+
+    - name: Verify Open WebUI
+      ansible.builtin.include_role:
+        name: openwebui
+        tasks_from: verify
+      when: enable_openwebui | bool
+
+    - name: Verify the observability stack
+      ansible.builtin.include_role:
+        name: observability
+        tasks_from: verify
+      when: enable_observability | bool
+
+    - name: Verify backups
+      ansible.builtin.include_role:
+        name: backups
+        tasks_from: verify
+      when: enable_backups | bool
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Report
+    # ─────────────────────────────────────────────────────────────────────────
+    - name: Report a clean box
+      ansible.builtin.debug:
+        msg: "ser5 verified — running state matches the committed configuration."
+      when: problems | length == 0
+
+    - name: Fail with every finding at once
+      ansible.builtin.fail:
+        msg: |-
+          ser5's running state does not match the committed configuration.
+
+          {{ problems | map('regex_replace', '^', '  ✗ ') | join('\n') }}
+
+          These are drift, not converge failures — `make provision` may well be
+          green. Re-read each line before re-running it.
+      when: problems | length > 0

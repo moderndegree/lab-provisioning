@@ -1,0 +1,116 @@
+---
+# Read-only probes for roles/backups. Appends to `problems`; changes nothing.
+#
+# A backup timer is the single worst thing in this repo to trust a green converge
+# on. `systemctl is-enabled restic-backup.timer` returning "enabled" proves the
+# unit file exists — nothing more. The repo can be unwritable, the password can
+# be wrong, the data disk can be unmounted so restic dutifully snapshots empty
+# directories, and the timer will keep firing and keep "succeeding" from
+# systemd's point of view.
+#
+# So the real check is the last line here: ask the RESTIC REPO when it last
+# received a snapshot. Everything above it is diagnosis for when that fails.
+
+- name: Check the backup timer is active
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'restic-backup.timer is '
+        ~ (ansible_facts.services['restic-backup.timer'].state | default('absent'))
+        ~ ' — no scheduled backups are running.'
+      ] }}
+  when: >-
+    ansible_facts.services['restic-backup.timer'] is not defined
+    or ansible_facts.services['restic-backup.timer'].state != 'running'
+
+# Distinct from the timer: the last RUN can have failed while the timer stays
+# perfectly healthy and simply tries again tomorrow.
+- name: Read the result of the last backup run
+  ansible.builtin.command: >-
+    systemctl show restic-backup.service -p Result -p ExecMainStatus --value
+  register: verify_restic_result
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Flag a failed last backup run
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'the last restic-backup.service run ended with result "'
+        ~ (verify_restic_result.stdout_lines[0] | default('unknown') | trim)
+        ~ '" — the timer is fine, the backup is not.'
+      ] }}
+  when:
+    - verify_restic_result.rc == 0
+    - (verify_restic_result.stdout_lines[0] | default('') | trim) not in ['success', '']
+
+- name: Check the restic repo is readable and ask when it last received a snapshot
+  ansible.builtin.command: >-
+    restic -r {{ restic_repo }} snapshots --latest 1 --json
+  environment:
+    RESTIC_PASSWORD: "{{ restic_password }}"
+  register: verify_restic_snaps
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  no_log: true
+
+- name: Flag an unreadable restic repo
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'the restic repo at ' ~ restic_repo ~ ' cannot be read — wrong password, missing '
+        ~ 'repo, or ' ~ data_mount ~ ' not mounted. Nothing is being backed up.'
+      ] }}
+  when: verify_restic_snaps.rc != 0
+
+# Snapshots are daily (restic_oncalendar), so anything older than ~2 days means
+# runs have been failing or the timer has not fired. Two days rather than one so
+# a single missed window during downtime is not noise — Persistent=true catches
+# that up on its own.
+- name: Flag a stale most-recent snapshot
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'the most recent restic snapshot is from '
+        ~ ((verify_restic_snaps.stdout | from_json) | first).time
+        ~ ' — backups are scheduled daily (' ~ restic_oncalendar ~ ') and have not run since.'
+      ] }}
+  when:
+    - verify_restic_snaps.rc == 0
+    - (verify_restic_snaps.stdout | from_json) | length > 0
+    - >-
+      ((verify_restic_snaps.stdout | from_json) | first).time[:19]
+      < '%Y-%m-%dT%H:%M:%S' | strftime((ansible_date_time.epoch | int) - 172800)
+
+- name: Flag a repo with no snapshots at all
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'the restic repo at ' ~ restic_repo ~ ' is readable but contains NO snapshots.'
+      ] }}
+  when:
+    - verify_restic_snaps.rc == 0
+    - (verify_restic_snaps.stdout | from_json) | length == 0
+
+# The paths are the point. A path that silently stopped existing (a renamed
+# directory, an unmounted disk) is excluded from every future snapshot with no
+# warning — restic backs up what it finds and reports success.
+- name: Stat every configured backup path
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop: "{{ restic_backup_paths }}"
+  register: verify_restic_paths
+
+- name: Flag configured backup paths that do not exist
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'backup path ' ~ item.item ~ ' does not exist — it is silently absent from every '
+        ~ 'snapshot and restic still reports success.'
+      ] }}
+  loop: "{{ verify_restic_paths.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: not item.stat.exists

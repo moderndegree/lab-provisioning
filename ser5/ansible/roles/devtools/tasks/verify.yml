@@ -1,0 +1,83 @@
+---
+# Read-only probes for roles/devtools. Appends to `problems`; changes nothing.
+#
+# Every version in group_vars was pinned BECAUSE the box had already drifted off
+# it — opencode was pinned at 1.18.17 after being found at 1.18.13, grok and
+# tailscale were pinned to "what is installed". Pinning records the intent; it
+# does not detect the next drift. npm in particular will happily leave a newer
+# global package in place, and `state: present` with a version is not enforced on
+# an already-installed package by every path through this role.
+#
+# These read the binaries. A mismatch is not automatically a fault — it usually
+# means someone upgraded deliberately and the var needs updating — but it should
+# never be a surprise.
+
+- name: Read the active Node version
+  ansible.builtin.command: "{{ user_home }}/.n/bin/node --version"
+  become: true
+  become_user: "{{ username }}"
+  register: verify_node
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Flag a Node version off the pin
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'node is ' ~ (verify_node.stdout | trim) ~ ' but node_version pins ' ~ node_version ~ '.'
+      ] }}
+  when:
+    - node_version not in ['lts', 'latest']
+    - verify_node.rc == 0
+    - (verify_node.stdout | trim | regex_replace('^v', '')) != (node_version | regex_replace('^v', ''))
+
+- name: Flag a missing Node install
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [user_home ~ '/.n/bin/node is not runnable — the user-prefix Node install is gone.'] }}
+  when: verify_node.rc != 0
+
+- name: Read the installed opencode version
+  ansible.builtin.command: "{{ user_home }}/.npm-global/bin/opencode --version"
+  become: true
+  become_user: "{{ username }}"
+  environment:
+    PATH: "{{ user_home }}/.npm-global/bin:{{ user_home }}/.n/bin:/usr/local/bin:/usr/bin:/bin"
+  register: verify_opencode
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Flag an opencode version off the pin
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'opencode is ' ~ (verify_opencode.stdout_lines[-1] | trim) ~ ' but opencode_version pins '
+        ~ opencode_version ~ ' — this is the exact drift the pin was added for.'
+      ] }}
+  when:
+    - opencode_version not in ['latest']
+    - verify_opencode.rc == 0
+    - opencode_version not in (verify_opencode.stdout | default(''))
+
+- name: Read the installed Grok Build version
+  ansible.builtin.command: "{{ user_home }}/.grok/bin/grok --version"
+  become: true
+  become_user: "{{ username }}"
+  register: verify_grok
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Flag a Grok Build version off the pin
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'grok is ' ~ (verify_grok.stdout_lines[-1] | trim) ~ ' but grok_version pins '
+        ~ grok_version ~ ' (grok_auto_update is ' ~ (grok_auto_update | bool) ~ ').'
+      ] }}
+  when:
+    - grok_version not in ['latest']
+    - verify_grok.rc == 0
+    - grok_version not in (verify_grok.stdout | default(''))

@@ -1,0 +1,39 @@
+---
+# Read-only probes for roles/base. Appends to `problems`; changes nothing.
+
+# ser5 has NO blanket tailscale0 allow (unlike mini) — Grafana and Open WebUI are
+# bound to loopback and reached via `tailscale serve` or the tunnel. That posture
+# only holds while UFW is up; Prometheus publishes on 0.0.0.0:9090 and would
+# otherwise be on the wifi LAN.
+- name: Check UFW status
+  ansible.builtin.command: ufw status
+  register: verify_ufw
+  changed_when: false
+  check_mode: false
+
+- name: Flag an inactive firewall
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'UFW is not active — Prometheus publishes on 0.0.0.0:' ~ prometheus_port | default(9090)
+        ~ ' and is currently reachable from the whole LAN.'
+      ] }}
+  when: "'Status: active' not in verify_ufw.stdout"
+
+- name: Flag a stopped sshd
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + ['ssh.service is not running — this box is the always-on loop driver.'] }}
+  when: >-
+    ansible_facts.services['ssh.service'] is not defined
+    or ansible_facts.services['ssh.service'].state != 'running'
+
+# A hostname that drifted breaks MagicDNS resolution from mini and silently
+# changes how Prometheus labels this box's own series.
+- name: Flag a hostname mismatch
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'hostname is ' ~ ansible_facts.hostname ~ ' but group_vars sets ' ~ hostname ~ '.'
+      ] }}
+  when: ansible_facts.hostname != hostname

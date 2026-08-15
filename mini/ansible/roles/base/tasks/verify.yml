@@ -1,0 +1,103 @@
+---
+# Read-only probes for roles/base. Appends to `problems`; changes nothing.
+# Included by ../../../verify.yml — see that file for why this exists.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Kernel cmdline
+# ─────────────────────────────────────────────────────────────────────────────
+# The single highest-value check on this box. tasks/main.yml writes the gfx1151
+# flags into /etc/default/grub and site.yml reboots — but only when auto_reboot
+# is true AND the lineinfile actually reported changed. Edit the flags by hand,
+# converge with auto_reboot false, or reboot into an older kernel entry, and the
+# file says one thing while the running kernel does another. amdgpu.gttsize is
+# what allows a ~83 GiB resident model set; silently losing it looks like the
+# GPU "just being slow", never like a config error.
+#
+# Compared token-by-token rather than as a string so flag ORDER and unrelated
+# boot-time additions (root=, ro, initrd) never produce a false positive.
+- name: Read the configured kernel cmdline
+  ansible.builtin.slurp:
+    src: /etc/default/grub
+  register: verify_grub_file
+
+- name: Read the running kernel cmdline
+  ansible.builtin.slurp:
+    src: /proc/cmdline
+  register: verify_proc_cmdline
+
+- name: Diff configured cmdline flags against the running ones
+  ansible.builtin.set_fact:
+    verify_cmdline_missing: >-
+      {{
+        (verify_grub_file.content | b64decode).splitlines()
+          | select('match', '^GRUB_CMDLINE_LINUX_DEFAULT=')
+          | map('regex_replace', '^GRUB_CMDLINE_LINUX_DEFAULT="?(.*?)"?$', '\1')
+          | join(' ') | split
+          | reject('in', (verify_proc_cmdline.content | b64decode) | split)
+          | list
+      }}
+
+- name: Flag kernel cmdline drift
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'kernel cmdline drift — /etc/default/grub sets ' ~ (verify_cmdline_missing | join(' ')) ~
+        ' but /proc/cmdline does not have it. The box needs a reboot (or update-grub never ran).'
+      ] }}
+  when: verify_cmdline_missing | length > 0
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Firewall
+# ─────────────────────────────────────────────────────────────────────────────
+# UFW is the single control point for the llama-server ports, which bind on
+# 0.0.0.0 because the quadlets use Network=host. If UFW is inactive, those ports
+# are on the LAN, not just the tailnet.
+- name: Check UFW status
+  ansible.builtin.command: ufw status
+  register: verify_ufw
+  changed_when: false
+  check_mode: false
+
+- name: Flag an inactive firewall
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'UFW is not active — llama-server binds 0.0.0.0 (Network=host), so its '
+        ~ 'ports are currently reachable from the whole LAN, not just the tailnet.'
+      ] }}
+  when: "'Status: active' not in verify_ufw.stdout"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Data disk
+# ─────────────────────────────────────────────────────────────────────────────
+# Only meaningful when a dedicated disk is configured. The failure this catches
+# is a real mount silently becoming a plain directory on root after a disk that
+# did not come back — models "disappear" and llama-server fails its GGUF stat.
+- name: Check the data disk is mounted
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        data_mount ~ ' is configured as a dedicated disk (has_data_disk: true) but is '
+        ~ 'not a mount point — it is a plain directory on the root filesystem.'
+      ] }}
+  when:
+    - has_data_disk | bool
+    - data_mount not in (ansible_mounts | map(attribute='mount') | list)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Metrics
+# ─────────────────────────────────────────────────────────────────────────────
+# ser5's Prometheus scrapes this. When it dies, the dashboards go flat rather
+# than red, so nothing tells you until you go looking.
+- name: Check prometheus-node-exporter is running
+  ansible.builtin.service_facts:
+
+- name: Flag a stopped node exporter
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'prometheus-node-exporter is not running — ser5 Grafana will show gaps, not alerts.'
+      ] }}
+  when: >-
+    ansible_facts.services['prometheus-node-exporter.service'] is not defined
+    or ansible_facts.services['prometheus-node-exporter.service'].state != 'running'
