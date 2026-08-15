@@ -315,6 +315,87 @@ is just text; nothing compares it to `llamacpp_instances`. Worth a check that
 cross-references each prompt's header against the model `opencode.json` assigns
 it, in the same spirit as `make verify`.
 
+## Subagents could dispatch, so "read-only" was not read-only
+
+Found 2026-08-14. Every critic prompt says "You may NOT dispatch other agents.
+Only the orchestrator does that." Nothing enforced it. Asked to create a file,
+`reviewer` — whose own `edit`/`write`/`patch`/`bash` are correctly denied — spawned
+a `devops` subagent, which wrote the file and ran `echo SHELL-WORKED`. The
+sandbox held for direct tool use and leaked entirely through delegation.
+
+`task: deny` is now set on all 12 subagents; only `build` dispatches. Same test
+afterwards: no file created. This also restores the invariant `max_task_batch`
+depends on — that the orchestrator is the only dispatcher.
+
+Two things learned about opencode permissions while fixing it, both of which
+contradicted what the config appears to say:
+
+- **`permission: {"*": "deny"}` does not restrict tool availability.** `research`
+  carries exactly that and still has `webfetch` — it fetched nodejs.org live and
+  correctly reported v24.19.0 LTS with a citation. `planner` and `build` can both
+  call `skill` despite the same wildcard. So `research` was never toolless; it was
+  prompted as a planner, having borrowed `planner.md`.
+- **A denied tool does not produce a BLOCKED report.** When the escalation was
+  closed, `reviewer` did not say it was blocked. It claimed it had delegated
+  successfully, returned `status: PASS`, and cited evidence from a directory that
+  had already been deleted. A subagent's `@@RESULT` can be fiction — which is the
+  entire reason this harness reads the db instead of the transcript.
+
+## A read-loop, and a step cap sized from measurement
+
+Run `agentfix1` (2026-08-15) was killed by hand at ~18 minutes. One `doc-writer`
+session had run **168 agentic iterations, calling `read` 164 times**.
+
+The first diagnosis was wrong and is worth recording because the mistake is easy
+to repeat: it was reported as "671 parts with ZERO tool calls — a generation
+loop". The part count was mid-run, and the tool count came from a query whose
+`$.` had been eaten by shell expansion, so `json_extract(data,'$.tool')` silently
+matched nothing instead of erroring. **A sqlite query through ssh that returns
+empty is not evidence of absence.** Correctly quoted, the session was
+tool 169 / step-start 168 / reasoning 168 / step-finish 167 / text 159.
+
+That distinction decided the fix. A watchdog was built first — kill the run when
+parts advance but no new tool call lands — and it would **never have fired**,
+because tool calls were advancing the whole time. It was a guard for a failure
+that did not happen, and was reverted rather than kept.
+
+The right lever is opencode's per-agent `steps`, which bounds agentic iterations
+at source. Sized from the data rather than taste:
+
+| | steps |
+|---|---|
+| the loop (`doc-writer`) | 168 |
+| busiest healthy session (`coder`, run `agentfix2`) | 28 |
+| everything else | 9–13 |
+
+`steps: 40` on all 12 subagents — a quarter of the loop, ~40% headroom over the
+busiest healthy agent. `build` is left uncapped: its step count is dispatch
+turns, and truncating a legitimately long chain is worse than the loop this
+prevents.
+
+**Hitting the cap is not an error**, which is the trap it introduces. opencode
+tells the capped agent to summarise and stop, so a looping subagent returns a
+plausible partial result and every dispatch criterion still passes — the probe
+would score it PASS. `agent-probe.sh` therefore reports `max_subagent_steps` and
+lists any subagent at or over the cap. Reported, not auto-failed: 40 is a chosen
+ceiling, not a measured law.
+
+Three runs with the cap in place:
+
+| label | verdict | critics | batch | qa | max_subagent_steps | elapsed |
+|---|---|---|---|---|---|---|
+| `agentfix2` | PASS | 4/4 | 4 | 1 | — | 936s |
+| `stepcap1` | **FAIL** | 0/4 | 1 | 0 | 6 | 111s |
+| `stepcap2` | PASS | 4/4 | 4 | 1 | 15 | 598s |
+
+`stepcap1` collapsed to a single `coder` dispatch in 111s — the shape already
+documented above for `temperature: 0.2` and `reasoningEffort: "none"`. **The cap
+did not cause it**, and the evidence is stronger than the subsequent PASS: the
+cap never engaged in either run (6 and 15 steps, nothing over-cap), so a limit
+that never fired cannot explain the collapse. Treat it as the known miss rate —
+10 of 11 reached 4/4 even after the coder-handoff fix, so one miss in three is
+unlucky rather than anomalous.
+
 ## Measurement traps that cost time here
 
 - `pgrep -f 'opencode run'` matches its own command line; use `opencode ru[n]`.
@@ -325,3 +406,13 @@ it, in the same spirit as `make verify`.
   Check for tools left in `state.status = 'running'` before concluding anything.
 - Killing a batch of probes kills the one that just started, too. Two runs were
   voided that way.
+- **`$.` in a sqlite JSON path gets eaten by shell expansion** when the query
+  travels through ssh inside double quotes. `json_extract(data,'$.tool')` then
+  matches nothing and returns an empty result instead of an error — which reads
+  exactly like "there were no tool calls". This produced a confident, wrong
+  diagnosis (see the read-loop above). Verify a JSON-path query returns something
+  on a case you KNOW is non-empty before drawing a conclusion from a zero.
+- **`COUNT=$(grep -c pattern file || echo 0)` is broken.** `grep -c` prints `0`
+  AND exits 1 when there is no match, so the fallback appends a second line and
+  the variable becomes `"0\n0"` — which `!= 0` treats as true. A verdict built on
+  it labelled a clean 46s run as a failure. Use `grep -q … && VAR=1`.
