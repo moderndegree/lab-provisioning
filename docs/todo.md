@@ -196,16 +196,71 @@ answer down; if it's "yes, drifted," that's what triggers the freeze above.
       able to egress to a third party. The manual and `ser5/README.md` are corrected;
       the ROUTE is not.
 
-      Hermes speaks only `OLLAMA_BASE_URL`, so mini's OpenAI-compatible `:8090/v1` is
-      not a drop-in substitute. Options, none yet chosen:
-      1. Run Ollama on mini again purely as a Hermes backend — costs residency that
-         llama-server currently owns, and reintroduces the memory contention that
-         stopping it resolved.
-      2. Put an Ollama-protocol shim in front of `:8090`.
-      3. Accept Hermes as a Tier X personal surface and never send client material
-         through it. Cheapest, and matches how it actually behaves today.
+      **Route reconfigured 2026-08-14 — options 1 and 2 are moot.** The premise
+      above ("Hermes speaks only `OLLAMA_BASE_URL`") was true of the build installed
+      on ser5, not of Hermes. Current Hermes has a first-class `custom` provider for
+      any endpoint serving `/v1/chat/completions`:
+      https://hermes-agent.nousresearch.com/docs/integrations/providers
 
-      Until this is decided, treat Hermes as third-party-egress.
+      `roles/hermes` now writes `model.provider=custom`,
+      `model.base_url=http://mini:8090/v1`, `model.default=qwen3.6-35b-a3b-mtp` and
+      `model.context_length=262144` via `hermes config set`, and the dead
+      `OLLAMA_BASE_URL` is gone from all three unit templates. No Ollama residency,
+      no shim.
+
+- [x] **APPLIED AND VERIFIED ON THE BOX 2026-08-14 19:35.** Set directly over SSH
+      with `hermes config set`; a later `make provision` is a no-op on these keys.
+      config.yaml now reads provider `custom`, base_url `http://mini:8090/v1`,
+      default `qwen3.6-35b-a3b-mtp`, context_length `262144`.
+
+      Proof is end-to-end, not from config: `hermes chat -q "..." -Q` returned the
+      answer while mini's own counters moved — `prompt_tokens_total` 20779→20797,
+      `tokens_predicted_total` 20→48, `n_decode_total` 19→29. Hermes v0.19.0 does
+      support `custom` (980 refs in the installed source tree).
+
+      Left in place: `model.ollama_num_ctx: 192000`, an inert Ollama-era leftover.
+
+- [ ] **Three findings on the box that contradict the 2026-08-04 note above.**
+      1. The route was NOT OpenRouter. It was `provider: xai-oauth`,
+         `base_url: https://api.x.ai/v1` — egress to **xAI**, a different third
+         party than recorded. Still not Tier L, but the note named the wrong one.
+      2. `model.default` was `qwen3.6:35b-a3b-mtp-q4_K_M`, an Ollama-style name
+         mini's llama-server never advertised (it serves `qwen3.6-35b-a3b-mtp`).
+         So the model name was wrong too, not just the endpoint.
+      3. **`hermes proxy` is a NOUS PORTAL proxy**, not a proxy for the configured
+         model — "Forwarding to: (resolved per-request from your subscription)".
+         It reads neither `model.provider` nor `base_url`. The "292 OpenRouter
+         models" reading was therefore never evidence about the default route.
+
+- [ ] **hermes-proxy is broken independent of routing.** It exits 2 with "Not
+      logged into Nous Portal. Run `hermes auth add nous` first." — there is no
+      `nous` credential in `hermes auth list`. Confirmed by A/B: it fails
+      identically with provider `custom` and provider `xai-oauth`. It had been
+      "active" only because it was last started long ago; it dies on ANY restart,
+      so the next reboot would have taken it out regardless. Stopped 2026-08-14 to
+      end a 15s restart loop (6 restarts), left ENABLED so it returns once fixed.
+      Fixing needs the interactive `hermes auth add nous` device-code flow.
+
+- [ ] **Decide what happens to the FOUR hosted credentials.** THIS IS THE REMAINING
+      GOVERNANCE ITEM and the routing change does not resolve it. `hermes auth list`
+      on the box shows live credentials for:
+
+        openrouter     OPENROUTER_API_KEY
+        opencode-zen   OPENCODE_ZEN_API_KEY
+        copilot        COPILOT_GITHUB_TOKEN
+        xai-oauth      device_code  ← was the active default provider until today
+
+      Setting a default model does not remove a route. Each of these is reachable
+      on fallback, on an explicit `--provider`, or on a `-m` naming a hosted model.
+      mini is wifi-only with a known powersave problem, so "mini unreachable" is
+      routine rather than hypothetical. Either remove them (Hermes hard-fails when
+      mini is down — the correct behaviour for Tier L) or keep them and accept
+      Hermes as Tier X.
+
+      Note `fallback_providers: []` is already empty, which helps but is not the
+      same as having no credentials.
+
+      Until that is decided, treat Hermes as third-party-egress.
 
 ## Backups — turned on 2026-08-05 (was off since the box was built)
 

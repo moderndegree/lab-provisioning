@@ -9,8 +9,8 @@ Type=simple
 Environment=HOME={{ user_home }}
 Environment=HERMES_HOME={{ hermes_home }}
 Environment=PATH={{ hermes_path }}
-# Same inference routing as the gateway: mini serves Tier L over the tailnet.
-Environment=OLLAMA_BASE_URL={{ hermes_ollama_base_url }}
+# Inference routing lives in HERMES_HOME/config.yaml, not in the environment —
+# see the note in hermes-gateway.service.j2.
 # Foreground mode; binds beyond localhost so tailnet peers can reach it
 # (UFW restricts the port to {{ hermes_tailnet_interface }}).
 ExecStart={{ hermes_bin }} proxy start --host {{ hermes_proxy_host }} --port {{ hermes_proxy_port }}

@@ -9,7 +9,7 @@ This lab is three things: the dev environment for a solo AI consulting practice,
 | Is it client-confidential? | mini over the tailnet | opencode pointed at `http://mini:8090/v1` | L | Data stays on hardware the owner controls; mini is the sovereign inference appliance. |
 | Am I at the desk on my own repos? | Windows workstation | GitHub Copilot CLI | G | Pro+ buys frontier models at a flat rate; the gaming PC is the primary cockpit. |
 | Should it run for hours without me? | ser5, or GitHub cloud | Grok Build CLI on ser5, or assign a GitHub issue to Copilot cloud agent | X or G | ser5 survives disconnects via systemd; cloud sessions need no lab uptime. |
-| Am I away from a computer? | ser5 | Hermes from the phone | **Not L — Hermes egresses to OpenRouter (verified 2026-08-04)** | Tailscale gives private reach, but reach is not confidentiality. Never client-confidential until the route is fixed. |
+| Am I away from a computer? | ser5 | Hermes dashboard (`:9119`) from the phone | **Not L — routes to mini as of 2026-08-14 (verified), but 4 hosted credentials remain** | Tailscale gives private reach, but reach is not confidentiality. A default model is not a boundary while openrouter/opencode-zen/copilot/xai-oauth can still be reached. |
 | Am I choosing between models or measuring quality? | ser5 driving mini | `packages/inference-bench` scripts | L | Measurements belong off mini; mini should only answer tokens. |
 
 ## Routing tiers
@@ -158,7 +158,7 @@ Start it: run AI Workstation with `CORTEX_VAULT_DIR=/data/brain`, or open `/data
 1. Connect Tailscale iOS. Private names `mini` and `ser5` should resolve; nothing is exposed to the internet.
 2. Open Hermes dashboard at `http://ser5:9119` in Safari.
 3. Add it to Home Screen. This is the sovereign phone surface because it is tailnet-only.
-4. For client-confidential work, use Hermes dashboard only, routed to Tier L on mini.
+4. For client-confidential work, do NOT use Hermes yet — its route to mini is configured but unverified and its OpenRouter fallback is still live (`docs/todo.md`). SSH to mini, or opencode against `http://mini:8090/v1`.
 5. For personal and lab work, use the already-configured Hermes Telegram or Discord gateways for chat-driven task initiation.
 6. Treat Telegram and Discord as third-party paths: notifications and personal lab work only, never client-confidential.
 7. To start real coding from the couch, use GitHub mobile: assign an issue to the Copilot cloud agent, then review the PR.
@@ -172,7 +172,7 @@ Start it: run AI Workstation with `CORTEX_VAULT_DIR=/data/brain`, or open `/data
 - Never start Ollama while llama-server is running — they cannot both hold weights in 122 GiB.
 - Never raise total context blind; `-c 2097152` hung the GPU allocator and needed a reboot.
 - Embeddings live on ser5's CPU.
-- Never send client-confidential material through Hermes until its route is fixed (see `todo.md`).
+- Never send client-confidential material through Hermes until its four hosted credentials (openrouter, opencode-zen, copilot, xai-oauth) are gone. The mini route is verified as of 2026-08-14; the credentials are the remaining boundary (see `todo.md`).
 - Client-confidential work never touches Telegram or Discord.
 - Client-confidential work never leaves Tier L without explicit written consent.
 - The lab never hosts client production.

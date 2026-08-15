@@ -121,6 +121,80 @@
       notify:
         - restart hermes-gateway
 
+    # ─── Model routing: mini's llama-server (qwen3.6) ─────────────────────────
+    # Applied through `hermes config set` rather than by templating config.yaml,
+    # because Hermes OWNS that file — it writes sessions, auth and skill state
+    # into it, and a template would clobber all of that on every converge.
+    #
+    # Idempotency is done by reading the file and diffing, not by trusting the
+    # command: `hermes config set` returns 0 whether or not it changed anything,
+    # so an unguarded loop would report changed every run and restart all three
+    # services with it.
+    - name: Read the current Hermes config
+      ansible.builtin.slurp:
+        src: "{{ hermes_home }}/config.yaml"
+      register: hermes_config_raw
+      failed_when: false
+      when: hermes_manage_model | bool
+
+    - name: Work out which model settings actually need changing
+      ansible.builtin.set_fact:
+        hermes_model_current: >-
+          {{ ((hermes_config_raw.content | default('') | b64decode | from_yaml) or {}).get('model', {}) or {} }}
+        hermes_model_desired:
+          provider: "{{ hermes_model_provider }}"
+          base_url: "{{ hermes_model_base_url }}"
+          default: "{{ hermes_model_default }}"
+          context_length: "{{ hermes_model_context_length }}"
+      when: hermes_manage_model | bool
+
+    # One `config set` per differing key. Restarting is gated on a real change so
+    # a steady-state converge does not bounce the gateway (which drops any
+    # in-flight Discord conversation).
+    - name: Point Hermes at mini's llama-server
+      ansible.builtin.command:
+        cmd: "{{ hermes_bin }} config set model.{{ item.key }} {{ item.value }}"
+      environment:
+        HOME: "{{ user_home }}"
+        HERMES_HOME: "{{ hermes_home }}"
+        PATH: "{{ hermes_path }}"
+      become: true
+      become_user: "{{ username }}"
+      loop: "{{ hermes_model_desired | dict2items }}"
+      loop_control:
+        label: "model.{{ item.key }} = {{ item.value }}"
+      register: hermes_model_set
+      changed_when: hermes_model_set.rc == 0
+      when:
+        - hermes_manage_model | bool
+        - (hermes_model_current[item.key] | default('') | string) != (item.value | string)
+      notify:
+        - restart hermes-gateway
+        - restart hermes-proxy
+        - restart hermes-dashboard
+
+    # Fail loudly rather than leaving Hermes silently on its previous route. The
+    # whole point of this block is that a wrong route here is invisible: Hermes
+    # does not error when its configured endpoint is unreachable, it falls
+    # through to whatever other provider still has credentials — which is exactly
+    # how this box ended up serving 292 OpenRouter models against a dead
+    # mini:11434 for weeks (docs/todo.md, found 2026-08-04).
+    - name: Require every model setting to have applied
+      ansible.builtin.assert:
+        that:
+          - item.rc | default(0) == 0
+        fail_msg: >-
+          `hermes config set model.{{ item.item.key }}` failed:
+          {{ item.stderr | default(item.stdout | default('no output')) }}.
+          Hermes is still routing wherever it was — check `hermes --version`,
+          since the `custom` provider needs a build that has it.
+      loop: "{{ hermes_model_set.results | default([]) }}"
+      loop_control:
+        label: "model.{{ item.item.key | default('') }}"
+      when:
+        - hermes_manage_model | bool
+        - item.skipped is not defined
+
     # ─── Optional web.backend: xai ────────────────────────────────────────────
     # Only patches config.yaml when hermes_web_backend is non-empty. Does not
     # change model.provider — default inference stays Ollama / Tier L.
@@ -196,7 +270,9 @@
           (optional model provider / x_search / Imagine / TTS).
           Messaging gateway: run `hermes gateway setup`, then approve each new chat with
           `hermes pairing approve <platform> <code>`; revoke pairings later if needed.
-          Default Hermes model stays Ollama at {{ hermes_ollama_base_url }}.
+          Default model: {{ hermes_model_default }} via {{ hermes_model_base_url }}
+          (mini's llama-server). Verify it actually took with `make verify` — a
+          wrong route here does not error, it falls through to another provider.
 
     # ─── Removed feature cleanup ──────────────────────────────────────────────
     # quality-loop was removed 2026-08. Without this, an already-provisioned

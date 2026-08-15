@@ -13,8 +13,43 @@ hermes_bin: "{{ user_home }}/.local/bin/hermes"
 # Lives under the data disk services/ tree created by the storage role.
 hermes_home: "{{ data_mount }}/services/hermes"
 
-# Hermes points at mini's Ollama API over the tailnet (Tier L), NOT localhost.
-hermes_ollama_base_url: "http://mini:11434"
+# ─────────────────────────────────────────────────────────────────────────────
+# Model routing — mini's llama-server over the tailnet
+# ─────────────────────────────────────────────────────────────────────────────
+# CORRECTED 2026-08-14. This used to be `hermes_ollama_base_url: http://mini:11434`,
+# written into the units as OLLAMA_BASE_URL. That route has been DEAD since Ollama
+# was stopped on mini to give its residency to llama-server — and Hermes did not
+# fail over to anything local. It fell through to OpenRouter and served 292
+# third-party models (found 2026-08-04, docs/todo.md).
+#
+# The note in todo.md and ser5/README.md said Hermes "speaks only OLLAMA_BASE_URL,
+# so mini's OpenAI-compatible :8090/v1 is not a drop-in substitute." That is no
+# longer true — current Hermes has a first-class `custom` provider for any
+# endpoint implementing /v1/chat/completions, configured in config.yaml:
+#   https://hermes-agent.nousresearch.com/docs/integrations/providers
+#
+# The legacy env-var path (LLM_MODEL, CUSTOM_BASE_URL) is REMOVED upstream —
+# config.yaml is the single source of truth — which is why the OLLAMA_BASE_URL
+# lines are gone from all three unit templates and these values are applied with
+# `hermes config set` instead.
+hermes_manage_model: true
+
+# :8090 is the "quality" llama-server instance from mini/ansible/roles/llamacpp —
+# qwen3.6-35b-a3b with MTP, ~106 tok/s single-stream, THE driver model.
+# The name must match the server's --alias exactly; Hermes sends it as the model
+# field and llama-server rejects anything else.
+hermes_model_provider: "custom"
+hermes_model_base_url: "http://mini:8090/v1"
+hermes_model_default: "qwen3.6-35b-a3b-mtp"
+
+# Per-SLOT context, not the instance total. :8090 runs ctx 1048576 across
+# parallel 4, statically partitioned at startup, so one conversation can never
+# exceed 262144 no matter how idle the box is. Setting the true total here would
+# let Hermes build a prompt the server truncates without saying so.
+hermes_model_context_length: 262144
+
+# No API key: llama-server takes none and ignores what it is sent. The boundary
+# is mini's UFW (tailnet-only), not authentication.
 
 # Version reference ONLY — this variable controls nothing. The NousResearch
 # installer always fetches latest, so a converge upgrades Hermes whether or not

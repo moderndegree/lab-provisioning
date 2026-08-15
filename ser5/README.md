@@ -233,15 +233,36 @@ API-key fallback: `export XAI_API_KEY=xai-...` (console.x.ai).
 Hermes is NousResearch's Hermes Agent installed by the official installer under
 `HERMES_HOME=/data/services/hermes` and run as systemd user services.
 
-> **Hermes is NOT Tier L, despite what this file used to say.** Verified 2026-08-04:
-> `hermes_ollama_base_url` still points at `http://mini:11434`, which is DEAD because
-> Ollama is now stopped. Hermes did not fail over to mini's llama-server — it serves
-> from **OpenRouter**, and `/v1/models` on the proxy returns 292 third-party models
-> against a configured `OPENROUTER_API_KEY`. Anything driven through the gateway,
-> proxy or dashboard can therefore egress to a third party. Do not put
-> client-confidential material through Hermes until this is resolved; see
-> `docs/todo.md`. Hermes speaks only `OLLAMA_BASE_URL`, so pointing it at mini's
-> OpenAI-compatible `:8090/v1` is not a drop-in change.
+> **Hermes now routes to mini — applied and verified on the box 2026-08-14.**
+>
+> `config.yaml` reads `provider: custom`, `base_url: http://mini:8090/v1`,
+> `default: qwen3.6-35b-a3b-mtp`, `context_length: 262144` (PER SLOT — `:8090` is ctx
+> 1048576 across `parallel: 4`). Verified end-to-end, not from config: a
+> `hermes chat -q` round-trip moved mini's own counters
+> (`tokens_predicted_total` 20→48).
+>
+> The old claim that "Hermes speaks only `OLLAMA_BASE_URL`" was true of the installed
+> build's *configuration*, not of Hermes — v0.19.0 has a first-class `custom` provider
+> ([docs](https://hermes-agent.nousresearch.com/docs/integrations/providers)). The
+> legacy env-var path is removed upstream, so `OLLAMA_BASE_URL` is gone from all three
+> unit templates.
+>
+> **Corrections to what this file said before.** The pre-change route was NOT
+> OpenRouter: it was `provider: xai-oauth` → `https://api.x.ai/v1`, with
+> `model.default: qwen3.6:35b-a3b-mtp-q4_K_M`, an Ollama-style name mini never
+> advertised. And `hermes proxy` is a **Nous Portal** proxy — it reads neither
+> `model.provider` nor `base_url`, so its `/v1/models` list was never evidence about
+> the default route.
+>
+> **Hermes is still NOT Tier L.** `hermes auth list` holds live credentials for
+> `openrouter`, `opencode-zen`, `copilot` and `xai-oauth`. A default model is not a
+> boundary while any of those can be reached on fallback or an explicit
+> `--provider`/`-m`. Removing them is a governance decision — see `docs/todo.md`.
+>
+> **`hermes-proxy` is down.** It exits 2 ("Not logged into Nous Portal") on any
+> restart and has no `nous` credential; confirmed by A/B that this is independent of
+> model routing. Stopped 2026-08-14 to end a 15s restart loop, left enabled. Fix with
+> the interactive `hermes auth add nous`.
 
 | Surface | Unit / command | Reachability | Use |
 |---------|----------------|--------------|-----|

@@ -95,10 +95,10 @@ cloudflared_autoupdate: true
 
 # ─── Hermes gateway (remote agent surface) ───────────────────────────────────
 # Installed via the official NousResearch installer and run as a systemd user
-# service. Points at mini for Tier L (Sovereign) inference over the tailnet.
-# See roles/hermes/defaults/main.yml for hermes_home, hermes_bin, hermes_version.
+# service. Model routing (provider, base_url, model name) is POLICY and lives in
+# roles/hermes/defaults/main.yml — do not copy it down here unless you mean to
+# diverge, because this file is gitignored and outranks every role default.
 enable_hermes: false
-hermes_ollama_base_url: "http://YOUR_MINI_HOST:11434"
 # Expose Hermes's OpenAI-compatible proxy to the tailnet so other machines can
 # chat through Hermes with its credentials/routing.
 enable_hermes_proxy: false

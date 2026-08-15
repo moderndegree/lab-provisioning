@@ -10,10 +10,11 @@ Environment=HOME={{ user_home }}
 Environment=HERMES_HOME={{ hermes_home }}
 # Include ~/.grok/bin so the optional Grok Build skill can spawn `grok`.
 Environment=PATH={{ hermes_path }}
-# Point Hermes at the inference node (mini) over the tailnet for Tier L (Sovereign)
-# inference. The Hermes gateway running here on ser5 is the routing layer; mini
-# is the actual inference node.
-Environment=OLLAMA_BASE_URL={{ hermes_ollama_base_url }}
+# NO OLLAMA_BASE_URL here. Inference routing lives in HERMES_HOME/config.yaml
+# (model.provider/base_url/default), applied by the role with `hermes config set`.
+# Upstream removed the legacy env-var path, so a value here would be silently
+# ignored — and the one that used to be here pointed at mini:11434, an Ollama
+# that has been stopped since llama-server took its residency.
 # HERMES_HOME/.env (optional XAI_API_KEY etc.) is loaded by Hermes itself.
 ExecStart={{ hermes_bin }} gateway start --all
 Restart=on-failure
