@@ -129,5 +129,20 @@ enable_hermes_xai_api_key: false
 # Set to "xai" once xAI credentials exist (OAuth or API key).
 hermes_web_backend: ""
 
+# ─── Repo-owned local skills ──────────────────────────────────────────────────
+# Each name is a directory under roles/hermes/files/skills/<name>/ containing a
+# SKILL.md, installed into HERMES_HOME/skills/autonomous-ai-agents/.
+#
+# These are OURS, versus the `official`/`builtin` skills Hermes ships. Keeping
+# them in the role means a converge repairs hand-edits and `git log` explains
+# them; the retired quality-gate skill is what happens to a local skill nobody
+# owns — it outlived the binary it invoked and kept being offered to the agent.
+#
+# Removing a name here does NOT uninstall it from the box. Delete the directory
+# under HERMES_HOME/skills/autonomous-ai-agents/ by hand, or add a prune step
+# modelled on roles/devtools' .moderndegree pruning.
+hermes_local_skills:
+  - opencode-lab
+
 # PATH for gateway/proxy so Hermes can find `grok` when the skill runs.
 hermes_path: "{{ user_home }}/.grok/bin:{{ user_home }}/.local/bin:/usr/local/bin:/usr/bin:/bin"

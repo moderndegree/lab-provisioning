@@ -274,6 +274,30 @@
           (mini's llama-server). Verify it actually took with `make verify` — a
           wrong route here does not error, it falls through to another provider.
 
+    # ─── Local skills owned by this repo ──────────────────────────────────────
+    # The builtin `opencode` skill covers CLI mechanics and knows nothing about
+    # this lab: it documents --agent build|plan as OpenCode's stock pair (here
+    # `build` fans out to 13 agents) and tells Hermes to pass
+    # --model openrouter/... , which would route coding work off mini entirely.
+    # This skill supplies the ask itself and corrects both.
+    #
+    # Deployed by Ansible rather than `hermes skills install` so it cannot drift:
+    # the retired quality-gate skill below is what an unowned local skill becomes.
+    # It deliberately POINTS AT .moderndegree/skills/task-package.md instead of
+    # copying it — that file is the live contract and a second copy would be the
+    # next thing to go stale.
+    - name: Install repo-owned Hermes skills
+      ansible.builtin.copy:
+        src: "skills/{{ item }}/"
+        dest: "{{ hermes_home }}/skills/autonomous-ai-agents/{{ item }}/"
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0644"
+        directory_mode: "0755"
+      loop: "{{ hermes_local_skills }}"
+      notify:
+        - restart hermes-gateway
+
     # ─── Removed feature cleanup ──────────────────────────────────────────────
     # quality-loop was removed 2026-08. Without this, an already-provisioned
     # SKILL.md keeps sitting in HERMES_HOME for Hermes to discover, pointing at
