@@ -97,7 +97,7 @@
         "list": "allow"
       },
       "prompt": "{file:./.moderndegree/prompts/planner.md}",
-      "steps": 40
+      "steps": 80
     },
     "architect": {
       "mode": "subagent",
@@ -112,7 +112,7 @@
         "list": "allow"
       },
       "prompt": "{file:./.moderndegree/prompts/architect.md}",
-      "steps": 40
+      "steps": 80
     },
     "coder": {
       "mode": "subagent",
@@ -123,7 +123,7 @@
         "task": "deny",
         "external_directory": "allow"
       },
-      "steps": 40
+      "steps": 80
     },
     "devops": {
       "mode": "subagent",
@@ -135,7 +135,7 @@
         "task": "deny",
         "external_directory": "allow"
       },
-      "steps": 40
+      "steps": 80
     },
     "reviewer": {
       "mode": "subagent",
@@ -150,7 +150,7 @@
         "list": "allow"
       },
       "prompt": "{file:./.moderndegree/prompts/reviewer.md}",
-      "steps": 40
+      "steps": 80
     },
     "security-auditor": {
       "mode": "subagent",
@@ -165,7 +165,7 @@
         "list": "allow"
       },
       "prompt": "{file:./.moderndegree/prompts/security.md}",
-      "steps": 40
+      "steps": 80
     },
     "tester": {
       "mode": "subagent",
@@ -176,7 +176,7 @@
         "task": "deny",
         "external_directory": "allow"
       },
-      "steps": 40
+      "steps": 80
     },
     "doc-writer": {
       "mode": "subagent",
@@ -191,7 +191,7 @@
         "list": "allow"
       },
       "prompt": "{file:./.moderndegree/prompts/docs.md}",
-      "steps": 40
+      "steps": 80
     },
     "qa": {
       "mode": "subagent",
@@ -205,7 +205,7 @@
         "cortex_vault_search": "allow",
         "cortex_vault_stats": "allow"
       },
-      "steps": 40
+      "steps": 80
     },
     "librarian": {
       "mode": "subagent",
@@ -227,7 +227,7 @@
         "cortex_vault_local_graph": "allow"
       },
       "prompt": "{file:./.moderndegree/prompts/librarian.md}",
-      "steps": 40
+      "steps": 80
     },
     "deep": {
       "mode": "subagent",
@@ -242,7 +242,7 @@
         "list": "allow"
       },
       "prompt": "{file:./.moderndegree/prompts/deep.md}",
-      "steps": 40
+      "steps": 80
     },
     "research": {
       "mode": "subagent",
@@ -253,7 +253,7 @@
         "*": "deny"
       },
       "prompt": "{file:./.moderndegree/prompts/research.md}",
-      "steps": 40
+      "steps": 80
     }
   }
 }

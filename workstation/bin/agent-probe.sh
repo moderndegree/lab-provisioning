@@ -125,14 +125,14 @@ STUCK=$(sqlite3 "$DB" "select count(*) from part p join session s on s.id=p.sess
 # hitting the cap is NOT an error: the agent is told to summarise what it has and
 # stop, so it returns a plausible partial result and every dispatch criterion
 # still passes. Measured 2026-08-15 (run `agentfix1`): one doc-writer session ran
-# 168 steps calling `read` 164 times before being killed by hand at ~18 minutes,
-# while the busiest HEALTHY session in the passing run used 28. Without this line
+# 168 steps calling `read` 164 times before being killed by hand at ~18 minutes.
+# The busiest session in a REAL task (issue3, a security fix) used 37. Without it
 # the next such loop is invisible in the score.
 #
-# Reported, not auto-failed: 40 is a chosen ceiling, not a measured law, and
+# Reported, not auto-failed: 80 is a chosen ceiling, not a measured law, and
 # failing runs on a guessed threshold would manufacture false regressions. If a
 # run reports a capped subagent, read that session before trusting its result.
-STEPCAP=${STEPCAP:-40}
+STEPCAP=${STEPCAP:-80}
 MAXSTEPS=$(sqlite3 "$DB" "select coalesce(max(n),0) from (select count(*) n from part p join session s on s.id=p.session_id where s.parent_id='$SID' and json_extract(p.data,'\$.type')='step-start' group by p.session_id);")
 echo "--- subagents at or over the step cap ($STEPCAP) (want: none)"
 sqlite3 "$DB" "select '  '||s.agent||' '||count(*)||' steps'from part p join session s on s.id=p.session_id where s.parent_id='$SID' and json_extract(p.data,'\$.type')='step-start' group by p.session_id having count(*) >= $STEPCAP;" | grep . || echo "  none"

@@ -364,14 +364,31 @@ at source. Sized from the data rather than taste:
 
 | | steps |
 |---|---|
-| the loop (`doc-writer`) | 168 |
-| busiest healthy session (`coder`, run `agentfix2`) | 28 |
-| everything else | 9–13 |
+| the loop (`doc-writer`, `agentfix1`) | 168 |
+| **busiest REAL task** (`coder`, `issue3` security fix) | **37** |
+| `tester` across `issue3`/`issue3b`/`issue3c` | 32, 30, 28, 26 |
+| busiest toy-benchmark session (`coder`, `agentfix2`) | 28 |
+| everything else | 9–18 |
 
-`steps: 40` on all 12 subagents — a quarter of the loop, ~40% headroom over the
-busiest healthy agent. `build` is left uncapped: its step count is dispatch
-turns, and truncating a legitimately long chain is worse than the loop this
-prevents.
+**The first cap was set at 40 and that was wrong.** It was sized only against the
+toy benchmark — build a small HTTP service in an empty directory — where the
+ceiling looked like 28. The real runs in this file peak at **37**, which leaves
+40 with 8% headroom. A slightly harder task would hit the cap, and hitting it
+does not error: the agent summarises and stops, so the run returns a plausible
+partial result and still scores PASS. A cap that silently truncates real work is
+worse than no cap.
+
+Raised to **`steps: 80`** on all 12 subagents — a little over 2x the busiest real
+session, and under half the loop, so a 168-step runaway is still stopped around
+the eight-minute mark rather than eighteen. `build` is left uncapped: its step
+count is dispatch turns, and truncating a legitimately long chain is worse than
+the loop this prevents.
+
+The general lesson, which cost nothing here only because the question was asked
+before real work hit the ceiling: **sizing a limit against a benchmark measures
+the benchmark.** The toy task never exercised a debugging loop, a failing test
+suite, or a `qa` rejection cycle — all of which are exactly when step counts
+climb.
 
 **Hitting the cap is not an error**, which is the trap it introduces. opencode
 tells the capped agent to summarise and stop, so a looping subagent returns a
