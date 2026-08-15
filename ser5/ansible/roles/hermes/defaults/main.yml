@@ -144,5 +144,19 @@ hermes_web_backend: ""
 hermes_local_skills:
   - opencode-lab
 
-# PATH for gateway/proxy so Hermes can find `grok` when the skill runs.
-hermes_path: "{{ user_home }}/.grok/bin:{{ user_home }}/.local/bin:/usr/local/bin:/usr/bin:/bin"
+# PATH for gateway/proxy/dashboard, baked into the unit files.
+#
+# ~/.npm-global/bin is REQUIRED and was missing until 2026-08-15. `opencode` is
+# installed there by roles/devtools (user-owned npm prefix), so without it Hermes
+# cannot see the binary at all — it reported "OpenCode is not installed,
+# `opencode` command not found anywhere" and offered to build the project itself
+# instead. The opencode-lab skill was therefore unreachable in practice: perfect
+# instructions for a command that could not be resolved.
+#
+# Found by running a real delegation end-to-end. Asking Hermes whether it could
+# use OpenCode would not have caught it — it only fails at the moment of
+# execution.
+#
+# ~/.n/bin is deliberately NOT here: node resolves from /usr/bin/node, and
+# opencode runs correctly with npm-global alone (verified 2026-08-15).
+hermes_path: "{{ user_home }}/.grok/bin:{{ user_home }}/.npm-global/bin:{{ user_home }}/.local/bin:/usr/local/bin:/usr/bin:/bin"
