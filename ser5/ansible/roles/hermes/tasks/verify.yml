@@ -185,6 +185,87 @@
     - verify_hermes_config.content is defined
     - (verify_hermes_conf_model[item.key] | default('') | string) != (item.value | string)
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Every OTHER place a model endpoint hides
+# ─────────────────────────────────────────────────────────────────────────────
+# `model:` is not the only routing in config.yaml, and checking only it is how a
+# dead endpoint survived a "verified" fix on 2026-08-14: `model:` was correct and
+# pointed at mini:8090, while `custom_providers` still advertised nine
+# Ollama-style ids at http://mini:11434/v1 (unreachable since Ollama was stopped)
+# and every `moa` reference model AND its aggregator pointed at that same dead
+# provider — the aggregator being nemotron-3-nano, retired weeks earlier.
+#
+# So: walk EVERY custom provider and prove its endpoint answers and actually
+# serves the ids it claims. A provider that lists models nothing serves is what
+# the user sees in the picker.
+- name: Extract the custom providers Hermes advertises
+  ansible.builtin.set_fact:
+    verify_hermes_providers: >-
+      {{ ((verify_hermes_config.content | default('') | b64decode | from_yaml) or {}).get('custom_providers', []) or [] }}
+  when: hermes_manage_model | bool
+
+- name: Ask each custom provider what it serves
+  ansible.builtin.uri:
+    url: "{{ item.base_url | regex_replace('/$', '') }}/models"
+    timeout: "{{ verify_http_timeout }}"
+    return_content: true
+  loop: "{{ verify_hermes_providers | default([]) }}"
+  loop_control:
+    label: "{{ item.name | default('?') }}"
+  register: verify_hermes_prov_models
+  failed_when: false
+  check_mode: false
+
+- name: Flag a custom provider whose endpoint is dead
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'Hermes custom provider "' ~ (item.item.name | default('?')) ~ '" points at '
+        ~ (item.item.base_url | default('?')) ~ ', which does not answer. It still appears '
+        ~ 'in the model picker, so the models it lists look selectable and are not.'
+      ] }}
+  loop: "{{ verify_hermes_prov_models.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name | default('?') }}"
+  when:
+    - item.skipped is not defined
+    - item.status | default(0) != 200
+
+- name: Flag a custom provider advertising models its endpoint does not serve
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'Hermes custom provider "' ~ (item.item.name | default('?')) ~ '" lists '
+        ~ (item.item.models | default([]) | difference(item.json.data | default([]) | map(attribute='id') | list) | join(', '))
+        ~ ' but ' ~ (item.item.base_url | default('?')) ~ ' serves '
+        ~ (item.json.data | default([]) | map(attribute='id') | join(', ')) ~ '.'
+      ] }}
+  loop: "{{ verify_hermes_prov_models.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name | default('?') }}"
+  when:
+    - item.skipped is not defined
+    - item.status | default(0) == 200
+    - (item.item.models | default([]) | difference(item.json.data | default([]) | map(attribute='id') | list)) | length > 0
+
+# MoA slots name providers by `custom:<slug>`. A slot pointing at a provider that
+# no longer exists fails only when someone runs /moa, which may be months later.
+- name: Flag MoA slots referencing a provider that no longer exists
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'Hermes MoA references provider "' ~ item ~ '" which is not in custom_providers '
+        ~ '(have: ' ~ (verify_hermes_providers | map(attribute='name') | join(', ')) ~ ').'
+      ] }}
+  loop: >-
+    {{ (verify_hermes_config.content | default('') | b64decode)
+       | regex_findall('custom:([A-Za-z0-9_.()-]+)')
+       | unique
+       | difference(verify_hermes_providers | default([]) | map(attribute='name') | list) }}
+  when:
+    - hermes_manage_model | bool
+    - verify_hermes_config.content is defined
+
 # mini's :8090 must be reachable FROM ser5. When it is not, Hermes keeps working
 # perfectly — on someone else's hardware — which is the whole problem.
 - name: Check mini's llama-server is reachable from ser5
