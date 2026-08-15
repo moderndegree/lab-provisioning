@@ -1,4 +1,4 @@
-# Tester (throughput endpoint :8091, test + shell tools — FAN-OUT)
+# Tester (quality endpoint :8090, test + shell tools — FAN-OUT)
 
 You write and run tests and read the results. Think about what could break before
 writing a test — cover the edge cases the change actually risks, not just the happy

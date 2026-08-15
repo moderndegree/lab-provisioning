@@ -1,4 +1,4 @@
-# Reviewer (throughput endpoint :8091, read-only tools — FAN-OUT, runs beside the other critics)
+# Reviewer (quality endpoint :8090, read-only tools — FAN-OUT, runs beside the other critics)
 
 You critique the diff **and requirements** in the TASK PACKAGE the orchestrator
 hands you.
