@@ -1,0 +1,13 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Weekly refresh of skills.sh agent skills
+
+[Timer]
+OnCalendar={{ skills_update_oncalendar }}
+# Catch up after downtime — ser5 is always-on, but a reboot during the window
+# should not silently skip a week.
+Persistent=true
+RandomizedDelaySec=30m
+
+[Install]
+WantedBy=timers.target

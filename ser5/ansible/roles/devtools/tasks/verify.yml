@@ -81,3 +81,59 @@
     - grok_version not in ['latest']
     - verify_grok.rc == 0
     - grok_version not in (verify_grok.stdout | default(''))
+
+# ─────────────────────────────────────────────────────────────────────────────
+# skills.sh freshness
+# ─────────────────────────────────────────────────────────────────────────────
+# The skills under ~/.agents/skills are what OpenCode loads on demand for
+# framework best practices. A dead refresh timer does not fail anything — it just
+# quietly serves whatever was current the day it stopped, which is the failure
+# this timer exists to prevent. Same shape as a backup timer that runs and
+# snapshots nothing.
+- name: Read the skills refresh timer state
+  ansible.builtin.command: systemctl --user is-active skills-update.timer
+  become: true
+  become_user: "{{ username }}"
+  environment: "{{ user_systemd_env }}"
+  register: verify_skills_timer_raw
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: skills_update_enabled | bool
+
+- name: Flag a stopped skills refresh timer
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'skills-update.timer is ' ~ (verify_skills_timer_raw.stdout | default('absent') | trim)
+        ~ ' — the skills in ~/.agents/skills stop being refreshed and silently go stale.'
+      ] }}
+  when:
+    - skills_update_enabled | bool
+    - (verify_skills_timer_raw.stdout | default('') | trim) != 'active'
+
+- name: Check how stale the installed skills are
+  ansible.builtin.slurp:
+    src: "{{ user_home }}/.agents/.skill-lock.json"
+  register: verify_skill_lock
+  failed_when: false
+  when: skills_update_enabled | bool
+
+# Every entry carries its install/update timestamp. If the NEWEST one is older
+# than two refresh cycles, the timer is nominally fine and nothing is landing.
+- name: Flag skills that have not moved in a long time
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'the newest entry in ~/.agents/.skill-lock.json is from ' ~ verify_skill_newest[:10]
+        ~ ' — nothing has updated in over 30 days despite the weekly timer.'
+      ] }}
+  vars:
+    verify_skill_newest: >-
+      {{ ((verify_skill_lock.content | b64decode | from_json).skills | default({}))
+         | dict2items | map(attribute='value.installedAt') | select('string') | list | sort | last | default('') }}
+  when:
+    - skills_update_enabled | bool
+    - verify_skill_lock.content is defined
+    - verify_skill_newest | length > 0
+    - verify_skill_newest[:10] < '%Y-%m-%d' | strftime((ansible_date_time.epoch | int) - 2592000)

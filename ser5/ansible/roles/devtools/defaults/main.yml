@@ -5,3 +5,34 @@ grok_version: "latest"
 grok_auto_update: false
 grok_permission_mode: "ask"
 grok_default_model: "grok-build-0.1"
+
+# ─── skills.sh refresh (roles/devtools) ───────────────────────────────────────
+# The 23 skills under ~/.agents/skills come from skills.sh and are maintained
+# UPSTREAM by the vendors (vercel/next.js, shadcn/ui, payloadcms/payload,
+# addyosmani/web-quality-skills, mattpocock/skills, anthropics/skills). OpenCode
+# discovers that directory natively and loads them on demand via the `skill`
+# tool — verified 2026-08-14 that both `build` and `planner` enumerate all of
+# them, including agents with `permission: {"*": "deny"}`.
+#
+# So the skills are the freshness mechanism; this timer is what keeps them fresh.
+#
+# Note what the risk actually was. On 2026-08-14, 21 of 23 lock entries still
+# carried their 2026-06-28 install date — but the first run of this timer
+# reported "All global skills are up to date", so upstream genuinely had not
+# moved. `installedAt` records when a skill was INSTALLED, not whether it is
+# current. The exposure was that nothing had checked in seven weeks, not that
+# anything was out of date. Unmanaged, not yet broken.
+#
+# Known limitation: `skills update -y` cannot prune. The first run found that
+# `payload` was DELETED upstream by payloadcms/payload and logged "Skipping
+# deletion in non-interactive mode" — so a skill that no longer exists will sit
+# in ~/.agents/skills forever, being offered to agents. Removing it is a manual
+# `npx skills remove payload`. Same failure class as the retired quality-gate
+# Hermes skill: an artefact that outlives its source and keeps being loaded.
+#
+# This does NOT install skills — adding one is a deliberate act
+# (`npx skills add <owner/repo>`), and auto-adding would be the same mistake as
+# a floating image tag. It only updates what is already there.
+skills_update_enabled: true
+skills_update_oncalendar: "Sun *-*-* 04:15:00"
+skills_update_timeout: 600

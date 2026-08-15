@@ -355,3 +355,80 @@
     mode: "0644"
     force: false
   # force: false — do not clobber operator edits after first provision
+
+# ─── skills.sh refresh timer ──────────────────────────────────────────────────
+# `systemctl --user` needs XDG_RUNTIME_DIR pointing at the user's own runtime
+# dir; without it the calls silently talk to the wrong (or no) manager.
+# Unconditional: the teardown branch below runs when skills_update_enabled is
+# FALSE and needs this too, so gating it on the flag would make disabling the
+# feature fail on an undefined variable.
+- name: Resolve {{ username }} UID (needed for systemctl --user calls)
+  ansible.builtin.command: "id -u {{ username }}"
+  register: devtools_user_uid
+  changed_when: false
+
+# User units, not system: ~/.agents, ~/.n and ~/.npm-global are user-owned, and
+# lingering (roles/containers, which runs earlier) keeps the user manager alive
+# without a login. A system unit would need to drop privileges and rebuild the
+# whole PATH anyway.
+- name: Ensure user systemd directory exists
+  ansible.builtin.file:
+    path: "{{ user_home }}/.config/systemd/user"
+    state: directory
+    owner: "{{ username }}"
+    group: "{{ username }}"
+    mode: "0755"
+  when: skills_update_enabled | bool
+
+- name: Template the skills.sh refresh units
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "{{ user_home }}/.config/systemd/user/{{ item }}"
+    owner: "{{ username }}"
+    group: "{{ username }}"
+    mode: "0644"
+  loop:
+    - skills-update.service
+    - skills-update.timer
+  register: skills_update_units
+  when: skills_update_enabled | bool
+
+- name: Reload the user systemd manager after a unit change
+  ansible.builtin.systemd:
+    daemon_reload: true
+    scope: user
+  become: true
+  become_user: "{{ username }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ devtools_user_uid.stdout }}"
+  when:
+    - skills_update_enabled | bool
+    - skills_update_units is changed
+
+# Only the TIMER is enabled. Enabling the service too would run an update on
+# every boot, which is both pointless and a way to pick up an upstream change at
+# the least convenient moment.
+- name: Enable the weekly skills refresh timer
+  ansible.builtin.systemd:
+    name: skills-update.timer
+    enabled: true
+    state: started
+    scope: user
+  become: true
+  become_user: "{{ username }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ devtools_user_uid.stdout }}"
+  when: skills_update_enabled | bool
+
+- name: Stop the skills refresh timer when disabled
+  ansible.builtin.systemd:
+    name: skills-update.timer
+    enabled: false
+    state: stopped
+    scope: user
+  become: true
+  become_user: "{{ username }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ devtools_user_uid.stdout }}"
+  failed_when: false
+  when: not (skills_update_enabled | bool)

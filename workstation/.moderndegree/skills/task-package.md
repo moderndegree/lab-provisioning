@@ -79,6 +79,32 @@ failing; one that has only ever been green may be asserting nothing.
 produce the interface before code is written") does. If a role's contribution is
 necessary, make it a gate with its own @@RESULT.
 
+**6. Third-party API shape is not something anyone here knows — it is something
+that gets checked.** Training data goes stale, and the failure is quiet: plausible
+syntax for a version that no longer exists, or an approach the maintainers stopped
+recommending two releases ago. Nobody reports BLOCKED for this, because the model
+does not know it is wrong.
+
+So when the work touches a framework or library:
+
+- **Name the skill to load.** `skill` lists what is installed (Next.js, React,
+  shadcn, Payload, web-vitals/a11y/perf/SEO among others; run `skill` to see the
+  current set). A skill named in the package gets loaded; one merely available does
+  not — the same asymmetry as rule 5.
+- **Add a criterion that executes against the real API**, not one that reads like
+  it did. A typecheck, an import, one live call with output pasted. This is rule 3
+  applied to a boundary that does not look like one: a library is someone else's
+  system, and offline agreement with your memory of it proves nothing.
+
+| Decoration | Criterion |
+|---|---|
+| "uses the current Next.js caching API" | "`pnpm typecheck` passes; paste the summary" |
+| "follows shadcn conventions" | "loaded the `shadcn` skill; quote the rule applied and the line it changed" |
+| "the SDK call is correct" | "one real call runs and returns non-null; paste the invocation and output" |
+
+If no skill covers the technology, say so in the package rather than implying
+coverage — an unstated gap is how a plan ends up asserting syntax nobody checked.
+
 ## Cortex pass (mandatory when tools exist)
 
 Use the **cortex** MCP server (configured in `opencode.json`). Pull **1–3**

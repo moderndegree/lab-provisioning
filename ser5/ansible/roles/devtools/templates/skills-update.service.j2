@@ -1,0 +1,34 @@
+# {{ ansible_managed }}
+#
+# Refreshes the skills.sh skills in ~/.agents/skills. OpenCode discovers that
+# directory natively and loads from it on demand via the `skill` tool, so this
+# is the whole freshness mechanism for framework best-practice guidance — the
+# skills themselves are maintained upstream by the vendors (vercel/next.js,
+# shadcn/ui, payloadcms/payload, addyosmani/web-quality-skills).
+#
+# WHY THIS EXISTS. Found 2026-08-14: 21 of 23 installed skills were still on
+# their 2026-06-28 revisions, seven weeks stale. A docs-freshness mechanism that
+# never refreshes is stale training data with extra steps — and the failure is
+# silent, because a skill file always reads plausibly.
+#
+# Runs as a USER unit: ~/.agents, ~/.n and ~/.npm-global are all user-owned, and
+# lingering (roles/containers) keeps the user manager alive without a login.
+
+[Unit]
+Description=Update skills.sh agent skills in ~/.agents/skills
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=HOME={{ user_home }}
+# npx lives under the user-owned npm prefix; node under ~/.n. Neither is on the
+# default systemd PATH.
+Environment=PATH={{ user_home }}/.npm-global/bin:{{ user_home }}/.n/bin:/usr/local/bin:/usr/bin:/bin
+# -g updates the global set (~/.agents), -y skips the interactive scope prompt —
+# without it this hangs forever under systemd with no tty.
+ExecStart=/usr/bin/env npx -y skills update -g -y
+# Network-bound and unattended; do not let a hung fetch sit forever.
+TimeoutStartSec={{ skills_update_timeout }}
+StandardOutput=journal
+StandardError=journal
