@@ -198,8 +198,35 @@ These flags in `ansible/group_vars/all.yml` now match the live box:
 | `enable_observability: true` | `observability` | Prometheus + Grafana quadlets targeting mini's metrics (mini must be reachable) |
 | `enable_hermes: true` | `hermes` | Hermes gateway, proxy, dashboard, messaging adapters, optional Grok Build skill + xAI env (see below) |
 | `enable_brain: true` | `brain` | Obsidian-compatible second brain under `{{ data_mount }}/brain` — see [`../docs/brain.md`](../docs/brain.md) |
-| `enable_openwebui: true` | `openwebui` | Open WebUI browser chat UI, reaching mini's Ollama over the tailnet — see below |
+| `enable_openwebui: true` | `openwebui` | Open WebUI browser chat UI, reaching mini's llama-server over the tailnet — see below |
 | `enable_backups: true` | `backups` | restic snapshots + daily timer (needs a real `vault_restic_password`) — see below |
+| `enable_searxng: true` | `searxng` | SearXNG metasearch on `openwebui.network` (Open WebUI web search) — see below |
+
+---
+
+## Open WebUI web search (SearXNG)
+
+Open WebUI on ser5 is a live rootless quadlet (`http://127.0.0.1:8080`, Cloudflare
+Access in front). Web search is **not** DuckDuckGo-in-process: a sibling SearXNG
+container on `openwebui.network` answers JSON queries, and Open WebUI stuffs the
+snippets into the chat.
+
+`roles/searxng` (flag `enable_searxng: true`) deploys that backend and, when
+`/data/services/openwebui/data/webui.db` exists, writes the matching
+PersistentConfig:
+
+- engine `searxng` at `http://searxng:8080/search?q=<query>`
+- `bypass_web_loader: true` (snippets only — page fetching is the usual hang)
+- default `function_calling: legacy` so the chat **Web Search** toggle actually
+  runs a search with local models. Native/agentic mode waits for the model to
+  emit a `search_web` tool call; qwen3.6-class local models often never do.
+
+To use it: open a chat → Integrations (next to `+`) → toggle **Web Search** on
+→ ask something that needs current info. The toggle is per-chat and resets when
+you switch chats.
+
+Debug the backend on the host: `curl -sS 'http://127.0.0.1:8888/search?q=test&format=json'`.
+From inside Open WebUI: `podman exec openwebui curl -sS 'http://searxng:8080/search?q=test&format=json'`.
 
 ---
 

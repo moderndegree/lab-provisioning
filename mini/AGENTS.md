@@ -103,16 +103,17 @@ model can be swapped without renaming the unit:
 | `llama-quality` | 8090 | `qwen3.6-35b-a3b-mtp-q4_K_M` | 4 | **262144** | n-max 3 | 106 t/s solo |
 | `llama-deep` | 8091 | `qwen3.8-27b-q4_K_M` | 1 | **262144** | n-max 5 | ~25 t/s |
 
-`llama-quality` is THE DRIVER — every agent role runs there except `deep`. It is MoE
-with ~3B active parameters, because Strix Halo decode speed tracks active parameters
-read per token, not headline size.
+`llama-quality` is the GENERAL slot — orchestration, planning, critique, docs,
+infra, chat. It is MoE with ~3B active parameters, because Strix Halo decode
+speed tracks active parameters read per token, not headline size.
 
-`llama-deep` is a deliberate exception to that rule: a DENSE 27B, ~4x slower, called
-only for hard problems. Dense is still the wrong default — raw it decodes at 11.4 t/s,
-matching the old dense `qwen3.6:27b-mtp-q4_K_M` at ~11-15 t/s — but MTP recovers 2.79x
-(to 31.8 t/s short-prompt, ~25 sustained), which is what makes it usable at all. Do not
-generalise this into "dense is fine now"; it is fine HERE because the endpoint is
-low-volume and MTP-assisted.
+`llama-deep` is the CODING + hard-design slot: a DENSE 27B, ~4x slower, used by
+`architect`, `coder`, and `deep`. One slot — a second dispatch queues. Dense is
+still the wrong default — raw it decodes at 11.4 t/s, matching the old dense
+`qwen3.6:27b-mtp-q4_K_M` at ~11-15 t/s — but MTP recovers 2.79x
+(to 31.8 t/s short-prompt, ~25 sustained), which is what makes it usable at all.
+Do not generalise this into "dense is fine now"; it is fine HERE because the
+endpoint is low-volume and MTP-assisted.
 
 `llama-throughput` (nemotron-3.5-lightning) was RETIRED 2026-08-14. It was dominated:
 quality-with-MTP beat it on aggregate (106.4 vs 92.1) AND single-stream (90.8 vs 70.8)

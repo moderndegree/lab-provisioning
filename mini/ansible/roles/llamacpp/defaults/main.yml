@@ -335,10 +335,14 @@ llamacpp_instances:
   # instance: append an entry with a free port — it joins llama-servers.target
   # automatically. To A/B a backend: set `image:` on one instance only.
 
-  # THE DRIVER. Serves every agent role except `deep` — orchestrator, planner,
-  # architect, coder, devops, qa AND the critic fan-out that used to live on a
-  # second endpoint. MTP on, because agent loops are mostly SINGLE-STREAM and
-  # that is exactly what MTP buys.
+  # THE GENERAL SLOT. Serves orchestration, planning, critique, docs, infra,
+  # and chat. Coding (`coder`) and hard design (`architect`, `deep`) live on
+  # :8091. MTP on, because agent loops are mostly SINGLE-STREAM and that is
+  # exactly what MTP buys.
+  #
+  # extra_args pins Qwen3.6 thinking/general sampling (temp 1.0, top_k 20,
+  # min_p 0, presence 1.5). llama.cpp defaults (0.8 / 40 / 0.05) are wrong
+  # for this card. No reasoning_effort knob exists on this template.
   #
   # WHY ONE ENDPOINT NOW (measured 2026-08-14, fanoutsim -n 4, all back-to-back
   # on b10380 so they are directly comparable — aggregate / per-stream / solo):
@@ -382,8 +386,9 @@ llamacpp_instances:
     parallel: 4
     mtp: true
     mtp_draft_max: 3
+    extra_args: "--temp 1.0 --top-k 20 --top-p 0.95 --min-p 0 --presence-penalty 1.5"
 
-  # DEEP — the complex-problem-solver, called DELIBERATELY, never in a loop.
+  # DEEP — coding + hard design. coder/architect/deep share the single slot.
   # Qwen3.8-27B since 2026-08-14, replacing nemotron-3.5-lightning on this port.
   # Port reused on purpose: Open WebUI's openwebui_openai_base_urls already reads
   # "8090;8091", so the swap needs no change on ser5.
@@ -467,6 +472,8 @@ llamacpp_instances:
     mtp_draft_max: 5
     chat_template_kwargs:
       reasoning_effort: "medium"
+    # Qwen3.8 thinking-mode official sampler. min_p 0 (not llama.cpp's 0.05).
+    extra_args: "--temp 1.0 --top-k 20 --top-p 0.95 --min-p 0 --presence-penalty 0"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # BACKEND / QUANT LEDGER — box-level, survives model swaps

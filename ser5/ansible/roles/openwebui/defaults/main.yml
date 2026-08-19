@@ -75,14 +75,14 @@ openwebui_ollama_base_url: "http://mini:11434"
 # picker after the llama-server restart. These notes exist so the picker's two
 # entries are legible; keep them true.
 #
-#   :8090  qwen3.6-35b-a3b-mtp  THE DRIVER — 106 tok/s single-stream, 109 at
+#   :8090  qwen3.6-35b-a3b-mtp  GENERAL — 106 tok/s single-stream, 109 at
 #          4-way. 262144 ctx per chat = 1048576 total / 4 slots, the model's
-#          full native window. Pick this by default for chat.
-#   :8091  qwen3.8-27b          DEEP — ~25 tok/s. 262144 ctx per chat on a
+#          full native window. Default for chat, planning, critique, docs.
+#   :8091  qwen3.8-27b          CODING — ~25 tok/s. 262144 ctx per chat on a
 #          SINGLE slot, the full native window. A second concurrent request
-#          QUEUES rather than running beside it. FOUR TIMES SLOWER than
-#          :8090 and worth it only for hard problems. A long answer here is a
-#          two-to-three MINUTE wait; that is expected, not a hang.
+#          QUEUES. FOUR TIMES SLOWER than :8090. Use for implementation and
+#          hard design. A long answer here is a two-to-three MINUTE wait;
+#          that is expected, not a hang.
 #
 # Measured 2026-08-14 on llama.cpp b10380 with fanoutsim.py. Earlier figures in
 # this file came from long-generation synthetics and read about twice as fast as

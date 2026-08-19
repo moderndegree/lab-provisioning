@@ -1,0 +1,20 @@
+---
+# SearXNG — private metasearch backend for Open WebUI on ser5.
+# Disabled unless enable_searxng is set in group_vars (the role `when:` is
+# evaluated before role defaults, so this value is documentation only).
+enable_searxng: false
+
+searxng_image: "docker.io/searxng/searxng:latest"
+searxng_data_dir: "{{ data_mount }}/services/searxng"
+searxng_secret_file: "{{ searxng_data_dir }}/secret"
+# Loopback-only host publish. Open WebUI reaches SearXNG by container name
+# on openwebui.network (http://searxng:8080), so this port is for debugging.
+searxng_host: "127.0.0.1"
+searxng_port: 8888
+searxng_autoupdate: true
+
+# Written into Open WebUI's PersistentConfig DB when that DB already exists.
+# These match the live settings that make the chat Web Search toggle work
+# with local models (legacy function calling + snippet-only loader).
+openwebui_db_path: "{{ data_mount }}/services/openwebui/data/webui.db"
+openwebui_searxng_query_url: "http://searxng:8080/search?q=<query>"

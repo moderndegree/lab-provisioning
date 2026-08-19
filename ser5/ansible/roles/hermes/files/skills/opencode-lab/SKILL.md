@@ -71,8 +71,8 @@ written"), because a role mentioned as advice does not get invoked.
     opencode run '...'
 
 `~/.config/opencode/opencode.json` points at mini's llama-server over the
-tailnet: `quality/qwen3.6-35b-a3b-mtp` on `:8090` for everything, and
-`deep/qwen3.8-27b` on `:8091` for the `architect` and `deep` agents. Overriding
+tailnet: `quality/qwen3.6-35b-a3b-mtp` on `:8090` for general work, and
+`deep/qwen3.8-27b` on `:8091` for `architect`, `coder`, and `deep`. Overriding
 `--model` both leaves controlled hardware and sends the work to a model the
 prompts were not written for.
 

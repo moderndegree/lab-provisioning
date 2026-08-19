@@ -84,6 +84,7 @@ enable_observability: false   # Prometheus + Grafana quadlets (monitors mini)
 enable_backups: false         # restic snapshots + daily timer (needs vault_restic_password)
 enable_brain: false           # Obsidian-compatible second brain under /data/brain
 enable_openwebui: false       # Open WebUI browser chat UI, reaching mini over the tailnet
+enable_searxng: false         # SearXNG metasearch backend for Open WebUI web search
 
 # ─── Cloudflare Zero Trust tunnel ────────────────────────────────────────────
 # System-level Podman quadlet. Token lives in vault (vault_cloudflared_token).

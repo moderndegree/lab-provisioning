@@ -27,13 +27,12 @@ reason is measurement, not taste. Roles live in the agent prompts rather than
 baked model variants.
 
 - **`quality` — `http://mini:8090/v1`** — `qwen3.6-35b-a3b-mtp` (MoE 35B-A3B,
-  3B active), **4 slots**, MTP n-max 3, **262144 ctx per slot**, 106 t/s solo /
-  109 aggregate at 4-way. THE DRIVER: every agent except `deep` — `build`,
-  `planner`, `coder`, `devops`, `qa`, and the whole critic fan-out
+  3B active), **4 slots**, MTP n-max 3, **262144 ctx per slot**, ~80–90 t/s
+  solo. GENERAL: `build`, `planner`, `devops`, `qa`, and the critic fan-out
   (`reviewer`, `security-auditor`, `tester`, `doc-writer`, `librarian`).
 - **`deep` — `http://mini:8091/v1`** — `qwen3.8-27b` (DENSE 27B hybrid),
-  **1 slot**, **262144 ctx**, ~25 t/s. Two agents: `deep` and `architect`.
-  They share the single slot, so a concurrent dispatch of both queues.
+  **1 slot**, **262144 ctx**, ~19 t/s. CODING + hard design: `architect`,
+  `coder`, `deep`. They share the single slot, so a concurrent dispatch queues.
 
   **`architect` was promoted here 2026-08-14 on measured evidence**, not on the
   published benchmarks (which compare 3.8 to the DENSE Qwen3.6-27B, not to the
@@ -42,12 +41,15 @@ baked model variants.
   worker pool with no concurrency control — a double-delivery bug in an
   at-least-once system. 3.8 also quantified its trade-offs (throughput ceiling,
   migration path, when it would choose differently) where 3.6 argued generically.
-  Cost: 59s -> 247s for that call. Paid ONCE per task, not per loop, which is why
-  architecture is the right role to spend it on and `coder` is not.
+  Cost: 59s -> 247s for that call. Paid ONCE per task, not per loop.
 
-  Caveat: that is ONE task under greedy decoding. It is evidence, not proof.
-  Reverting is a one-line model change in `opencode.json`. The `deep` agent alone. ~4x slower
-  than everything else; dispatch it for genuinely hard problems, never in a loop.
+  `coder` later moved here too: implementation quality compounds, and 3.8 is
+  the coding model. It is usually alone on `:8091` (`architect` is once per
+  task; `deep` is rare). Critics stay on `:8090` so the fan-out still has four
+  slots.
+
+  Caveat: the architect comparison is ONE task under greedy decoding. It is
+  evidence, not proof. Reverting is a one-line model change in `opencode.json`.
 
 **Why the concurrency split was abandoned.** It existed to keep the critic
 fan-out off the interactive endpoint. Measured 2026-08-14 at n=4, back-to-back:

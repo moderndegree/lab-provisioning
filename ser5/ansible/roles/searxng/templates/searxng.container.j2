@@ -1,0 +1,28 @@
+# Podman quadlet — SearXNG (rootless, Ansible-managed).
+# Open WebUI web-search backend on the same bridge as openwebui.
+# Published on loopback only; not exposed to LAN/WAN/tailnet.
+
+[Unit]
+Description=SearXNG (Open WebUI web search)
+After=network-online.target openwebui-network.service
+Wants=network-online.target
+
+[Container]
+Image={{ searxng_image }}
+ContainerName=searxng
+Network=openwebui.network
+UserNS=keep-id
+PublishPort={{ searxng_host }}:{{ searxng_port }}:8080
+Volume={{ searxng_data_dir }}:/etc/searxng:Z
+Environment=SEARXNG_BASE_URL=http://{{ searxng_host }}:{{ searxng_port }}/
+{% if searxng_autoupdate | bool %}
+AutoUpdate=registry
+{% endif %}
+
+[Service]
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=120
+
+[Install]
+WantedBy=default.target

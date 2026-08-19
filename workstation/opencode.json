@@ -9,7 +9,7 @@
       },
       "models": {
         "qwen3.6-35b-a3b-mtp": {
-          "name": "Qwen3.6 35B-A3B MTP (driver \u2014 262144 ctx, 4 slots, 106 t/s solo)",
+          "name": "Qwen3.6 35B-A3B MTP (general — 262144 ctx, 4 slots, ~80-90 t/s solo)",
           "limit": {
             "context": 262144,
             "output": 8192
@@ -25,7 +25,7 @@
       },
       "models": {
         "qwen3.8-27b": {
-          "name": "Qwen3.8 27B (deep \u2014 262144 ctx, 1 slot, ~25 t/s, reasoning_effort=medium server-side)",
+          "name": "Qwen3.8 27B (coding — 262144 ctx, 1 slot, ~19 t/s, reasoning_effort=medium server-side)",
           "limit": {
             "context": 262144,
             "output": 8192
@@ -116,8 +116,8 @@
     },
     "coder": {
       "mode": "subagent",
-      "model": "quality/qwen3.6-35b-a3b-mtp",
-      "description": "Implements changes. Edits files, verifies they parse/build. Runs on the QUALITY endpoint \u2014 code correctness is worth more than parallelism here.",
+      "model": "deep/qwen3.8-27b",
+      "description": "Implements changes. Edits files, verifies they parse/build. On DEEP (:8091) with architect — 27B is the coding model. ONE slot shared with architect+deep, so a concurrent dispatch queues. Slower (~19 t/s) than the 35B; paid because implementation quality compounds.",
       "prompt": "{file:./.moderndegree/prompts/coder.md}",
       "permission": {
         "task": "deny",

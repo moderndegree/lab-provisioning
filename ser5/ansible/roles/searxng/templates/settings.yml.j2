@@ -1,0 +1,22 @@
+# SearXNG — Open WebUI web-search backend (lab, loopback / shared podman net only)
+use_default_settings: true
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "en"
+  formats:
+    - html
+    - json
+
+server:
+  secret_key: "{{ searxng_secret }}"
+  limiter: false
+  image_proxy: false
+  bind_address: "0.0.0.0"
+  port: 8080
+  method: "GET"
+
+general:
+  instance_name: "searxng-lab"
+  enable_metrics: false

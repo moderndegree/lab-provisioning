@@ -15,6 +15,7 @@
 #   brain          → Obsidian-compatible second-brain vault under /data/brain
 #   openwebui      → Open WebUI quadlet, reaches mini over the tailnet (enable_openwebui: true to activate)
 #   observability  → Prometheus + Grafana quadlets (enable_observability: true to activate)
+#   searxng        → SearXNG metasearch for Open WebUI (enable_searxng: true to activate)
 #   backups        → restic snapshots + daily timer (enable_backups: true to activate)
 
 - name: Provision ser5
@@ -39,5 +40,7 @@
       when: enable_openwebui | bool
     - role: observability
       when: enable_observability | bool
+    - role: searxng
+      when: enable_searxng | default(false) | bool
     - role: backups
       when: enable_backups | bool

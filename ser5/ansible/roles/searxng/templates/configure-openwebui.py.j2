@@ -1,0 +1,51 @@
+"""Point an existing Open WebUI DB at this SearXNG instance.
+
+Idempotent. Open WebUI reads these PersistentConfig keys on the next request
+(or after a container restart). Does nothing if the DB file is missing.
+"""
+import json
+import sqlite3
+import time
+
+DB = {{ openwebui_db_path | to_json }}
+NOW = int(time.time())
+UPDATES = {
+    "web.search.enable": True,
+    "web.search.engine": "searxng",
+    "web.search.searxng_query_url": {{ openwebui_searxng_query_url | to_json }},
+    "web.search.searxng_language": "en",
+    "web.search.bypass_web_loader": True,
+    "web.search.concurrent_requests": 10,
+    "web.search.result_count": 5,
+    "web.search.trust_env": True,
+    "models.default_params": {"function_calling": "legacy"},
+    "models.default_metadata": {"capabilities": {"web_search": True}},
+}
+
+con = sqlite3.connect(DB)
+cur = con.cursor()
+for key, value in UPDATES.items():
+    cur.execute(
+        "INSERT INTO config(key, value, updated_at) VALUES (?, ?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+        (key, json.dumps(value), NOW),
+    )
+# Default the admin UI to always-on web search so new chats attach the tool
+# without a per-chat toggle. The model cannot see search unless the client
+# sends features.web_search=true.
+now_user = int(time.time())
+for user_id, raw in cur.execute("SELECT id, settings FROM user"):
+    settings = json.loads(raw) if isinstance(raw, str) and raw else (raw or {})
+    if not isinstance(settings, dict):
+        settings = {}
+    ui = settings.setdefault("ui", {})
+    if ui.get("webSearch") != "always":
+        ui["webSearch"] = "always"
+        cur.execute(
+            "UPDATE user SET settings=?, updated_at=? WHERE id=?",
+            (json.dumps(settings), now_user, user_id),
+        )
+
+con.commit()
+con.close()
+print("updated", len(UPDATES), "openwebui config keys")

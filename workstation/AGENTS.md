@@ -129,51 +129,40 @@ Bad answers usually come from thin handoffs. Full rules:
 
 ## Placement rule (the architectural backbone)
 
-Two `llama-server` endpoints on mini serve every agent. mini is
-memory-bandwidth-bound: decode speed tracks **active parameters read per token**,
-not total parameters. That is why both are MoE, and why **no agent may introduce
-a dense model or point at a third endpoint**:
-
-The split is by CONCURRENCY, not by difficulty. It is sized to measurements in
-`mini/AGENTS.md`: the quality endpoint peaks at 2 concurrent streams and gets
-worse at 4; the throughput endpoint peaks at 4 and gets worse at 8; and an
-orchestrator supervising a fan-out costs only +3-4%.
+Two `llama-server` endpoints on mini serve every agent. The split is by
+**role**, not by concurrency:
 
 - **`quality` → `http://mini:8090/v1`** — `qwen3.6-35b-a3b-mtp` (MoE 35B-A3B,
-  3B active), 4 slots, MTP on. 88 t/s solo, and MTP is worth **+21% at one
-  stream but -18% at two**, so this endpoint is for work on the critical path
-  that runs largely alone:
-  `build` (orchestrator), `planner`, `architect`, `coder`, `devops`, `deep`.
+  3B active), 4 slots, MTP on, ~80–90 t/s solo. **General**: chat,
+  orchestration, planning, critique, docs, infra.
+  `build`, `planner`, `devops`, `reviewer`, `security-auditor`, `tester`,
+  `doc-writer`, `qa`, `librarian`.
 
-  `coder` lives here deliberately. It is the one agent whose output quality
-  compounds, and it is usually the only thing running when it runs.
+- **`deep` → `http://mini:8091/v1`** — `qwen3.8-27b` (dense 27B, hybrid
+  attention), 1 slot, MTP on, ~19 t/s. **Coding + hard design**:
+  `architect`, `coder`, `deep`. One slot — a second dispatch queues.
 
-- **`throughput` → `http://mini:8091/v1`** — `gpt-oss-20b` (MoE 20B), 8 slots,
-  no MTP. 33 t/s per stream at 4-way for 114 t/s aggregate. This endpoint is for
-  the FAN-OUT — agents dispatched simultaneously against the same finished change:
-  `reviewer`, `security-auditor`, `tester`, `doc-writer`. Plus `qa`, which runs
-  on this endpoint but SEQUENTIALLY, after the batch — see below.
+`coder` is on 27B because implementation quality compounds and 3.8 is the
+coding model. It is usually the only thing on `:8091` when it runs
+(`architect` is once per task; `deep` is rare). Do not put the critic
+fan-out on `:8091` — those four stay on `:8090` so they actually run in
+parallel.
 
-  There are exactly four in the batch because four is where `:8091` peaks. Adding a
-  fifth parallel critic buys nothing: at 8-way the endpoint delivers LESS
-  aggregate throughput (81 t/s) than at 4-way and halves per-stream speed.
+mini is memory-bandwidth-bound: the 35B is fast because only 3B weights
+move per token. The 27B reads the whole model per token; that slowness is
+accepted on the coding path only. No agent may point at a third endpoint
+or start Ollama (it is stopped). llama-server holds weights for the
+process lifetime.
 
-Steady state is therefore ~2 streams on `:8090` (orchestrator + one worker) and
-up to 4 on `:8091` — which is exactly where both endpoints measure fastest.
-
-Context per slot differs: **262144 on quality** (2 slots — the model's full native
-window) and 131072 on throughput (8 slots). Both are partitioned statically at
-startup, so a single session cannot exceed its endpoint's figure. There is no residency or eviction to reason about any
-more: llama-server holds its weights for the process lifetime. (The previous
-"two warm slots" wording described Ollama, which is now stopped.)
+Context is **262144 per slot** on both endpoints, partitioned at startup.
+A single session cannot exceed its endpoint's figure.
 
 ## Context budgets — why the orchestrator delegates reading
 
-Agents on quality get **262144 tokens**; agents on throughput get **131072**.
-That is per SLOT, fixed at server start. The orchestrator holds its window for the WHOLE session; every
-subagent's is discarded when it finishes. Nine agents therefore give you roughly
-nine independent working sets, but only if the orchestrator stops being the sole
-reader.
+Every agent gets **262144 tokens** per slot. The orchestrator holds its
+window for the WHOLE session; every subagent's is discarded when it
+finishes. Nine agents therefore give you roughly nine independent working
+sets, but only if the orchestrator stops being the sole reader.
 
 Earlier experiments failed exactly here: subagents had no tools, so the
 orchestrator had to read everything and paste it into every package, exhausted its

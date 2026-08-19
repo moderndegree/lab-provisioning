@@ -38,8 +38,8 @@ Strix Halo is memory-bandwidth-bound, not compute-bound. Decode speed tracks act
 
 | Endpoint | Model | Size / shape | Speed | Use |
 |---|---|---:|---:|---|
-| `:8090` quality | `qwen3.6-35b-a3b-mtp-q4_K_M` | 22 GB, MoE 35B-A3B, 3B active | 106 tok/s c=1; 109 agg c=4 | THE DRIVER — every agent role except `deep`, plus all chat. MTP n-max 3. 262144 ctx/slot x 4. |
-| `:8091` deep | `qwen3.8-27b-q4_K_M` | 19 GB + 3.2 GB MTP head, DENSE 27B hybrid | ~25 tok/s sustained | Hard problems only, called deliberately, never in a loop. ~4x slower. 262144 ctx/slot x 1; a second concurrent call queues. |
+| `:8090` quality | `qwen3.6-35b-a3b-mtp-q4_K_M` | 22 GB, MoE 35B-A3B, 3B active | 106 tok/s c=1; 109 agg c=4 | GENERAL — orchestration, planning, critique, docs, chat. MTP n-max 3. 262144 ctx/slot x 4. Official thinking/general sampler (temp 1.0 / top_k 20 / presence 1.5). |
+| `:8091` deep | `qwen3.8-27b-q4_K_M` | 19 GB + 3.2 GB MTP head, DENSE 27B hybrid | ~25 tok/s sustained | CODING + hard design (`architect`, `coder`, `deep`). ~4x slower. 262144 ctx/slot x 1; a second concurrent call queues. `reasoning_effort=medium`. |
 
 Context per slot: **262144 on BOTH endpoints** — each model's full native window (`:8090` 4 slots, `:8091` 1 slot). Swap a model by editing `llamacpp_instances`
 in mini's `roles/llamacpp` — the units are named by role, not by model.
@@ -105,7 +105,7 @@ Why this: the workstation is the cockpit, not the model host; 32 GB RAM and a 16
 
 ### opencode
 
-What it is: the sovereign coding harness on the workstation, pointed at BOTH of mini's llama-server endpoints. The 10-agent team is split by concurrency: `build`, `planner`, `architect`, `coder` and `devops` on `:8090` (quality, MTP, critical path), and `reviewer`, `security-auditor`, `tester`, `doc-writer` and `librarian` on `:8091` (throughput, the parallel fan-out). `qa` runs on `:8090` (quality) and sequentially, after the batch — it is the final acceptance gate, validating the delivered system black-box against the done-when list rather than reviewing the diff. That split is sized to measurement — `:8090` peaks at 2 concurrent streams, `:8091` at 4 — see `../mini/AGENTS.md`. The `deep` escalation is hard reasoning on `:8090` with thinking left on; it replaces the old `heavy` agent, which pointed at `gpt-oss:120b` via Ollama and no longer resolves. The `research` escalation (xAI, Tier X, never client-confidential) needs `opencode auth login`, so the sovereign path is the failure-safe default.
+What it is: the sovereign coding harness on the workstation, pointed at BOTH of mini's llama-server endpoints. The split is by **role**: `build`, `planner`, `devops`, and the critic fan-out (`reviewer`, `security-auditor`, `tester`, `doc-writer`, `librarian`) plus `qa` on `:8090` (qwen3.6 35B-A3B, general, 4 slots); `architect`, `coder`, and `deep` on `:8091` (qwen3.8 27B, coding + hard design, 1 slot). `qa` still runs sequentially after the critic batch as the black-box acceptance gate. See `../workstation/opencode.json` and `../mini/AGENTS.md`. The `research` escalation (xAI, Tier X, never client-confidential) needs `opencode auth login`, so the sovereign path is the failure-safe default.
 
 Reach for it when: the task is client-confidential, the repo is local, and the answer must stay Tier L. Config lives in `../workstation/opencode.json`; delivery contract is in [`../workstation/AGENTS.md`](../workstation/AGENTS.md).
 
