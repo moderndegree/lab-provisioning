@@ -335,14 +335,36 @@ llamacpp_instances:
   # instance: append an entry with a free port — it joins llama-servers.target
   # automatically. To A/B a backend: set `image:` on one instance only.
 
-  # THE GENERAL SLOT. Serves orchestration, planning, critique, docs, infra,
-  # and chat. Coding (`coder`) and hard design (`architect`, `deep`) live on
-  # :8091. MTP on, because agent loops are mostly SINGLE-STREAM and that is
-  # exactly what MTP buys.
+  # THE GENERAL SLOT, AND SINCE 2026-08-23 THE CODING SLOT TOO. Serves
+  # orchestration, planning, critique, docs, infra and chat, and now also the
+  # interactive coding agent -- which is why the sampling below changed from the
+  # general preset to the precise-coding one. :8091 keeps hard design and the
+  # deep/architect roles; it is ~3.8x slower and reserved for problems that earn
+  # it. MTP on, because agent loops are mostly SINGLE-STREAM and that is exactly
+  # what MTP buys.
   #
-  # extra_args pins Qwen3.6 thinking/general sampling (temp 1.0, top_k 20,
-  # min_p 0, presence 1.5). llama.cpp defaults (0.8 / 40 / 0.05) are wrong
-  # for this card. No reasoning_effort knob exists on this template.
+  # SAMPLING IS THE PRECISE-CODING PRESET AS OF 2026-08-23, not the general one.
+  # Qwen's card lists two thinking-mode presets and they are tuned as SETS:
+  #   general        temp 1.0, top_p 0.95, top_k 20, min_p 0, presence 1.5
+  #   precise coding temp 0.6, top_p 0.95, top_k 20, min_p 0, presence 0.0
+  # This slot now drives coding as well as orchestration, so it runs the latter.
+  # Do not mix rows. llama.cpp's own defaults (0.8 / 40 / 0.05) are wrong for
+  # this card under either preset.
+  #
+  # NO reasoning_effort KNOB EXISTS ON THIS TEMPLATE -- confirmed by grepping
+  # /props: zero occurrences, versus 5 in qwen3.8-27b's. Passing it here is a
+  # silent no-op, NOT an error, which is exactly how it goes unnoticed. The
+  # working control is reasoning_budget below.
+  #
+  # reasoning_budget 1500 because this model does not self-limit: measured
+  # 2026-08-23 it spent ~3058 reasoning tokens on "write an LRU cache" and
+  # ~5542 on a harder prompt, so the 6000 used on :8091 would never bind here.
+  # Unbounded, it will consume an entire max_tokens allowance in <think> and
+  # emit nothing -- that is the mechanism behind the truncated opencode tool
+  # calls seen the same day, where a write's JSON arguments were cut mid-string.
+  # At budget 500 the trace was cut mid-sentence yet the answer got BETTER
+  # (content 5.7k -> 15.6k chars, still complete and correct); 1500 is a
+  # deliberately loose starting point. Tune DOWN if answers stay truncated.
   #
   # WHY ONE ENDPOINT NOW (measured 2026-08-14, fanoutsim -n 4, all back-to-back
   # on b10380 so they are directly comparable — aggregate / per-stream / solo):
@@ -386,7 +408,8 @@ llamacpp_instances:
     parallel: 4
     mtp: true
     mtp_draft_max: 3
-    extra_args: "--temp 1.0 --top-k 20 --top-p 0.95 --min-p 0 --presence-penalty 1.5"
+    reasoning_budget: 1500
+    extra_args: "--temp 0.6 --top-k 20 --top-p 0.95 --min-p 0 --presence-penalty 0.0"
 
   # DEEP — coding + hard design. coder/architect/deep share the single slot.
   # Qwen3.8-27B since 2026-08-14, replacing nemotron-3.5-lightning on this port.
@@ -473,6 +496,11 @@ llamacpp_instances:
     chat_template_kwargs:
       reasoning_effort: "medium"
     # Qwen3.8 thinking-mode official sampler. min_p 0 (not llama.cpp's 0.05).
+    # CODIFIES DRIFT. The live server has run --reasoning-budget 6000 since at
+    # least 2026-08-22 while this flag existed nowhere in the repo, so any
+    # converge would have silently removed it. Unlike :8090 this model also has
+    # a real reasoning_effort knob (medium, below); the budget is the backstop.
+    reasoning_budget: 6000
     extra_args: "--temp 1.0 --top-k 20 --top-p 0.95 --min-p 0 --presence-penalty 0"
 
 # ─────────────────────────────────────────────────────────────────────────────

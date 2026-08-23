@@ -76,6 +76,21 @@ Exec=-m {{ item.model }} \
 {% endif %}
      --spec-type draft-mtp --spec-draft-n-max {{ item.mtp_draft_max | default(1) }} \
 {% endif %}
+{#   reasoning_budget is the only thinking control this role can rely on across
+     models. reasoning_effort is a TEMPLATE feature: qwen3.8-27b's template
+     implements it (xhigh/medium/low, raising on anything else) but
+     qwen3.6-35b-a3b's has no such knob at all, so passing it there is a silent
+     no-op -- verified against both /props templates 2026-08-23.
+     --reasoning-budget is enforced by llama.cpp itself and works regardless of
+     template. Measured on :8090 the same day: budget 500 cut reasoning from
+     ~3058 to ~456 tokens and TRIPLED emitted content (5.7k -> 15.6k chars) on
+     an identical prompt, because the answer stopped competing with the trace
+     for max_tokens.
+     `is defined` rather than `| default('')`: 0 is MEANINGFUL here (end
+     thinking immediately) and a falsy test would silently drop it. #}
+{% if item.reasoning_budget is defined %}
+     --reasoning-budget {{ item.reasoning_budget }} \
+{% endif %}
 {% if item.chat_template_kwargs | default('') %}
      --chat-template-kwargs '{{ item.chat_template_kwargs | to_json if item.chat_template_kwargs is mapping else item.chat_template_kwargs }}' \
 {% endif %}
