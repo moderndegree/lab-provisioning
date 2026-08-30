@@ -1,0 +1,183 @@
+---
+# Read-only probes for roles/voice. Appends to `problems`; changes nothing.
+#
+# The voice path fails QUIETLY more than most things here. Every one of these
+# leaves both units active and every port answering:
+#
+#   - speaches is up but holds no model, so transcription returns 500 and the
+#     assistant simply never hears anything (the same shape as the Open WebUI
+#     "model picker is empty" failure roles/openwebui documents)
+#   - mini is serving a different alias, so every turn 400s
+#   - the UFW rule is missing, so the gateway is perfect on loopback and
+#     unreachable from the desk
+#   - a speaches bump changes the TTS sample rate and the voice plays at the
+#     wrong pitch, which no health check anywhere would notice
+#
+# So these ask the SERVICES, not systemd, and the gateway's own /v1/status is
+# used to reach the things only it can see.
+
+- name: Check the voice units are active
+  ansible.builtin.command: "systemctl --user is-active {{ item }}"
+  become: true
+  become_user: "{{ username }}"
+  environment: "{{ user_systemd_env }}"
+  loop:
+    - voice-speech.service
+    - voice-gateway.service
+  register: verify_voice_units
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Flag inactive voice units
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [item.item ~ ' is ' ~ (item.stdout | default('unknown')) ~ '.'] }}
+  loop: "{{ verify_voice_units.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item.stdout | default('') != 'active'
+
+# A container started before a pin bump keeps running the old layer forever;
+# podman never restarts it for you and the unit stays happily active.
+- name: Read the image voice-speech is running
+  ansible.builtin.command: >-
+    podman inspect --format {{ '{{.ImageName}}' }} voice-speech
+  become: true
+  become_user: "{{ username }}"
+  environment: "{{ user_systemd_env }}"
+  register: verify_voice_image
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Flag a stale speaches image
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'voice-speech is running image ' ~ (verify_voice_image.stdout | trim) ~
+        ' but the quadlet pins ' ~ voice_speech_image ~
+        ' — restart it to pick the pinned image up.'
+      ] }}
+  when:
+    - verify_voice_image.rc | default(1) == 0
+    - (verify_voice_image.stdout | trim) != voice_speech_image
+
+# Asks speaches what it actually holds. A model that is configured but absent
+# is the single most likely reason the assistant is silent, and it produces no
+# error until something tries to use it.
+- name: Ask speaches which models it holds
+  ansible.builtin.uri:
+    url: "http://{{ voice_speech_host }}:{{ voice_speech_port }}/v1/models"
+    timeout: "{{ verify_http_timeout }}"
+    return_content: true
+  register: verify_voice_models
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Flag missing speech models
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'speaches does not hold ' ~ item ~
+        ' — requests for it return 500 (it does not download on demand).'
+      ] }}
+  loop: "{{ voice_speech_models }}"
+  when:
+    - verify_voice_models.status | default(0) == 200
+    - item not in (verify_voice_models.json.data | default([]) | map(attribute='id') | list)
+
+- name: Flag speaches not answering
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'speaches is not answering on :' ~ voice_speech_port ~
+        ' (' ~ (verify_voice_models.msg | default('no response')) ~ ').'
+      ] }}
+  when: verify_voice_models.status | default(0) != 200
+
+# The gateway's own view of its dependencies. /health would pass with every one
+# of them dead, which is exactly why /v1/status exists separately.
+- name: Ask the gateway about its dependencies
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ voice_gateway_port }}/v1/status"
+    # A real transcription and a real synthesis happen behind this.
+    timeout: 60
+    return_content: true
+  register: verify_voice_status
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Flag a gateway that is not answering
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'voice-gateway is not answering on :' ~ voice_gateway_port ~
+        ' (' ~ (verify_voice_status.msg | default('no response')) ~ ').'
+      ] }}
+  when: verify_voice_status.status | default(0) != 200
+
+- name: Flag each failing gateway dependency
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'voice-gateway cannot use ' ~ item.key ~ ': ' ~ (item.value.detail | default('no detail'))
+      ] }}
+  loop: "{{ (verify_voice_status.json.checks | default({})) | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  when:
+    - verify_voice_status.status | default(0) == 200
+    - not (item.value.ok | default(false))
+
+# The TTS sample rate is hard-coded in the wire protocol because
+# `response_format: pcm` comes back as bare `audio/pcm` with no rate to parse.
+# If an image bump changes it, nothing errors — the voice just plays at the
+# wrong pitch and speed. This is the only place that would ever catch it.
+- name: Ask the TTS what sample rate it is producing
+  ansible.builtin.command: >-
+    {{ voice_venv_dir }}/bin/python -c
+    "import io,sys,wave,urllib.request,json;
+    d=json.dumps({'model':'{{ voice_tts_model }}','voice':'{{ voice_tts_voice }}','input':'rate check','response_format':'wav'}).encode();
+    r=urllib.request.Request('http://{{ voice_speech_host }}:{{ voice_speech_port }}/v1/audio/speech',data=d,headers={'Content-Type':'application/json'});
+    print(wave.open(io.BytesIO(urllib.request.urlopen(r,timeout=30).read())).getframerate())"
+  become: true
+  become_user: "{{ username }}"
+  register: verify_voice_rate
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Flag a TTS sample-rate change
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'TTS is producing ' ~ (verify_voice_rate.stdout | trim) ~ ' Hz but the wire protocol '
+        ~ 'hard-codes 24000 (packages/voice-gateway/voice_gateway/protocol.py). '
+        ~ 'Audio will play at the wrong pitch; nothing else reports this.'
+      ] }}
+  when:
+    - verify_voice_rate.rc | default(1) == 0
+    - (verify_voice_rate.stdout | trim) != '24000'
+
+# Without this rule the gateway is loopback-only. Nothing on the box notices;
+# the desktop client simply cannot connect.
+- name: Read the UFW rule list
+  ansible.builtin.command: ufw status
+  register: verify_voice_ufw
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Flag a missing tailnet rule for the gateway
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'no UFW allow for ' ~ voice_gateway_port ~ '/tcp on ' ~ voice_tailnet_interface ~
+        ' — the gateway is reachable only from ser5 itself.'
+      ] }}
+  when:
+    - verify_voice_ufw.rc | default(1) == 0
+    - not (verify_voice_ufw.stdout is search(voice_gateway_port | string ~ '/tcp on ' ~ voice_tailnet_interface))

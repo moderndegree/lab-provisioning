@@ -20,6 +20,7 @@ autoinstall + Ansible provisioning stack; lab software lives under
 |-----------|------|
 | [`docs/operating-manual.md`](docs/operating-manual.md) | One-page entry point: which harness when, which model where, and how to drive it from the phone |
 | [`packages/inference-bench/`](packages/inference-bench/README.md) | Benchmarks for mini's llama.cpp serving path — the numbers behind the `llamacpp` role's sizing |
+| [`packages/voice-gateway/`](packages/voice-gateway/README.md) | The voice loop: VAD → STT → mini → TTS with barge-in. 1305 ms to first audible word (measured); desktop push-to-talk client included |
 | [`workstation/`](workstation/README.md) | opencode config for the 10-agent coding team (copied/symlinked onto the dev box) |
 | [`docs/brain.md`](docs/brain.md) | Second brain vault on ser5 (`/data/brain`); UI/MCP in sibling **ai-workstation** |
 | [`docs/todo.md`](docs/todo.md) | Open punch list — operational follow-ups and the open question of what measures quality |
@@ -55,10 +56,14 @@ lab-provisioning/
 │   ├── provisioning-checklist.md  one-time manual steps Ansible cannot do
 │   └── todo.md              open punch list
 ├── packages/
-│   └── inference-bench/     serving benchmarks behind the llamacpp sizing
-│       ├── lbench.py        raw decode throughput at a given concurrency
-│       ├── agentsim.py      workers + orchestrator, tool calls, multi-turn
-│       └── fanoutsim.py     small fan-out: N workers then a judge pass
+│   ├── inference-bench/     serving benchmarks behind the llamacpp sizing
+│   │   ├── lbench.py        raw decode throughput at a given concurrency
+│   │   ├── agentsim.py      workers + orchestrator, tool calls, multi-turn
+│   │   └── fanoutsim.py     small fan-out: N workers then a judge pass
+│   └── voice-gateway/       the voice loop (ser5); see roles/voice
+│       ├── voice_gateway/   VAD, STT, LLM, sentence-chunked TTS, routing
+│       ├── clients/desktop/ Windows push-to-talk + wake-word client
+│       └── bench/           voicebench.py — the latency numbers in the README
 ├── workstation/             opencode runtime config for the dev box
 ├── mini/                    MS-S1 Max — headless inference node
 │   ├── README.md
@@ -87,7 +92,7 @@ lab-provisioning/
         ├── group_vars/
         │   ├── all.example.yml    placeholder params (tracked)
         │   └── vault.yml.example  placeholder secrets (tracked; encrypt after init)
-        └── roles/{base,desktop,storage,devtools,virtualization,containers,tailscale,hermes,brain,openwebui,observability,backups}/
+        └── roles/{base,desktop,storage,devtools,virtualization,containers,tailscale,hermes,brain,openwebui,searxng,voice,observability,backups}/
     └── autoinstall/
         ├── user-data.example  ${PLACEHOLDER} template
         └── meta-data

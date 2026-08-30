@@ -1,0 +1,218 @@
+---
+# Voice I/O — speaches (STT + TTS) as a rootless quadlet, plus the gateway as a
+# systemd user unit. See defaults/main.yml for the measurements behind every
+# engine and model choice here.
+
+- name: voice stub — role is disabled
+  ansible.builtin.debug:
+    msg: >
+      voice role is disabled (enable_voice: false).
+      Set enable_voice: true in group_vars/all.yml to activate.
+  when: not (enable_voice | default(false) | bool)
+
+- name: Deploy the voice stack
+  when: enable_voice | default(false) | bool
+  block:
+    - name: Resolve {{ username }} UID (needed for systemctl --user calls)
+      ansible.builtin.command: "id -u {{ username }}"
+      register: voice_user_uid
+      changed_when: false
+
+    - name: Ensure the voice directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0750"
+      loop:
+        - "{{ voice_data_dir }}"
+        - "{{ voice_models_dir }}"
+        - "{{ voice_app_dir }}"
+
+    # ─── Silero VAD ──────────────────────────────────────────────────────────
+    # Checksummed because it is a binary blob fetched from the internet onto an
+    # always-on box, and because a truncated download would not fail loudly —
+    # onnxruntime would refuse the graph at the first utterance, long after the
+    # converge went green.
+    - name: Fetch the Silero VAD graph
+      ansible.builtin.get_url:
+        url: "{{ voice_vad_model_url }}"
+        dest: "{{ voice_vad_model_path }}"
+        checksum: "sha256:{{ voice_vad_model_sha256 }}"
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0644"
+      notify: restart voice-gateway
+
+    # ─── speaches ────────────────────────────────────────────────────────────
+    - name: Template the speaches quadlet
+      ansible.builtin.template:
+        src: voice-speech.container.j2
+        dest: "{{ user_home }}/.config/containers/systemd/voice-speech.container"
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0644"
+      notify:
+        - voice daemon-reload
+        - restart voice-speech
+
+    - name: Flush handlers (daemon-reload before start)
+      ansible.builtin.meta: flush_handlers
+
+    - name: Ensure voice-speech is started
+      ansible.builtin.systemd:
+        name: voice-speech.service
+        state: started
+        scope: user
+      become: true
+      become_user: "{{ username }}"
+      environment:
+        XDG_RUNTIME_DIR: "/run/user/{{ voice_user_uid.stdout }}"
+      when: not ansible_check_mode
+
+    # Cold start loads models off the data disk; the pulls below fail flat if
+    # they race it, and the failure reads as "model missing" rather than "not up
+    # yet".
+    - name: Wait for speaches to answer
+      ansible.builtin.uri:
+        url: "http://{{ voice_speech_host }}:{{ voice_speech_port }}/health"
+        status_code: [200]
+      register: voice_speech_up
+      retries: 30
+      delay: 5
+      until: voice_speech_up.status | default(0) == 200
+      changed_when: false
+      when: not ansible_check_mode
+
+    # speaches does NOT download a model on demand. A model it does not already
+    # hold raises huggingface_hub.CacheNotFound and the request returns 500, so
+    # the cache has to be populated explicitly. Verified 2026-08-30.
+    - name: Read the models speaches already holds
+      ansible.builtin.uri:
+        url: "http://{{ voice_speech_host }}:{{ voice_speech_port }}/v1/models"
+        return_content: true
+      register: voice_models_present
+      changed_when: false
+      failed_when: false
+      when: not ansible_check_mode
+
+    - name: Download the speech models
+      ansible.builtin.uri:
+        url: >-
+          http://{{ voice_speech_host }}:{{ voice_speech_port }}/v1/models/{{ item }}
+        method: POST
+        status_code: [200, 201, 409]
+        # A first pull is hundreds of MB over the public internet.
+        timeout: 1800
+      loop: "{{ voice_speech_models }}"
+      register: voice_model_pull
+      changed_when: voice_model_pull.status | default(0) in [200, 201]
+      when:
+        - not ansible_check_mode
+        - item not in (voice_models_present.json.data | default([]) | map(attribute='id') | list)
+
+    # ─── Gateway ─────────────────────────────────────────────────────────────
+    - name: Install the gateway system prompt
+      ansible.builtin.copy:
+        src: system-prompt.md
+        dest: "{{ voice_data_dir }}/system-prompt.md"
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0644"
+      notify: restart voice-gateway
+
+    # Copied rather than run from the repo checkout: the gateway is a service on
+    # this box and must not depend on a working copy that can be moved, dirty,
+    # or mid-rebase.
+    #
+    # synchronize rather than copy, purely for --exclude. Running the bench or a
+    # pip install in the source tree leaves __pycache__ and .egg-info behind, and
+    # ansible.builtin.copy has no way to skip them: it would ship that junk and
+    # report `changed` on any run where a .pyc timestamp had moved, so the role
+    # would never settle.
+    - name: Copy the gateway package onto the box
+      ansible.posix.synchronize:
+        src: "{{ voice_src_dir }}/"
+        dest: "{{ voice_app_dir }}/"
+        delete: true
+        rsync_opts:
+          - "--exclude=__pycache__"
+          - "--exclude=*.egg-info"
+          - "--exclude=.venv"
+          - "--exclude=*.pyc"
+          - "--exclude=build"
+          - "--exclude=dist"
+      become: false
+      register: voice_src_copy
+      notify: restart voice-gateway
+
+    - name: Own the copied package
+      ansible.builtin.file:
+        path: "{{ voice_app_dir }}"
+        state: directory
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        recurse: true
+
+    - name: Create the gateway virtualenv
+      ansible.builtin.command:
+        cmd: "python3 -m venv {{ voice_venv_dir }}"
+        creates: "{{ voice_venv_dir }}/bin/python"
+      become: true
+      become_user: "{{ username }}"
+      register: voice_venv_created
+
+    # Reinstalled only when the source actually changed or the venv is new.
+    # `pip install` is not idempotent on its own, so changed_when reads pip's own
+    # report rather than assuming.
+    - name: Install the gateway into its virtualenv
+      ansible.builtin.command:
+        cmd: "{{ voice_venv_dir }}/bin/pip install --upgrade {{ voice_app_dir }}"
+      become: true
+      become_user: "{{ username }}"
+      register: voice_pip
+      changed_when: "'Successfully installed' in voice_pip.stdout"
+      when: voice_src_copy.changed or voice_venv_created.changed
+      notify: restart voice-gateway
+
+    - name: Template the gateway unit
+      ansible.builtin.template:
+        src: voice-gateway.service.j2
+        dest: "{{ user_home }}/.config/systemd/user/voice-gateway.service"
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0644"
+      notify:
+        - voice daemon-reload
+        - restart voice-gateway
+
+    - name: Flush handlers (daemon-reload before enable/start)
+      ansible.builtin.meta: flush_handlers
+
+    # This one is a real unit file, not a quadlet-generated one, so unlike the
+    # container units it CAN and must be enabled.
+    - name: Enable and start voice-gateway
+      ansible.builtin.systemd:
+        name: voice-gateway.service
+        state: started
+        enabled: true
+        scope: user
+      become: true
+      become_user: "{{ username }}"
+      environment:
+        XDG_RUNTIME_DIR: "/run/user/{{ voice_user_uid.stdout }}"
+      when: not ansible_check_mode
+
+    # ─── Exposure ────────────────────────────────────────────────────────────
+    # ser5 is default-deny with NO blanket tailscale0 allow (mini has one; this
+    # box does not). Every service that needs the tailnet adds its own rule —
+    # see roles/hermes. Without this the gateway binds fine, answers on
+    # loopback, and is silently unreachable from the desktop client.
+    - name: Allow the voice gateway in from the tailnet interface
+      community.general.ufw:
+        rule: allow
+        direction: in
+        interface: "{{ voice_tailnet_interface }}"
+        to_port: "{{ voice_gateway_port }}"
+        proto: tcp

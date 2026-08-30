@@ -26,7 +26,7 @@ This lab is three things: the dev environment for a solo AI consulting practice,
 | Device | Role | Runs | Does not run | Why this, on this hardware |
 |---|---|---|---|---|
 | mini | Inference appliance | Headless Ubuntu 26.04, llama-server on `:8090`/`:8091`, Vulkan/RADV backend, tailnet-only; Ollama installed but stopped, started by hand only to try a model | Loops, experiments, dashboards, queues, client apps | Strix Halo has 128 GB unified LPDDR5X and ~110 GB usable GPU pool; protect it from anything that can crash or OOM. |
-| ser5 | Always-on driver | Hermes, second brain (`/data/brain`), Grok Build CLI, Prometheus+Grafana, Open WebUI (opt-in), restic backups | Local models | Ryzen 7 5800H + 64 GB DDR4 is enough for orchestration; `/data` holds durable state. |
+| ser5 | Always-on driver | Hermes, second brain (`/data/brain`), Grok Build CLI, Prometheus+Grafana, Open WebUI (opt-in), SearXNG (opt-in), voice gateway + speech models (opt-in), restic backups | Local **LLMs** | Ryzen 7 5800H + 64 GB DDR4 is enough for orchestration; `/data` holds durable state. Speech models are I/O codecs, not reasoning — see the hard rules. |
 | workstation | Primary cockpit | Copilot CLI, opencode client, repo work | Local models | RTX 4080 Super 16 GB and 32 GB system RAM lose to mini for this fleet; drive mini instead. |
 | iPhone | Remote control surface | Tailscale, Hermes dashboard, GitHub mobile, Grafana (Open WebUI only if `enable_openwebui` is turned on) | Bulk editing, production hosting | Starts work, reviews PRs, checks health; it is not the lab. |
 
@@ -145,6 +145,33 @@ systemctl --user start hermes-gateway hermes-proxy hermes-dashboard
 
 Why this: Hermes is the bridge between small inputs and long-running work; it belongs on ser5, not mini.
 
+### Voice
+
+What it is: a streaming voice loop on ser5 (`enable_voice`). Two units —
+`voice-speech`, a speaches container serving both speech-to-text and
+text-to-speech on `:8770`, and `voice-gateway` on `:8772`, which does the
+endpointing, routing and sentence chunking. Reasoning goes straight to
+`mini:8090`, so a spoken turn is Tier L end to end. The desktop client lives in
+`packages/voice-gateway/clients/desktop`.
+
+Reach for it when: your hands are busy, you want an answer rather than a
+document, or you want to hand a long job to Hermes without sitting down. Say
+"search for X" to route through SearXNG; say "have hermes ..." to delegate.
+
+Start it:
+
+```bash
+systemctl --user start voice-speech voice-gateway
+# on the workstation
+python packages/voice-gateway/clients/desktop/voice_client.py --host ser5
+```
+
+Why this: **1305 ms from the end of speech to the first audible word**
+(measured, ser5, push-to-talk, 2.3 s command, n=10; p95 1932 ms). It is not magic — it is
+sentence chunking, so you hear sentence one while sentence three is still
+generating, plus mini's prefix cache taking time-to-first-token from 774 ms cold
+to 75 ms warm. Speak over it to interrupt.
+
 ### Second brain (`/data/brain` + AI Workstation)
 
 What it is: Obsidian-compatible markdown vault for postmortems, decisions, and ACE playbooks. Seeded by the `brain` role (`enable_brain`). The **AI Workstation** app (sibling repo `ai-workstation`) is the primary UI and cortex MCP over the same path (`CORTEX_VAULT_DIR=/data/brain`).
@@ -172,6 +199,15 @@ Start it: run AI Workstation with `CORTEX_VAULT_DIR=/data/brain`, or open `/data
 - Never start Ollama while llama-server is running — they cannot both hold weights in 122 GiB.
 - Never raise total context blind; `-c 2097152` hung the GPU allocator and needed a reboot.
 - Embeddings live on ser5's CPU.
+- Speech models (ASR and TTS) live on ser5's CPU too, for the same reason: they are
+  I/O codecs, not reasoning. The whole voice stack is well under 1 GB and CPU-only.
+  LLM inference stays on mini. A GPU buys the TTS nothing (piper measures RTF 0.047
+  on ser5's CPU), and mini has ~12 GB of headroom, which is not enough to be worth
+  the risk to a live serving box.
+- Hermes's `:8645` is a **Nous Portal proxy**, not a route to mini. It forwards to a
+  Nous subscription regardless of the `model.provider`/`base_url` it is configured
+  with, and it is currently down. Nothing in the lab may treat it as an inference
+  endpoint; go to `mini:8090/v1` directly.
 - Never send client-confidential material through Hermes until its four hosted credentials (openrouter, opencode-zen, copilot, xai-oauth) are gone. The mini route is verified as of 2026-08-14; the credentials are the remaining boundary (see `todo.md`).
 - Client-confidential work never touches Telegram or Discord.
 - Client-confidential work never leaves Tier L without explicit written consent.
@@ -196,4 +232,7 @@ Start it: run AI Workstation with `CORTEX_VAULT_DIR=/data/brain`, or open `/data
 | A model is missing from the list | That instance is down, or Ollama got started and is contending | `curl mini:8090/v1/models`, `curl mini:8091/v1/models`, `systemctl is-active ollama` on mini | Restart the instance; stop Ollama — it and llama-server cannot both hold weights in 122 GiB. |
 | Jobs queue behind each other | More concurrent requests than slots (4 on `:8090`, 8 on `:8091`) | `llamacpp:requests_deferred` and `llamacpp:requests_processing` in Prometheus | Let it queue, or send bulk fan-out to `:8091`. Raising slots lowers ctx/slot. |
 | Throughput is far below the table | Estimate treated as fact | Re-measure with `packages/inference-bench` | Keep `(est.)` labels until measured; adopt only measured wins. |
+| A voice turn takes seconds instead of about one | Prefix-cache miss on mini — the system prompt drifted, so every turn pays a cold prefill | Compare `/data/services/voice/system-prompt.md` against the copy in `roles/voice/files/`; 774 ms cold vs 75 ms warm | Restore the file and restart `voice-gateway`. It is byte-stable on purpose. |
+| Voice hears nothing, but everything is "active" | speaches holds no model — it does NOT download on demand and returns 500 | `curl 127.0.0.1:8770/v1/models`, or `cd ser5 && make verify` | Re-run `make provision`; it pre-pulls each model in `voice_speech_models`. |
+| The assistant sounds like a chipmunk | A speaches bump changed the TTS sample rate; the wire protocol hard-codes 24000 | `cd ser5 && make verify` — it asserts the rate against the WAV header | Update `TTS_SAMPLE_RATE` in `voice_gateway/protocol.py` and the client's `OUT_RATE` together. |
 | A service restarted but behaves like the old version | A stale `~/.config/systemd/user/<unit>.service` shadows the quadlet | `systemctl --user show <unit> -p FragmentPath --value` | Anything not under `.../systemd/generator/` is shadowed — delete it and `daemon-reload`. A clean converge does NOT catch this. |

@@ -1,0 +1,57 @@
+# systemd USER unit — voice gateway.
+# Managed by ser5/ansible/roles/voice — do not edit by hand.
+#
+# NOT a container, deliberately. The gateway shells out to `hermes` for
+# delegation, so containerising it would mean baking the Hermes binary and
+# HERMES_HOME into an image and keeping them in step with roles/hermes forever.
+# roles/hermes is the precedent for a user unit with an explicit PATH.
+#
+# Every setting the gateway reads arrives as an environment variable below, so
+# this file is the whole story:
+#   systemctl --user show voice-gateway -p Environment
+
+[Unit]
+Description=Voice gateway — VAD, STT, mini, TTS, with barge-in
+After=network-online.target voice-speech.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory={{ voice_app_dir }}
+Environment=PATH={{ voice_gateway_path }}
+Environment=PYTHONUNBUFFERED=1
+
+Environment=VOICE_HOST={{ voice_gateway_host }}
+Environment=VOICE_PORT={{ voice_gateway_port }}
+
+Environment=VOICE_STT_URL=http://{{ voice_speech_host }}:{{ voice_speech_port }}
+Environment=VOICE_STT_MODEL={{ voice_stt_model }}
+Environment=VOICE_STT_LANGUAGE={{ voice_stt_language }}
+
+# Same service as STT today. Kept as its own variable so a voice-clone lane on
+# the workstation GPU can be pointed at without touching STT.
+Environment=VOICE_TTS_URL=http://{{ voice_speech_host }}:{{ voice_speech_port }}
+Environment=VOICE_TTS_MODEL={{ voice_tts_model }}
+Environment=VOICE_TTS_VOICE={{ voice_tts_voice }}
+
+Environment=VOICE_LLM_BASE_URL={{ voice_llm_base_url }}
+Environment=VOICE_LLM_MODEL={{ voice_llm_model }}
+Environment=VOICE_LLM_MAX_TOKENS={{ voice_llm_max_tokens }}
+
+Environment=VOICE_VAD_MODEL_PATH={{ voice_vad_model_path }}
+Environment=VOICE_VAD_SILENCE_MS={{ voice_vad_silence_ms }}
+
+Environment=VOICE_SEARXNG_URL={{ voice_searxng_url }}
+Environment=VOICE_HERMES_BIN={{ voice_hermes_bin }}
+# The system prompt lives in the repo and is byte-stable across restarts. That
+# matters beyond tidiness: it is the prefix-cache key on mini, and the llamacpp
+# defaults call --cache-ram the highest-value untuned knob on the box at ~12x on
+# time-to-first-token. Measured here 2026-08-30: 774ms cold, 75ms warm.
+Environment=VOICE_SYSTEM_PROMPT_PATH={{ voice_data_dir }}/system-prompt.md
+
+ExecStart={{ voice_venv_dir }}/bin/python -m voice_gateway
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

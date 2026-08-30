@@ -1,0 +1,59 @@
+# Podman quadlet — speaches (rootless, Ansible-managed).
+# Managed by ser5/ansible/roles/voice — do not edit by hand.
+#
+# One container serving BOTH halves of the voice path:
+#   /v1/audio/transcriptions   faster-whisper, base.en
+#   /v1/audio/speech           piper, en_US-amy-medium
+# See defaults/main.yml for the measurements behind both choices.
+#
+# Loopback-only. The gateway is the only thing that talks to it and runs on this
+# same host; nothing on the tailnet needs it. Open WebUI, when it is pointed
+# here in a later pass, is also local.
+
+[Unit]
+Description=speaches — speech to text and text to speech for the voice gateway
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image={{ voice_speech_image }}
+ContainerName=voice-speech
+PublishPort={{ voice_speech_host }}:{{ voice_speech_port }}:8000
+
+# UserNS=keep-id is REQUIRED, not stylistic. The image runs as its own `ubuntu`
+# user; without keep-id the bind-mounted cache below is owned by an unmapped uid
+# inside the container and every model download dies with
+#   PermissionError: [Errno 13] .../hub/models--Systran--faster-whisper-base.en
+# which surfaces as an HTTP 500 on transcription, not as a startup failure.
+# Same reason roles/searxng carries it.
+UserNS=keep-id
+
+# The HuggingFace cache. This has to persist: speaches does NOT download a model
+# on demand — a model it does not already hold raises CacheNotFound and returns
+# 500 — so losing this volume means every request fails until the models are
+# pulled again. tasks/main.yml pre-pulls them through the API.
+Volume={{ voice_models_dir }}:/home/ubuntu/.cache/huggingface:Z
+
+# -1 keeps a loaded model resident indefinitely. The default unloads it after an
+# idle period and the reload then lands on the first thing you say after a quiet
+# spell, which is the worst possible moment for it.
+Environment=WHISPER__TTL={{ voice_speech_ttl }}
+Environment=WHISPER__COMPUTE_TYPE={{ voice_speech_compute_type }}
+
+# speaches has its own /health, and unlike a bare port check it comes up only
+# once the app is actually serving.
+HealthCmd=curl -sf http://127.0.0.1:8000/health
+HealthInterval=30s
+# Cold start loads models from the cache; generous, because a container that is
+# merely still loading must not be restarted underneath itself.
+HealthStartPeriod=300s
+HealthTimeout=10s
+HealthRetries=3
+
+[Service]
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=300
+
+[Install]
+WantedBy=default.target

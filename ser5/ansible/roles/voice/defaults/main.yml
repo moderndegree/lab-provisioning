@@ -1,0 +1,129 @@
+---
+# Voice I/O for the lab — speech in, speech out, reasoning on mini.
+#
+# Two units:
+#   voice-speech    rootless Podman quadlet. speaches, serving BOTH
+#                   /v1/audio/transcriptions and /v1/audio/speech.
+#   voice-gateway   systemd USER unit (not a container). It shells out to
+#                   `hermes`, so containerising it would mean putting the Hermes
+#                   binary and HERMES_HOME inside an image. roles/hermes is the
+#                   precedent for a user unit with a baked PATH.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# WHY THESE ENGINES — measured on ser5, 2026-08-30, 8 CPU threads, int8.
+# ─────────────────────────────────────────────────────────────────────────────
+# The original design used WhisperLive for streaming STT and openedai-speech for
+# TTS. Both lost on measurement and were replaced by one container.
+#
+# STT, 3.88 s clip:
+#     path                              tiny.en   base.en   small.en
+#     faster-whisper in-process           237ms     408ms     1260ms
+#     speaches (HTTP container)           460ms     708ms     1876ms
+#     WhisperLive REST                   3060ms    3060ms     3100ms
+#     WhisperLive streaming, tail lag    2300ms    2750ms     2200ms
+#
+# WhisperLive's server will not transcribe a chunk under one second —
+# `backend/base.py`: `if duration < 1.0: time.sleep(0.1)` — so an utterance's
+# tail waits out that window plus a whisper pass. The lag is identical across
+# model sizes, which proves it is the cadence and not the compute; no flag
+# reaches it. Streaming partials are real and useful, but they arrive DURING
+# speech and the finalize is what the listener waits on.
+#
+# TTS, time to FIRST BYTE (what a listener experiences, not total synthesis):
+#     speaches + piper en_US-amy-medium     250ms   RTF 0.047
+#     openedai-speech + piper (tts-1)      1028ms   RTF 0.349
+#     speaches + Kokoro-82M ONNX int8      5592ms   RTF 1.125  <- SLOWER THAN
+#                                                                 REAL TIME
+# Kokoro sounds better and is simply not viable on this CPU; it wants a GPU.
+#
+# End to end, push-to-talk, 2.3 s command, n=10 (packages/voice-gateway/bench):
+#     STT finalize             671ms
+#     model -> first sentence  349ms   (mini TTFT is 75ms warm; the rest is
+#                                       tokens generated before a full sentence)
+#     synthesis                273ms
+#     TO FIRST AUDIBLE WORD   1305ms   (p95 1932ms; the spread is mini's load)
+#
+# Re-measure with `voicebench.py` before changing any of this. Every number here
+# came from that script and nothing here is an estimate.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Role is gated in site.yml; this line is documentation (the role `when:` is
+# evaluated before role defaults, exactly as noted in roles/searxng).
+enable_voice: false
+
+voice_data_dir: "{{ data_mount }}/services/voice"
+# Source of the gateway package in this repo, copied to the box and installed
+# into a venv. playbook_dir is ser5/ansible.
+voice_src_dir: "{{ playbook_dir }}/../../packages/voice-gateway"
+voice_app_dir: "{{ voice_data_dir }}/app"
+voice_venv_dir: "{{ voice_data_dir }}/venv"
+
+# ─── speaches: STT + TTS in one container ────────────────────────────────────
+# Pinned to an exact tag. 0.9.0-rc.1 exists upstream; release candidates do not
+# go on an always-on box.
+voice_speech_image: "ghcr.io/speaches-ai/speaches:0.8.3-cpu"
+voice_speech_host: "127.0.0.1"
+voice_speech_port: 8770
+# HF cache. Models are NOT downloaded on demand — speaches raises CacheNotFound
+# and returns 500 for a model it does not already have — so tasks/main.yml
+# pre-pulls each one through the API.
+voice_models_dir: "{{ voice_data_dir }}/models"
+# TTL -1 keeps a loaded model resident forever. The default evicts it after an
+# idle period, and the reload lands on the first thing you say after a quiet
+# spell — the worst possible moment.
+voice_speech_ttl: -1
+voice_speech_compute_type: "int8"
+
+# Every model the container must hold. STT and TTS both come from this list.
+voice_speech_models:
+  - "Systran/faster-whisper-base.en"
+  - "speaches-ai/piper-en_US-amy-medium"
+
+# ─── Gateway ─────────────────────────────────────────────────────────────────
+# Binds 0.0.0.0 because the desktop client reaches it over the tailnet; UFW
+# scopes it to tailscale0 below. ser5 has NO blanket tailscale0 allow (mini
+# does), so without that rule this is loopback-only and the client cannot
+# connect — with nothing else reporting a fault.
+voice_gateway_host: "0.0.0.0"
+voice_gateway_port: 8772
+voice_tailnet_interface: "tailscale0"
+
+# base.en over tiny.en on measurement: 632ms vs 392ms on a 2.25 s command, and
+# tiny.en heard "the GPU temperature on many" where base.en heard "on Mini".
+# 240 ms is worth paying to get the name of the box right.
+voice_stt_model: "Systran/faster-whisper-base.en"
+voice_stt_language: "en"
+voice_tts_model: "speaches-ai/piper-en_US-amy-medium"
+voice_tts_voice: "en_US-amy-medium"
+
+# ─── Reasoning: mini, directly ───────────────────────────────────────────────
+# NOT through Hermes. `hermes proxy` on :8645 is a Nous Portal proxy that
+# forwards to a Nous subscription regardless of its configured model.base_url,
+# and it is down anyway ("Not logged into Nous Portal"). Going direct keeps
+# every conversational turn on Tier L and, decisively, keeps it STREAMING —
+# which is what makes sentence-chunked speech possible.
+voice_llm_base_url: "http://mini:8090/v1"
+# Must equal llama-server's --alias exactly; it rejects anything else.
+voice_llm_model: "qwen3.6-35b-a3b-mtp"
+voice_llm_max_tokens: 400
+
+# ─── Endpointing ─────────────────────────────────────────────────────────────
+# Silero VAD as a bare ONNX graph. Deliberately NOT the `silero-vad` pip
+# package, which drags in torch + torchaudio — about 2 GB of wheels on a box
+# whose job here is moving small buffers between sockets.
+voice_vad_model_url: "https://github.com/snakers4/silero-vad/raw/v5.1.2/src/silero_vad/data/silero_vad.onnx"
+voice_vad_model_sha256: "2623a2953f6ff3d2c1e61740c6cdb7168133479b267dfef114a4a3cc5bdd788f"
+voice_vad_model_path: "{{ voice_models_dir }}/silero_vad.onnx"
+voice_vad_silence_ms: 250
+
+# ─── Tools ───────────────────────────────────────────────────────────────────
+# SearXNG already runs here for Open WebUI and publishes on loopback, which is
+# where the gateway sits. Its role sets `formats: [html, json]` and disables the
+# limiter; without both of those this returns 403.
+voice_searxng_url: "http://127.0.0.1:{{ searxng_port | default(8888) }}/search"
+# Same PATH reasoning as roles/hermes: ~/.local/bin holds `hermes` (put there by
+# the NousResearch installer) and ~/.npm-global/bin holds `opencode`. Hermes
+# could not see opencode until 2026-08-15 for exactly this reason, and reported
+# it as "not installed" rather than as a path problem.
+voice_gateway_path: "{{ user_home }}/.npm-global/bin:{{ user_home }}/.local/bin:/usr/local/bin:/usr/bin:/bin"
+voice_hermes_bin: "hermes"

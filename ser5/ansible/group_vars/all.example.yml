@@ -85,6 +85,9 @@ enable_backups: false         # restic snapshots + daily timer (needs vault_rest
 enable_brain: false           # Obsidian-compatible second brain under /data/brain
 enable_openwebui: false       # Open WebUI browser chat UI, reaching mini over the tailnet
 enable_searxng: false         # SearXNG metasearch backend for Open WebUI web search
+enable_voice: false           # Speech in/out: speaches (STT+TTS) + the voice gateway on :8772
+                              # Needs enable_searxng for the "search for ..." route, and
+                              # mini's llama-server on :8090 for every spoken answer.
 
 # ─── Cloudflare Zero Trust tunnel ────────────────────────────────────────────
 # System-level Podman quadlet. Token lives in vault (vault_cloudflared_token).

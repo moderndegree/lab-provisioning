@@ -248,5 +248,42 @@ tool dispatch), unset (thinking on for the Qwen stack) everywhere else.
 Two things that look like they work but **don't** through the `/v1` endpoint:
 the `/think`/`/no_think` soft switches in prompts, and a `think: false` body
 field. Both were tested and are ignored. `reasoning_effort: "none"` is the
+
+## Voice client
+
+The push-to-talk interface to the lab. It talks to the `voice-gateway` on ser5
+(`enable_voice`), which does the endpointing and routes to `mini:8090` — so a
+spoken turn is Tier L end to end. Source and full design notes live in
+[`packages/voice-gateway`](../packages/voice-gateway/README.md).
+
+Like everything else in this directory it is **not** Ansible-provisioned; the
+workstation drives, it does not get converged.
+
+```powershell
+pip install -e "packages/voice-gateway[client]"
+
+# push-to-talk only
+python packages/voice-gateway/clients/desktop/voice_client.py --host ser5
+
+# add a hands-free wake word
+python packages/voice-gateway/clients/desktop/voice_client.py --host ser5 --wake-word hey_jarvis
+```
+
+Hold `ctrl+alt+space` and speak. Releasing the key **is** the endpoint, which
+skips the gateway's VAD hangover entirely — that is why push-to-talk is the fast
+path and the wake word is the convenient one. Speak over an answer to interrupt
+it; the mic stays open during playback precisely so that works.
+
+Three things to know:
+
+- **"search for ..."** routes through SearXNG on ser5, **"have hermes ..."**
+  delegates to Hermes in the background and speaks the result when it lands.
+  Everything else is a direct, streaming turn against mini.
+- Measured **1305 ms** from end of speech to first audible word. If it is
+  suddenly seconds, the prefix cache on mini missed — see the operating manual's
+  "When things are slow".
+- If it cannot connect, check the UFW rule first: ser5 is default-deny with no
+  blanket tailnet allow, so `:8772` needs its own rule on `tailscale0`.
+  `cd ser5 && make verify` reports that as a finding.
 only /v1 mechanism that disables thinking; native `/api/chat` honours
 `think: false` for scripts.
