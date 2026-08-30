@@ -289,6 +289,12 @@ voice_floor_hold_s: 5.0
 # rather than by reading the ruleset back.
 voice_locality_enforce: false
 voice_locality_table: "voice_locality"
+voice_locality_unit: "voice-locality.service"
+# A sudoers drop-in scoped to exactly one command, so the gateway's user unit can
+# rebuild the wall when it starts. See the ExecStartPost in
+# templates/voice-gateway.service.j2 for why that is the only moment it can be
+# done correctly.
+voice_locality_sudoers: "/etc/sudoers.d/voice-locality"
 voice_locality_ruleset: "/etc/nftables/voice-locality.nft"
 voice_locality_cgroup_level: 5
 voice_locality_cgroup: >-

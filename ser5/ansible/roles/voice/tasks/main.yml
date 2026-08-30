@@ -324,7 +324,7 @@
         - name: Template the locality unit
           ansible.builtin.template:
             src: voice-locality.service.j2
-            dest: /etc/systemd/system/voice-locality.service
+            dest: "/etc/systemd/system/{{ voice_locality_unit }}"
             owner: root
             group: root
             mode: "0644"
@@ -332,14 +332,37 @@
             - voice system daemon-reload
             - reload voice-locality
 
-        - name: Flush handlers (load the ruleset before enabling)
+        # One command, one user, no wildcards. This exists so the gateway's USER
+        # unit can rebuild the wall from its ExecStartPost — which is the only
+        # moment the cgroup it matches actually exists with its current inode.
+        # `visudo -cf` validates before it lands: a malformed drop-in breaks sudo
+        # for everything on the box, including the next converge.
+        - name: Allow the gateway to rebuild the locality ruleset
+          ansible.builtin.copy:
+            dest: "{{ voice_locality_sudoers }}"
+            owner: root
+            group: root
+            mode: "0440"
+            content: |
+              # Managed by ser5/ansible/roles/voice — do not edit by hand.
+              # nft resolves a cgroupv2 path to an inode at load time, and systemd
+              # gives voice-gateway.service a new cgroup inode on every start, so
+              # the rule must be reloaded after the presence comes up or it
+              # matches nothing. See templates/voice-gateway.service.j2.
+              {{ username }} ALL=(root) NOPASSWD: /usr/bin/systemctl restart {{ voice_locality_unit }}
+            validate: "visudo -cf %s"
+
+        - name: Flush handlers (load the ruleset before the gateway restarts)
           ansible.builtin.meta: flush_handlers
 
-        - name: Enable and start voice-locality
+        # NOT enabled: the wall is rebuilt by voice-gateway's ExecStartPost, on
+        # every start. Enabling it at boot would only produce a failed unit —
+        # nft cannot resolve the cgroup before the user manager has created it —
+        # and a false sense of coverage.
+        - name: Make sure voice-locality is not started at boot
           ansible.builtin.systemd:
-            name: voice-locality.service
-            state: started
-            enabled: true
+            name: "{{ voice_locality_unit }}"
+            enabled: false
             daemon_reload: true
           when: not ansible_check_mode
 

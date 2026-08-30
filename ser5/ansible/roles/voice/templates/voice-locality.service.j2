@@ -1,26 +1,31 @@
 # systemd SYSTEM unit — load the locality ruleset.
 # Managed by ser5/ansible/roles/voice — do not edit by hand.
 #
-# A oneshot that loads its own nftables table and nothing else. UFW is left
-# entirely alone: this adds `table inet {{ voice_locality_table }}` beside
-# whatever UFW has, and removing it is one `nft delete table`.
+# IT IS NOT STARTED AT BOOT, AND THAT IS DELIBERATE. The nftables rule matches
+# the presence's cgroup, and `nft` resolves that path to a cgroup ID (an inode)
+# WHEN THE RULE IS LOADED — not per packet. Two consequences, both measured on
+# ser5 2026-08-30:
 #
-# Ordered after ufw so a UFW reload cannot flush it, and RemainAfterExit so
-# `systemctl status` shows the intent. NOTE the failure mode that shape has —
-# roles/observability has already been bitten by it: a oneshot reports
-# `active (exited)` forever, whether or not the thing it created still exists.
-# So verify.yml does not ask systemd. It opens a socket and checks it is
-# refused.
+#   1. Loading it before voice-gateway.service exists simply fails:
+#      "Error: cgroupv2 path fails: No such file or directory". At boot this
+#      unit would run before the user manager has started anything.
+#   2. Every restart of voice-gateway destroys and recreates that cgroup with a
+#      NEW inode, and the already-loaded rule keeps the old one. It then matches
+#      NOTHING — while `nft list ruleset` still prints the correct path back, so
+#      it looks perfect from every angle except an actual connection attempt.
+#      A converge, a reboot or a `systemctl restart` all silently take the wall
+#      down. This was caught within seconds of deployment, by the presence's own
+#      self-check on /v1/status, and by nothing else.
+#
+# So the wall's lifetime is tied to the thing it protects: voice-gateway.service
+# restarts this unit from its ExecStartPost, every time it starts. Enabling it at
+# boot would only add a failed unit and a false sense of coverage.
 [Unit]
 Description=Voice locality — the presence may reach the property, not the world
-After=ufw.service nftables.service network-online.target
-Wants=network-online.target
+After=ufw.service nftables.service
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/usr/sbin/nft -f {{ voice_locality_ruleset }}
 ExecStop=/usr/sbin/nft delete table inet {{ voice_locality_table }}
-
-[Install]
-WantedBy=multi-user.target

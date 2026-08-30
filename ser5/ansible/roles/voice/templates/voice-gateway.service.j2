@@ -88,6 +88,18 @@ Environment=VOICE_HERMES_BIN={{ voice_hermes_bin }}
 Environment=VOICE_SYSTEM_PROMPT_PATH={{ voice_data_dir }}/system-prompt.md
 
 ExecStart={{ voice_venv_dir }}/bin/python -m voice_gateway
+{% if voice_locality_enforce | bool %}
+# REBUILD THE WALL. `nft` resolves the cgroup path to an inode at load time, and
+# systemd gives this service a NEW cgroup inode on every start — so a rule loaded
+# before this moment matches nothing, while still printing the right path in
+# `nft list ruleset`. Re-loading it here, after the cgroup exists, is what makes
+# locality survive a restart, a converge and a reboot.
+#
+# `-` prefix: the presence must still come up if this fails. /v1/status reports
+# the truth either way, which is the point of it testing itself.
+# `sudo -n`: fails immediately rather than hanging if the sudoers drop-in is gone.
+ExecStartPost=-/usr/bin/sudo -n /usr/bin/systemctl restart {{ voice_locality_unit }}
+{% endif %}
 Restart=on-failure
 RestartSec=5
 
