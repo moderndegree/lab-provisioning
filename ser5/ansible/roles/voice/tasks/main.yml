@@ -28,7 +28,20 @@
       loop:
         - "{{ voice_data_dir }}"
         - "{{ voice_models_dir }}"
-        - "{{ voice_app_dir }}"
+
+    # voice_app_dir gets NO mode assertion here, deliberately. rsync's archive
+    # mode copies the SOURCE directory's own permission bits onto this dest
+    # root on every sync (not just its contents) — confirmed 2026-08-30 via its
+    # itemized ".d...p..... ./" output. Asserting a different mode here just
+    # means this task and the sync permanently fight over it, one flipping it
+    # back every run the other just changed. Let the sync own it; existence
+    # alone is enough before the first sync ever runs.
+    - name: Ensure the gateway app directory exists
+      ansible.builtin.file:
+        path: "{{ voice_app_dir }}"
+        state: directory
+        owner: "{{ username }}"
+        group: "{{ username }}"
 
     # ─── Silero VAD ──────────────────────────────────────────────────────────
     # Checksummed because it is a binary blob fetched from the internet onto an
@@ -131,6 +144,14 @@
     # ansible.builtin.copy has no way to skip them: it would ship that junk and
     # report `changed` on any run where a .pyc timestamp had moved, so the role
     # would never settle.
+    # changed_when overridden: synchronize's own `changed` is a false positive
+    # on every run. rsync's archive mode always emits an attribute-sync entry
+    # for the destination ROOT directory itself (".d...p..... ./"), even when
+    # every file beneath it is identical, and the module treats any itemized
+    # line as `changed` without excluding it. Confirmed 2026-08-30: a manual
+    # `rsync -n --itemize-changes` between the same two trees showed zero
+    # lines, yet the module still reported changed. Left as-is, this breaks the
+    # repo's own rule that a second `make provision` must be green.
     - name: Copy the gateway package onto the box
       ansible.posix.synchronize:
         src: "{{ voice_src_dir }}/"
@@ -145,6 +166,11 @@
           - "--exclude=dist"
       become: false
       register: voice_src_copy
+      changed_when: >-
+        voice_src_copy.stdout_lines
+        | map('regex_replace', '^\S+ ', '')
+        | reject('equalto', './')
+        | list | length > 0
       notify: restart voice-gateway
 
     - name: Own the copied package

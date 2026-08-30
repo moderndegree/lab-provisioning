@@ -1,0 +1,155 @@
+---
+# Read-only probes for roles/whispercpp. Appends to `problems`; changes nothing.
+# Same posture as llamacpp's verify.yml: ask the running service what it
+# actually did, not just whether systemd thinks the unit is up.
+
+- name: Check the whisper-stt unit is active
+  ansible.builtin.command: systemctl --user is-active whisper-stt.service
+  become: true
+  become_user: "{{ node_user }}"
+  environment: "{{ user_systemd_env }}"
+  register: verify_whispercpp_unit
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Flag an inactive whisper-stt
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + ['whisper-stt.service is ' ~ (verify_whispercpp_unit.stdout | default('unknown')) ~ '.'] }}
+  when: verify_whispercpp_unit.stdout | default('') != 'active'
+
+# Rebuilds only when the pinned commit changes, so a stale running container
+# after an image bump is the same invisible-drift shape llamacpp's own image
+# check exists for.
+- name: Read the image whisper-stt is running
+  ansible.builtin.command: >-
+    podman inspect --format {{ '{{.ImageName}}' }} whisper-stt
+  become: true
+  become_user: "{{ node_user }}"
+  environment: "{{ user_systemd_env }}"
+  register: verify_whispercpp_image
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Flag whisper-stt running a stale image
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'whisper-stt is running ' ~ (verify_whispercpp_image.stdout | trim) ~
+        ' but the quadlet pins ' ~ whispercpp_image ~ '.'
+      ] }}
+  when:
+    - verify_whispercpp_image.rc | default(1) == 0
+    - (verify_whispercpp_image.stdout | trim) != whispercpp_image
+
+# The built binary and the model both live on the data disk, bind-mounted in —
+# same reasoning as llamacpp's GGUF check: if the disk does not come back after
+# a reboot, the already-running container keeps serving from page cache until
+# the next restart, and everything looks healthy until then.
+- name: Stat the built binary and the model
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ whispercpp_bin_dir }}/whisper-server"
+    - "{{ whispercpp_model_path }}"
+  register: verify_whispercpp_files
+
+- name: Flag a missing binary or model file
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [item.item ~ ' is gone from disk — whisper-stt will not survive a restart.'] }}
+  loop: "{{ verify_whispercpp_files.results }}"
+  loop_control:
+    label: "{{ item.item | basename }}"
+  when: not item.stat.exists
+
+- name: Check whisper-stt answers
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ whispercpp_port }}/health"
+    timeout: "{{ verify_http_timeout }}"
+    status_code: [200]
+  register: verify_whispercpp_health
+  failed_when: false
+  check_mode: false
+
+- name: Flag whisper-stt not answering
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + ['whisper-stt is not answering on :' ~ whispercpp_port ~ '.'] }}
+  when: verify_whispercpp_health.status | default(0) != 200
+
+# A GET /health passing proves the HTTP server is up, not that the GPU
+# actually enumerated — AddDevice/seccomp getting this wrong is a SILENT
+# fallback to CPU, not an error (see the quadlet's own comment). Grepping the
+# journal for whisper.cpp's own Vulkan-init line is the only thing that
+# catches that, mirroring why llamacpp's defaults call out grepping for "MTP
+# draft context" rather than trusting a green health check.
+- name: Check the journal for Vulkan GPU enumeration
+  ansible.builtin.shell:
+    cmd: >-
+      journalctl --user -u whisper-stt.service --no-pager
+      | grep -q 'ggml_vulkan: Found'
+  become: true
+  become_user: "{{ node_user }}"
+  environment: "{{ user_systemd_env }}"
+  register: verify_whispercpp_gpu
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Flag whisper-stt not running on the GPU
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'whisper-stt'"'"'s journal shows no "ggml_vulkan: Found" line — it may have '
+        ~ 'silently fallen back to CPU. Check AddDevice=/dev/dri,/dev/kfd and '
+        ~ 'seccomp=unconfined are both present in the quadlet.'
+      ] }}
+  when: verify_whispercpp_gpu.rc | default(1) != 0
+
+# The real test: ask it to actually transcribe something, the same philosophy
+# as SttClient.health() on ser5 ("a real transcription rather than a GET on
+# /health"). Uses system python3 directly — there is no venv here, this is a
+# compiled binary, not a Python service. Builds a tiny silent WAV in memory and
+# hand-rolls the multipart body (stdlib has no multipart client) rather than
+# adding a dependency for one probe.
+- name: Ask whisper-stt to transcribe a real (silent) clip
+  ansible.builtin.command: >-
+    python3 -c "
+    import io,wave,urllib.request,uuid,json;
+    buf=io.BytesIO();
+    w=wave.open(buf,'wb');
+    w.setnchannels(1);
+    w.setsampwidth(2);
+    w.setframerate(16000);
+    w.writeframes(b'\x00'*3200);
+    w.close();
+    b=uuid.uuid4().hex;
+    head=('--'+b+'\r\nContent-Disposition: form-data; name=file; filename=silence.wav\r\nContent-Type: audio/wav\r\n\r\n').encode();
+    tail=('\r\n--'+b+'--\r\n').encode();
+    body=head+buf.getvalue()+tail;
+    url='http://127.0.0.1:{{ whispercpp_port }}{{ whispercpp_inference_path }}';
+    req=urllib.request.Request(url, data=body, headers={'Content-Type': 'multipart/form-data; boundary='+b});
+    r=urllib.request.urlopen(req, timeout=30);
+    print('text' in json.loads(r.read()))
+    "
+  register: verify_whispercpp_transcribe
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: verify_whispercpp_health.status | default(0) == 200
+
+- name: Flag whisper-stt's inference path not working
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'whisper-stt'"'"'s OpenAI-compatible route (' ~ whispercpp_inference_path ~
+        ') did not return a usable transcription: ' ~
+        (verify_whispercpp_transcribe.stderr | default('no detail') | trim | truncate(200)) ~
+        '. voice_gateway'"'"'s SttClient will fail the same way.'
+      ] }}
+  when:
+    - verify_whispercpp_health.status | default(0) == 200
+    - verify_whispercpp_transcribe.stdout | default('') | trim != 'True'

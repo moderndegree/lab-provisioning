@@ -46,6 +46,30 @@
 # Re-measure with `voicebench.py` before changing any of this. Every number here
 # came from that script and nothing here is an estimate.
 # ─────────────────────────────────────────────────────────────────────────────
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# STT MOVED TO MINI'S GPU — 2026-08-30. Everything above this line describes
+# speaches, which still does TTS and can still do STT (voice_stt_backend: ser5).
+# ─────────────────────────────────────────────────────────────────────────────
+# The reasoning above ("speech models are I/O codecs, keep them off mini")
+# was drawn from ser5's OWN GPU being useless for this — a 2020-era Vega iGPU
+# Vulkan reports as `matrix cores: none` — and never separately asked what
+# mini's GPU would do. It has `matrix cores: KHR_coopmat`, the same hardware
+# already doing 85-168 tok/s LLM decode. Measured end to end through THIS
+# gateway, n=15, identical stimulus, before/after:
+#
+#                          ser5 (was default)   mini (now default)
+#   STT finalize                   671ms                66ms
+#   model -> first sentence        346ms               346ms   (unchanged)
+#   synthesis                      306ms               306ms   (unchanged)
+#   TO FIRST AUDIBLE WORD         1305ms               779ms
+#
+# Gated on a GPU-contention rehearsal against live LLM traffic BEFORE this was
+# adopted, not after — see mini/ansible/roles/whispercpp/defaults/main.yml for
+# the full numbers (concurrent STT cost llama-quality 78.5 -> 78.1 tok/s,
+# noise not a hit; STT itself only slowed from ~33ms idle-GPU to ~44-51ms at
+# 4/4 slots). TTS stays on ser5 — nothing measured suggested moving it.
+# ─────────────────────────────────────────────────────────────────────────────
 
 # Role is gated in site.yml; this line is documentation (the role `when:` is
 # evaluated before role defaults, exactly as noted in roles/searxng).
@@ -91,10 +115,45 @@ voice_tailnet_interface: "tailscale0"
 # base.en over tiny.en on measurement: 632ms vs 392ms on a 2.25 s command, and
 # tiny.en heard "the GPU temperature on many" where base.en heard "on Mini".
 # 240 ms is worth paying to get the name of the box right.
-voice_stt_model: "Systran/faster-whisper-base.en"
 voice_stt_language: "en"
 voice_tts_model: "speaches-ai/piper-en_US-amy-medium"
 voice_tts_voice: "en_US-amy-medium"
+
+# ─── STT backend: ser5 CPU vs mini GPU ───────────────────────────────────────
+# "ser5" | "mini". ADOPTED "mini" 2026-08-30 on a measured end-to-end win —
+# packages/voice-gateway/bench/voicebench.py, n=15, identical stimulus,
+# before/after on THIS gateway (not just the raw STT number the repo's own
+# rule warns is not the same claim):
+#
+#                          ser5 (was default)   mini (now default)
+#   STT finalize                   671ms                66ms
+#   TO FIRST AUDIBLE WORD         1305ms               779ms
+#
+# 526ms faster end to end — actually beats the plan's original ~700ms target,
+# something the ser5-only design never got close to. mini's whisper-server
+# needs NO shim to get here: --inference-path is a real whisper.cpp flag
+# (confirmed by reading examples/server/server.cpp) that renames its only
+# route to the exact OpenAI path SttClient already calls, and /inference reads
+# `language` and defaults response_format to json identically to what
+# SttClient already sends — see mini/ansible/roles/whispercpp/defaults/main.yml
+# for the GPU-contention rehearsal against live LLM traffic that gated this
+# (neither service measurably starves the other at 4/4 llama-quality slots).
+#
+# Kept as a flag, not deleted, in case a heavier concurrent load ever erodes
+# this — same posture as first_chunk_clause_break below. Set back to "ser5" to
+# revert with no code changes.
+voice_stt_backend: "mini"
+
+voice_stt_url: >-
+  {{ 'http://mini:8092' if voice_stt_backend == 'mini'
+     else 'http://' ~ voice_speech_host ~ ':' ~ voice_speech_port }}
+# whisper.cpp's /inference has no per-request model concept (one model per
+# process) and ignores an unrecognized `model` form field harmlessly, so this
+# value is documentation on the mini path rather than something the server
+# reads — kept non-empty anyway since voice_gateway logs it.
+voice_stt_model: >-
+  {{ 'ggml-base.en.bin' if voice_stt_backend == 'mini'
+     else 'Systran/faster-whisper-base.en' }}
 
 # ─── Reasoning: mini, directly ───────────────────────────────────────────────
 # NOT through Hermes. `hermes proxy` on :8645 is a Nous Portal proxy that

@@ -24,7 +24,10 @@ Environment=PYTHONUNBUFFERED=1
 Environment=VOICE_HOST={{ voice_gateway_host }}
 Environment=VOICE_PORT={{ voice_gateway_port }}
 
-Environment=VOICE_STT_URL=http://{{ voice_speech_host }}:{{ voice_speech_port }}
+# voice_stt_backend: "ser5" (this box, CPU) or "mini" (GPU, ~33-51ms measured
+# vs ser5's 671ms — see roles/whispercpp/defaults/main.yml). Toggle there, not
+# here.
+Environment=VOICE_STT_URL={{ voice_stt_url }}
 Environment=VOICE_STT_MODEL={{ voice_stt_model }}
 Environment=VOICE_STT_LANGUAGE={{ voice_stt_language }}
 

@@ -19,7 +19,34 @@
     XDG_RUNTIME_DIR: "/run/user/{{ voice_user_uid.stdout }}"
   when: not ansible_check_mode
 
-- name: restart voice-gateway
+# `listen:` topic, NOT two tasks sharing a `name:` — tried that first and it
+# does not do what it looks like it does. Confirmed with -vvv 2026-08-30: when
+# two handler tasks share a `name:`, notifying that name runs only the FIRST
+# of them, silently — no error, no "skipping" line, the second is just absent
+# from the executed task list. Then tried wrapping both steps in a `block:`
+# under one handler name — ansible-core 2.20 rejects that outright ("The
+# requested handler ... was not found"): handlers/main.yml does not accept a
+# block as a handler entry. `listen:` is the documented mechanism for "one
+# notification, several handler tasks, in order" and is what actually works —
+# verified end to end after switching to it.
+#
+# The stat exists because the VAD-fetch task in tasks/main.yml notifies this
+# handler and gets flushed by the SPEECH phase's `meta: flush_handlers` — on a
+# first-ever converge that fires before voice-gateway.service has been
+# templated at all, and `systemd: name=voice-gateway.service state=restarted`
+# hard-fails with "Could not find the requested service" for a unit systemd
+# has never heard of (not merely inactive). The later "Enable and start
+# voice-gateway" task still brings it up on that same first run; this handler
+# only needs to be a safe no-op until the unit exists, then behave normally on
+# every converge after.
+- name: Check whether voice-gateway.service exists yet
+  listen: "restart voice-gateway"
+  ansible.builtin.stat:
+    path: "{{ user_home }}/.config/systemd/user/voice-gateway.service"
+  register: voice_gateway_unit_file
+
+- name: Restart voice-gateway
+  listen: "restart voice-gateway"
   ansible.builtin.systemd:
     name: voice-gateway.service
     state: restarted
@@ -28,4 +55,6 @@
   become_user: "{{ username }}"
   environment:
     XDG_RUNTIME_DIR: "/run/user/{{ voice_user_uid.stdout }}"
-  when: not ansible_check_mode
+  when:
+    - not ansible_check_mode
+    - voice_gateway_unit_file.stat.exists

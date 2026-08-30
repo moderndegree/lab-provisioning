@@ -1,0 +1,102 @@
+---
+# whisper.cpp — GPU-accelerated speech-to-text on mini's Strix Halo GPU.
+#
+# One quadlet, built the same way mini/scripts/flash-next-setup.sh already
+# builds llama.cpp master: the toolbox image carries no whisper-server of its
+# own, so tasks/main.yml builds it once via an ephemeral `podman run` against
+# that same pinned image, then a persistent quadlet runs the compiled binary
+# through Entrypoint=, mounted read-only — no distrobox, no second image.
+#
+# WHY THIS EXISTS. ser5's roles/voice runs STT on its own CPU (speaches,
+# 671ms measured on base.en) on the doctrine "speech models are I/O codecs,
+# keep them off mini, like embeddings." That doctrine was reasoned from ser5's
+# OWN GPU being useless for this — a 2020-era Vega iGPU that Vulkan reports as
+# `matrix cores: none` — and never separately asked what MINI's GPU would do.
+#
+# Measured 2026-08-30, identical 2.28s clip, warm persistent HTTP server in
+# every case (this is real data, not the `(est.)` the doctrine requires until
+# proven):
+#
+#   ser5, speaches (CPU, production)         671-700ms
+#   ser5, whisper.cpp on its own Vega iGPU   ~250-270ms
+#   ser5, whisper.cpp CPU-only               ~408ms
+#   mini, whisper.cpp on Strix Halo GPU      ~33ms  (+~10ms tailnet ~= 43ms)
+#
+# mini's GPU reports `matrix cores: KHR_coopmat` on the identical Vulkan
+# backend — the same hardware already doing 85-168 tok/s LLM decode. This is a
+# compute-class gap, not a tuning one.
+#
+# CONTENTION REHEARSED BEFORE COMMITTING, per "mini runs inference only — no
+# loops, no experiments" and the 2026-08-14 OOM precedent (a hand-run
+# benchmark's memory pressure killed a LIVE service, not the process that
+# asked for the memory). Measured 2026-08-30 with
+# packages/inference-bench/lbench.py at concurrency 8 against llama-quality,
+# real qwen3.6-35b-a3b-mtp decode load, back-to-back A/B:
+#
+#   LLM throughput alone                78.5 tok/s aggregate
+#   LLM throughput + concurrent STT     78.1 tok/s aggregate  (noise, not a hit)
+#   STT latency, GPU idle               ~33ms
+#   STT latency, GPU at 4/4 slots       ~44-51ms
+#
+# Neither service measurably starves the other. Re-run both sides of that A/B
+# before raising llamacpp_instances' parallelism or adding a third resident
+# service — this finding is about THIS pair at THIS concurrency, not a general
+# license to assume the GPU has infinite headroom.
+enable_whispercpp: false
+
+# Reuses the exact image llamacpp already pins — same gfx1151 Mesa/RADV
+# userspace, one fewer image for this box to track. Independent variable on
+# purpose: bump this one alone to A/B a different toolbox build without
+# touching the LLM path, or bump both together when the upstream image moves.
+whispercpp_image: "docker.io/kyuz0/amd-strix-halo-toolboxes:vulkan-radv_20260811T205316"
+
+# PINNED TO A COMMIT, DELIBERATELY — same doctrine as llamacpp_image being
+# pinned to a dated tag instead of a moving one. The ad hoc measurement above
+# floated on whatever was HEAD at clone time (2026-08-30); a role that is
+# reprovisioned by anyone, anytime, does not get to.
+whispercpp_git_url: "https://github.com/ggml-org/whisper.cpp"
+whispercpp_git_ref: "c4ac0012a8f5a2082dfca6aad4ddfd8b2c02b337"
+
+whispercpp_port: 8092
+# 0.0.0.0 like llama-server: mini's UFW allows the WHOLE tailscale0 interface
+# (roles/base/tasks/main.yml), unlike ser5 which has no such blanket rule. No
+# new UFW work needed here — confirmed by reading that task, not assumed.
+whispercpp_host: "0.0.0.0"
+
+# Build artifacts live under llamacpp_models_dir's parent, alongside the other
+# GPU-serving state on this box rather than under this role's own directory —
+# consistent with the src/ + bin/ split flash-next-setup.sh already uses.
+whispercpp_build_dir: "{{ data_mount }}/models/src/whisper.cpp"
+whispercpp_bin_dir: "{{ data_mount }}/models/whispercpp-bin"
+
+# base.en, matching the accuracy trade-off ser5 already measured and chose —
+# see ser5/ansible/roles/voice/defaults/main.yml and
+# packages/voice-gateway/voice_gateway/config.py: tiny.en mishears "mini" as
+# "many"; base.en's ~240ms extra cost was judged worth it there. Same model
+# CLASS here, not the same file — this is whisper.cpp's own GGML conversion
+# (ser5 runs CTranslate2's), independently converted from the same OpenAI
+# weights.
+whispercpp_model_url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin"
+whispercpp_model_sha256: "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002"
+whispercpp_model_path: "{{ data_mount }}/models/ggml-base.en.bin"
+
+whispercpp_threads: 4
+
+# --inference-path is a real, documented whisper-server flag (confirmed by
+# reading examples/server/server.cpp at the pinned commit, not guessed) that
+# renames its ONLY inference route. Set to the OpenAI path voice_gateway's
+# SttClient already calls, so this box needs NO shim, NO extra process, and
+# NO change to voice_gateway at all. Confirmed field-for-field identical
+# otherwise: /inference already reads `language` from the multipart form
+# exactly like SttClient sends it, ignores an unrecognized `model` field
+# harmlessly (it has no per-request model concept), and defaults
+# response_format to json — `{"text": "..."}`, the exact shape SttClient
+# already parses.
+whispercpp_inference_path: "/v1/audio/transcriptions"
+
+# Readiness only. Model load off a warm page cache is a couple of seconds; the
+# Vulkan shader-compile warmup on first request is what actually takes a
+# while (measured: ~630ms cold vs ~33ms warm) but that happens AFTER the
+# health check passes, on the first real transcription.
+whispercpp_health_interval: "30s"
+whispercpp_health_start_period: "120s"

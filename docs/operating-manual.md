@@ -25,7 +25,7 @@ This lab is three things: the dev environment for a solo AI consulting practice,
 
 | Device | Role | Runs | Does not run | Why this, on this hardware |
 |---|---|---|---|---|
-| mini | Inference appliance | Headless Ubuntu 26.04, llama-server on `:8090`/`:8091`, Vulkan/RADV backend, tailnet-only; Ollama installed but stopped, started by hand only to try a model | Loops, experiments, dashboards, queues, client apps | Strix Halo has 128 GB unified LPDDR5X and ~110 GB usable GPU pool; protect it from anything that can crash or OOM. |
+| mini | Inference appliance | Headless Ubuntu 26.04, llama-server on `:8090`/`:8091`, whisper-stt (GPU ASR) on `:8092`, Vulkan/RADV backend, tailnet-only; Ollama installed but stopped, started by hand only to try a model | Loops, experiments, dashboards, queues, client apps | Strix Halo has 128 GB unified LPDDR5X and ~110 GB usable GPU pool; protect it from anything that can crash or OOM. |
 | ser5 | Always-on driver | Hermes, second brain (`/data/brain`), Grok Build CLI, Prometheus+Grafana, Open WebUI (opt-in), SearXNG (opt-in), voice gateway + speech models (opt-in), restic backups | Local **LLMs** | Ryzen 7 5800H + 64 GB DDR4 is enough for orchestration; `/data` holds durable state. Speech models are I/O codecs, not reasoning — see the hard rules. |
 | workstation | Primary cockpit | Copilot CLI, opencode client, repo work | Local models | RTX 4080 Super 16 GB and 32 GB system RAM lose to mini for this fleet; drive mini instead. |
 | iPhone | Remote control surface | Tailscale, Hermes dashboard, GitHub mobile, Grafana (Open WebUI only if `enable_openwebui` is turned on) | Bulk editing, production hosting | Starts work, reviews PRs, checks health; it is not the lab. |
@@ -147,11 +147,13 @@ Why this: Hermes is the bridge between small inputs and long-running work; it be
 
 ### Voice
 
-What it is: a streaming voice loop on ser5 (`enable_voice`). Two units —
-`voice-speech`, a speaches container serving both speech-to-text and
-text-to-speech on `:8770`, and `voice-gateway` on `:8772`, which does the
-endpointing, routing and sentence chunking. Reasoning goes straight to
-`mini:8090`, so a spoken turn is Tier L end to end. The desktop client lives in
+What it is: a streaming voice loop on ser5 (`enable_voice`). Two units on ser5 —
+`voice-speech`, a speaches container serving text-to-speech (and STT as a
+fallback) on `:8770`, and `voice-gateway` on `:8772`, which does the
+endpointing, routing and sentence chunking — plus `whisper-stt` on mini's GPU
+(`:8092`, `enable_whispercpp` on mini), which is where speech-to-text runs by
+default (`voice_stt_backend: mini`). Reasoning goes straight to `mini:8090`,
+so a spoken turn is Tier L end to end. The desktop client lives in
 `packages/voice-gateway/clients/desktop`.
 
 Reach for it when: your hands are busy, you want an answer rather than a
@@ -161,16 +163,22 @@ document, or you want to hand a long job to Hermes without sitting down. Say
 Start it:
 
 ```bash
-systemctl --user start voice-speech voice-gateway
+systemctl --user start voice-speech voice-gateway   # on ser5
+systemctl --user start whisper-stt                  # on mini
 # on the workstation
 python packages/voice-gateway/clients/desktop/voice_client.py --host ser5
 ```
 
-Why this: **1305 ms from the end of speech to the first audible word**
-(measured, ser5, push-to-talk, 2.3 s command, n=10; p95 1932 ms). It is not magic — it is
-sentence chunking, so you hear sentence one while sentence three is still
-generating, plus mini's prefix cache taking time-to-first-token from 774 ms cold
-to 75 ms warm. Speak over it to interrupt.
+Why this: **779 ms from the end of speech to the first audible word**
+(measured, push-to-talk, 2.3 s command, n=15; p95 1165 ms) — down from 1305 ms
+when STT ran on ser5's CPU (671 ms of that alone). mini's GPU does the same
+transcription in 66 ms; the doctrine that speech models stay off mini was
+reasoned from ser5's own GPU being useless for this, never from mini's — see
+the hard rules below and `mini/ansible/roles/whispercpp/defaults/main.yml` for
+the GPU-contention rehearsal that gated moving it. The rest is sentence
+chunking, so you hear sentence one while sentence three is still generating,
+plus mini's prefix cache taking time-to-first-token from 774 ms cold to 75 ms
+warm. Speak over it to interrupt.
 
 ### Second brain (`/data/brain` + AI Workstation)
 
@@ -199,11 +207,18 @@ Start it: run AI Workstation with `CORTEX_VAULT_DIR=/data/brain`, or open `/data
 - Never start Ollama while llama-server is running — they cannot both hold weights in 122 GiB.
 - Never raise total context blind; `-c 2097152` hung the GPU allocator and needed a reboot.
 - Embeddings live on ser5's CPU.
-- Speech models (ASR and TTS) live on ser5's CPU too, for the same reason: they are
-  I/O codecs, not reasoning. The whole voice stack is well under 1 GB and CPU-only.
-  LLM inference stays on mini. A GPU buys the TTS nothing (piper measures RTF 0.047
-  on ser5's CPU), and mini has ~12 GB of headroom, which is not enough to be worth
-  the risk to a live serving box.
+- TTS lives on ser5's CPU: it is an I/O codec, not reasoning, and a GPU buys it
+  nothing (piper measures RTF 0.047 on ser5's CPU already).
+- ASR is the one exception to "keep it off mini" — moved to mini's GPU
+  2026-08-30 on a measured win (STT 671ms on ser5's CPU vs 66ms on mini's GPU;
+  1305ms vs 779ms end to end). The original rule was reasoned from ser5's OWN
+  GPU being useless for this (`matrix cores: none`), never from mini's
+  (`matrix cores: KHR_coopmat`) — it was an untested assumption, not a
+  measured one. Gated on a GPU-contention rehearsal against live LLM traffic
+  first: `mini/ansible/roles/whispercpp/defaults/main.yml` has the numbers
+  (concurrent STT cost llama-quality 78.5 -> 78.1 tok/s, noise not a hit).
+  `voice_stt_backend: ser5` reverts with no code changes if a heavier
+  concurrent load ever erodes this.
 - Hermes's `:8645` is a **Nous Portal proxy**, not a route to mini. It forwards to a
   Nous subscription regardless of the `model.provider`/`base_url` it is configured
   with, and it is currently down. Nothing in the lab may treat it as an inference
@@ -234,5 +249,6 @@ Start it: run AI Workstation with `CORTEX_VAULT_DIR=/data/brain`, or open `/data
 | Throughput is far below the table | Estimate treated as fact | Re-measure with `packages/inference-bench` | Keep `(est.)` labels until measured; adopt only measured wins. |
 | A voice turn takes seconds instead of about one | Prefix-cache miss on mini — the system prompt drifted, so every turn pays a cold prefill | Compare `/data/services/voice/system-prompt.md` against the copy in `roles/voice/files/`; 774 ms cold vs 75 ms warm | Restore the file and restart `voice-gateway`. It is byte-stable on purpose. |
 | Voice hears nothing, but everything is "active" | speaches holds no model — it does NOT download on demand and returns 500 | `curl 127.0.0.1:8770/v1/models`, or `cd ser5 && make verify` | Re-run `make provision`; it pre-pulls each model in `voice_speech_models`. |
+| Voice turns fail with an STT error, everything else on ser5 looks fine | STT defaults to mini's GPU (`voice_stt_backend: mini`); mini or `whisper-stt` is down | `curl mini:8092/health`, `systemctl --user status whisper-stt` on mini | Fix `whisper-stt`, or set `voice_stt_backend: ser5` to fall back to speaches (671ms vs 66ms, but no dependency on mini for STT) until it's back. |
 | The assistant sounds like a chipmunk | A speaches bump changed the TTS sample rate; the wire protocol hard-codes 24000 | `cd ser5 && make verify` — it asserts the rate against the WAV header | Update `TTS_SAMPLE_RATE` in `voice_gateway/protocol.py` and the client's `OUT_RATE` together. |
 | A service restarted but behaves like the old version | A stale `~/.config/systemd/user/<unit>.service` shadows the quadlet | `systemctl --user show <unit> -p FragmentPath --value` | Anything not under `.../systemd/generator/` is shadowed — delete it and `daemon-reload`. A clean converge does NOT catch this. |

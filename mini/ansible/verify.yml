@@ -77,6 +77,12 @@
         tasks_from: verify
       when: enable_llamacpp | bool
 
+    - name: Verify the whisper.cpp STT path
+      ansible.builtin.include_role:
+        name: whispercpp
+        tasks_from: verify
+      when: enable_whispercpp | default(false) | bool
+
     # ─────────────────────────────────────────────────────────────────────────
     # Report
     # ─────────────────────────────────────────────────────────────────────────

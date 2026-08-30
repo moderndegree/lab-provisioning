@@ -1,0 +1,15 @@
+---
+- name: whispercpp daemon-reload
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+    scope: user
+  become_user: "{{ node_user }}"
+  environment: "{{ whispercpp_user_env }}"
+
+- name: restart whisper-stt
+  ansible.builtin.systemd_service:
+    name: whisper-stt.service
+    scope: user
+    state: restarted
+  become_user: "{{ node_user }}"
+  environment: "{{ whispercpp_user_env }}"

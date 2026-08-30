@@ -1,0 +1,146 @@
+---
+# whisper.cpp STT — one Podman quadlet, built from a pinned commit the first
+# time this runs and reused after. See defaults/main.yml for the measurements
+# behind every choice here and the GPU-contention rehearsal that gated it.
+#
+# Runs AFTER roles/llamacpp in site.yml, reusing its pinned toolbox image and
+# its GPU udev rule (roles/llamacpp/tasks/main.yml already makes /dev/kfd and
+# the render nodes 0666) — nothing here duplicates that.
+
+- name: Look up the node user's uid for XDG_RUNTIME_DIR
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ node_user }}"
+
+- name: Build the rootless user environment
+  ansible.builtin.set_fact:
+    whispercpp_user_env:
+      HOME: "{{ node_home }}"
+      XDG_RUNTIME_DIR: "/run/user/{{ ansible_facts['getent_passwd'][node_user][1] }}"
+
+# ─── Model ───────────────────────────────────────────────────────────────────
+# Checksummed because it is a binary blob fetched from the internet onto an
+# always-on box, same reasoning as roles/voice's Silero VAD fetch on ser5.
+- name: Fetch the whisper.cpp GGML model
+  ansible.builtin.get_url:
+    url: "{{ whispercpp_model_url }}"
+    dest: "{{ whispercpp_model_path }}"
+    checksum: "sha256:{{ whispercpp_model_sha256 }}"
+    owner: "{{ node_user }}"
+    group: "{{ node_user }}"
+    mode: "0644"
+  notify: restart whisper-stt
+
+# ─── Build ───────────────────────────────────────────────────────────────────
+# The toolbox image has no whisper-server of its own (it exists for llama.cpp).
+# Build one from the pinned commit via an ephemeral `podman run` against the
+# SAME image, so the binary links against its gfx1151-patched Mesa/RADV
+# userspace — exactly what mini/scripts/flash-next-setup.sh already does for
+# llama.cpp master, done here as an idempotent Ansible task instead of a hand
+# script.
+- name: Ensure the build and bin directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ node_user }}"
+    group: "{{ node_user }}"
+    mode: "0755"
+  loop:
+    - "{{ whispercpp_build_dir | dirname }}"
+    - "{{ whispercpp_bin_dir }}"
+
+# depth: 1 with an exact commit works against GitHub (it allows fetching a
+# specific reachable SHA, not just branch heads) and keeps the clone small.
+# `git` reports changed only when the checked-out commit actually moves, which
+# is exactly the signal the build step below gates on.
+- name: Clone whisper.cpp at the pinned commit
+  ansible.builtin.git:
+    repo: "{{ whispercpp_git_url }}"
+    dest: "{{ whispercpp_build_dir }}"
+    version: "{{ whispercpp_git_ref }}"
+    depth: 1
+    force: true
+  become_user: "{{ node_user }}"
+  register: whispercpp_checkout
+
+- name: Check whether the whisper-server binary already exists
+  ansible.builtin.stat:
+    path: "{{ whispercpp_bin_dir }}/whisper-server"
+  register: whispercpp_bin_stat
+
+# The toolbox image's /usr/bin/ld is a DANGLING alternatives symlink (target
+# /etc/alternatives/ld does not exist) — confirmed 2026-08-30, and
+# mini/scripts/flash-next-setup.sh independently hit and fixed the identical
+# thing for llama.cpp master, so this is a known property of the image, not a
+# fluke of this build. `test -e` on a dangling symlink follows it and reports
+# false, which is exactly the check that catches this case without also
+# firing on a working ld.
+- name: Build whisper-server with Vulkan inside the toolbox image
+  ansible.builtin.command:
+    cmd: >-
+      podman run --rm
+      --security-opt seccomp=unconfined
+      -v {{ whispercpp_build_dir }}:/src:Z
+      -v {{ whispercpp_bin_dir }}:/out:Z
+      {{ whispercpp_image }}
+      bash -lc '
+        set -euo pipefail;
+        if [[ ! -e /usr/bin/ld ]] && [[ -x /usr/bin/ld.bfd ]]; then
+          ln -sfn /usr/bin/ld.bfd /usr/bin/ld;
+        fi;
+        cd /src;
+        rm -rf build;
+        cmake -B build -DGGML_VULKAN=1 -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF;
+        cmake --build build -j$(nproc) --target whisper-server;
+        install -m 0755 build/bin/whisper-server /out/whisper-server
+      '
+  become_user: "{{ node_user }}"
+  environment: "{{ whispercpp_user_env }}"
+  when: whispercpp_checkout.changed or not whispercpp_bin_stat.stat.exists
+  register: whispercpp_build
+  changed_when: true
+  notify: restart whisper-stt
+
+- name: Require the whisper-server binary to exist after building
+  ansible.builtin.stat:
+    path: "{{ whispercpp_bin_dir }}/whisper-server"
+  register: whispercpp_bin_check
+
+- name: Fail loudly if the build did not produce a binary
+  ansible.builtin.assert:
+    that: whispercpp_bin_check.stat.exists
+    fail_msg: >-
+      {{ whispercpp_bin_dir }}/whisper-server does not exist after the build
+      step. Check the podman run output above — a cmake/link failure inside
+      the toolbox does not otherwise fail this task loudly.
+
+# ─── Quadlet ─────────────────────────────────────────────────────────────────
+- name: Ensure the quadlet directory exists
+  ansible.builtin.file:
+    path: "{{ node_home }}/.config/containers/systemd"
+    state: directory
+    owner: "{{ node_user }}"
+    group: "{{ node_user }}"
+    mode: "0755"
+
+- name: Install the whisper-stt quadlet
+  ansible.builtin.template:
+    src: whisper-stt.container.j2
+    dest: "{{ node_home }}/.config/containers/systemd/whisper-stt.container"
+    owner: "{{ node_user }}"
+    group: "{{ node_user }}"
+    mode: "0644"
+  notify:
+    - whispercpp daemon-reload
+    - restart whisper-stt
+
+- name: Flush handlers (daemon-reload / rebuild-triggered restart before start)
+  ansible.builtin.meta: flush_handlers
+
+- name: Ensure whisper-stt is started
+  ansible.builtin.systemd_service:
+    name: whisper-stt.service
+    scope: user
+    state: started
+  become_user: "{{ node_user }}"
+  environment: "{{ whispercpp_user_env }}"

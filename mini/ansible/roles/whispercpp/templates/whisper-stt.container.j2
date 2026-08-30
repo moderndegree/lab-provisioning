@@ -1,0 +1,60 @@
+# Managed by Ansible (mini/ansible/roles/whispercpp) — do not edit by hand.
+#
+# Podman quadlet for whisper.cpp's whisper-server, GPU-accelerated STT on
+# :{{ whispercpp_port }}. systemd generates whisper-stt.service from this at
+# daemon-reload. Same shape as llama-server.container.j2's GPU wiring — see
+# that file's comments for why each device/security flag is load-bearing.
+#
+# Entrypoint is NOT the image's own binary: the toolbox image carries no
+# whisper-server at all. tasks/main.yml builds one from a pinned commit via an
+# ephemeral `podman run` against this same image, and this quadlet just runs
+# that build, mounted read-only — the identical pattern
+# mini/scripts/flash-next-setup.sh already uses for llama.cpp master builds.
+[Unit]
+Description=whisper.cpp STT (Vulkan) on :{{ whispercpp_port }}
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+ContainerName=whisper-stt
+Image={{ whispercpp_image }}
+Entrypoint=/opt/whisper-fn/whisper-server
+
+# Host networking, matching llama-server.container.j2 — real ports on mini,
+# mini's UFW (tailnet-only via the blanket tailscale0 rule) is the one control
+# point.
+Network=host
+
+# GPU passthrough — identical requirement to llamacpp's quadlet.
+# seccomp=unconfined is not optional: without it the GPU silently fails to
+# enumerate rather than erroring, and whisper-server falls back to CPU with no
+# visible fault. The 0666 udev rule that makes this work regardless of uid
+# mapping is llamacpp's, applied once for the whole box.
+AddDevice=/dev/dri
+AddDevice=/dev/kfd
+PodmanArgs=--security-opt seccomp=unconfined
+
+# Built binary and the model, both read-only: nothing here should write to
+# either.
+Volume={{ whispercpp_bin_dir }}:/opt/whisper-fn:ro
+Volume={{ whispercpp_model_path }}:{{ whispercpp_model_path }}:ro
+
+Exec=-m {{ whispercpp_model_path }} \
+     --host {{ whispercpp_host }} \
+     --port {{ whispercpp_port }} \
+     -t {{ whispercpp_threads }} \
+     --inference-path {{ whispercpp_inference_path }} \
+     --no-timestamps
+
+HealthCmd=curl -sf http://127.0.0.1:{{ whispercpp_port }}/health
+HealthInterval={{ whispercpp_health_interval }}
+HealthStartPeriod={{ whispercpp_health_start_period }}
+HealthTimeout=10s
+HealthRetries=3
+
+[Service]
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

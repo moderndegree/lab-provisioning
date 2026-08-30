@@ -9,6 +9,8 @@
 #   tailscale   → tailnet access
 #   containers  → rootless Podman; user lingering; quadlet support
 #   llamacpp    → llama-server Podman quadlets + GPU/model prerequisites
+#   whispercpp  → whisper.cpp Vulkan STT quadlet, reuses llamacpp's image/udev
+#                 (enable_whispercpp: true to activate)
 #   cloudflared → Cloudflare Zero Trust tunnel (enable_cloudflared: true to activate)
 #
 # Open WebUI moved to ser5 (roles/openwebui there) — mini stays inference-only.
@@ -31,6 +33,11 @@
     - role: llama_benchy
       when: enable_llamacpp | bool
       tags: [llama_benchy, bench]
+    # Reuses llamacpp's pinned toolbox image and GPU udev rule — kept after it
+    # for the same reason llama_benchy is.
+    - role: whispercpp
+      when: enable_whispercpp | default(false) | bool
+      tags: [whispercpp]
     - role: cloudflared
       when: enable_cloudflared | bool
 

@@ -93,6 +93,18 @@ auto_reboot: true
 # llama-throughput/nemotron instance was retired 2026-08-14 as dominated.
 # enable_llamacpp: true
 
+# ─── whisper.cpp GPU STT (roles/whispercpp) ───
+# One quadlet, whisper-server built from a pinned commit and run with Vulkan
+# against mini's Strix Halo GPU. Measured 2026-08-30 against ser5's CPU-served
+# STT: ~33ms warm (idle GPU) / ~44-51ms warm (GPU at 4/4 llama-quality slots)
+# versus ser5's 671ms — a compute-class gap, not a tuning one, and a rehearsed
+# GPU-contention A/B showed neither service measurably starves the other (see
+# that role's defaults for the full numbers). Reuses llamacpp's pinned image
+# and GPU udev rule, so enable it alongside enable_llamacpp, not instead of.
+# Off by default: ser5/ansible/roles/voice's voice_stt_backend must also be
+# flipped to "mini" before anything actually calls this.
+# enable_whispercpp: true
+
 # ─── Ollama service lifecycle (roles/ollama/defaults/main.yml) ───
 # Uncomment these two ONLY alongside enable_llamacpp above. Ollama stays
 # installed (it is still how models are pulled) but must not serve at the same

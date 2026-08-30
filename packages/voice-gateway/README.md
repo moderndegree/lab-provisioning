@@ -8,32 +8,44 @@ mini serves inference only, and this is a loop with per-connection state.
 
 ```
 Windows workstation                 ser5                                mini
-┌──────────────────┐   WS: PCM    ┌────────────────────────┐   HTTP   ┌──────────────┐
-│ voice_client.py  │ ───────────► │ voice-gateway   :8772  │ ───────► │ :8090        │
-│  PTT hotkey      │              │   silero VAD           │   SSE    │ llama-quality│
-│  openWakeWord    │ ◄─────────── │   route / chunk        │ ◄─────── │ 4 slots      │
-│  playback        │  PCM + evts  │                        │          └──────────────┘
-└──────────────────┘              │ voice-speech    :8770  │
-                                  │   speaches: STT + TTS  │
+┌──────────────────┐   WS: PCM    ┌────────────────────────┐   HTTP   ┌───────────────┐
+│ voice_client.py  │ ───────────► │ voice-gateway   :8772  │ ───────► │ :8090         │
+│  PTT hotkey      │              │   silero VAD           │   SSE    │ llama-quality │
+│  openWakeWord    │ ◄─────────── │   route / chunk        │ ◄─────── │ 4 slots       │
+│  playback        │  PCM + evts  │                        │          ├───────────────┤
+└──────────────────┘              │ voice-speech    :8770  │   HTTP   │ whisper-stt   │
+                                  │   speaches: TTS (+STT  │ ───────► │ :8092 Vulkan  │
+                                  │   fallback, ser5 mode) │          └───────────────┘
                                   └────────────────────────┘
                                        │ searxng :8888
                                        └ hermes chat -q
 ```
 
+STT defaults to mini (`voice_stt_backend: mini`) — see Measured latency below.
+`voice_stt_backend: ser5` routes it back through speaches instead, no code
+changes either way.
+
 ## Measured latency
 
-ser5 CPU, 8 threads, int8. Push-to-talk, 2.3 s spoken command, n=10, via
-[`bench/voicebench.py`](bench/voicebench.py):
+Push-to-talk, ~2.3 s spoken command, via
+[`bench/voicebench.py`](bench/voicebench.py). Current default is STT on mini's
+GPU (`voice_stt_backend: mini`); the ser5-CPU path (speaches) is still there
+as a fallback, n=15/n=10 respectively:
 
-| stage | median |
-|---|---:|
-| STT finalize | 671 ms |
-| model → first sentence | 349 ms |
-| synthesis (time to first byte) | 273 ms |
-| **to first audible word** | **1305 ms** |
+| stage | ser5 CPU (was default) | mini GPU (now default) |
+|---|---:|---:|
+| STT finalize | 671 ms | 66 ms |
+| model → first sentence | 349 ms | 346 ms |
+| synthesis (time to first byte) | 273 ms | 306 ms |
+| **to first audible word** | **1305 ms** | **779 ms** |
 
-p95 is 1932 ms — the spread is mini's load, not this box. A web-search turn
-adds roughly 1.6 s for the SearXNG round trip.
+mini's whisper-server needs no shim — `--inference-path` renames its one route
+to the exact OpenAI path this package's `SttClient` already calls (see
+[`mini/ansible/roles/whispercpp`](../../mini/ansible/roles/whispercpp)). Adopted
+2026-08-30 on this measured win, gated on a GPU-contention rehearsal against
+live LLM traffic first — that role's defaults have the full numbers. p95 on
+the mini path is 1165 ms. A web-search turn adds roughly 1.6 s for the
+SearXNG round trip regardless of STT backend.
 
 mini's prefix cache is doing real work here: time-to-first-token measured
 **774 ms cold, 75 ms warm**, which is why the system prompt is byte-stable and
@@ -73,6 +85,16 @@ means it synthesises slower than you can listen. It would need a GPU.
 `base.en` is the STT default over `tiny.en` because on a 2.25 s command it heard
 *"the GPU temperature on Mini"* where tiny.en heard *"on many"*. 240 ms is worth
 paying to get the name of the box right. Set `VOICE_STT_MODEL` to trade back.
+
+The table above is all **ser5 CPU** — the engine bake-off for what runs on this
+box. It never asked what mini's GPU would do to the same problem, because the
+lab's hard rule was "speech models are I/O codecs, keep them off mini." That
+rule was reasoned from ser5's own GPU being useless here (a 2020-era iGPU with
+no matrix cores), not from mini's — mini's Strix Halo GPU reports
+`matrix cores: KHR_coopmat`, the same hardware already doing 85-168 tok/s LLM
+decode. Measured 2026-08-30: 66ms vs 671ms. See `voice_stt_backend` above and
+[`mini/ansible/roles/whispercpp`](../../mini/ansible/roles/whispercpp) for the
+full story, including the GPU-contention rehearsal that gated adopting it.
 
 ## Design
 
