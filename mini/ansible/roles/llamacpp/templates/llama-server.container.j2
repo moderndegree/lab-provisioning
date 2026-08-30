@@ -97,9 +97,6 @@ Exec=-m {{ item.model }} \
 {% if item.chat_template_kwargs | default('') %}
      --chat-template-kwargs '{{ item.chat_template_kwargs | to_json if item.chat_template_kwargs is mapping else item.chat_template_kwargs }}' \
 {% endif %}
-{% if item.reasoning_budget is defined %}
-     --reasoning-budget {{ item.reasoning_budget }} \
-{% endif %}
 {% if item.extra_args | default('') %}
      {{ item.extra_args }} \
 {% endif %}
