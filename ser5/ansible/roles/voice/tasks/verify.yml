@@ -132,6 +132,191 @@
     - verify_voice_status.status | default(0) == 200
     - not (item.value.ok | default(false))
 
+# ─── The Ledger ──────────────────────────────────────────────────────────────
+# /v1/status already reports whether the file opens; these ask the two questions
+# a green "ledger: ok" cannot answer.
+#
+# WAL matters beyond performance: it is what lets the bench read the same file
+# while the presence writes it. Without it a bench query blocks a conversational
+# turn, which puts disk contention on the fast path — invisible until the box is
+# busy, which is exactly when it matters.
+#
+# Attribution matters because it cannot be recovered retroactively. A ledger full
+# of turns attributed to device "unknown" is a ledger that has already lost the
+# thing it was built to keep, and every check above it stays green.
+- name: Read the ledger's journal mode and attribution
+  ansible.builtin.command: >-
+    {{ voice_venv_dir }}/bin/python -c
+    "import sqlite3,sys;
+    c=sqlite3.connect('file:{{ voice_ledger_path }}?mode=ro',uri=True);
+    m=c.execute('PRAGMA journal_mode').fetchone()[0];
+    t=c.execute('SELECT count(*) FROM turns').fetchone()[0];
+    u=c.execute('SELECT count(*) FROM turns WHERE device=? OR device=?',('unknown','')).fetchone()[0];
+    print(m,t,u)"
+  become: true
+  become_user: "{{ username }}"
+  register: verify_voice_ledger
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Flag a ledger that is not in WAL mode
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'the voice ledger is in ' ~ (verify_voice_ledger.stdout.split()[0]) ~ ' mode, not wal '
+        ~ '— the bench reading it will block conversational turns on disk.'
+      ] }}
+  when:
+    - verify_voice_ledger.rc | default(1) == 0
+    - verify_voice_ledger.stdout.split()[0] != 'wal'
+
+- name: Flag a ledger that is recording no attribution
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'every one of the ledger\'s ' ~ (verify_voice_ledger.stdout.split()[1]) ~ ' turns is '
+        ~ 'attributed to device "unknown" — clients are not identifying themselves, and '
+        ~ 'attribution cannot be recovered retroactively.'
+      ] }}
+  when:
+    - verify_voice_ledger.rc | default(1) == 0
+    - verify_voice_ledger.stdout.split()[1] | int > 0
+    - verify_voice_ledger.stdout.split()[1] == verify_voice_ledger.stdout.split()[2]
+
+# ─── The bench ───────────────────────────────────────────────────────────────
+- name: Check the bench unit is active
+  ansible.builtin.command: "systemctl --user is-active voice-bench.service"
+  become: true
+  become_user: "{{ username }}"
+  environment: "{{ user_systemd_env }}"
+  register: verify_voice_bench
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: enable_voice_bench | bool
+
+- name: Flag an inactive bench
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'voice-bench.service is ' ~ (verify_voice_bench.stdout | default('unknown')) ~
+        ' but enable_voice_bench is true — the presence is saying "on it" about '
+        ~ 'errands nothing is running.'
+      ] }}
+  when:
+    - enable_voice_bench | bool
+    - verify_voice_bench.stdout | default('') != 'active'
+
+# ─── Locality, proven rather than read ───────────────────────────────────────
+# "No prompt leaves the property. Verified on the wire, not in config."
+#
+# The PROOF is not here — it is in /v1/status, and the "Flag each failing gateway
+# dependency" task above already reports it. The presence tries to open a socket
+# to the public internet and reports whether it was refused, because it is the
+# only process inside the cgroup the rule names.
+#
+# An external probe was tried first and was WRONG in a way that mattered:
+# `nsenter --target <pid> --cgroup` enters the cgroup NAMESPACE and leaves the
+# probe in its own cgroup. Measured on ser5 2026-08-30 — the probe reported
+# `/user.slice/user-1000.slice/session-260.scope`, sailed out to the internet,
+# and would have declared the rule broken while it was working perfectly.
+# Writing to cgroup.procs does work but needs root, because cgroup v2 delegation
+# containment requires write access to the common ancestor of source and
+# destination, and that is user-1000.slice.
+#
+# What is left here is the other half: whether the ruleset is even loaded. That
+# distinguishes "no rule" from "rule present but matching nothing" — and the
+# second is the failure this whole arrangement exists to catch, since it looks
+# perfect in `nft list ruleset`.
+- name: Read the locality ruleset
+  ansible.builtin.command: "nft list table inet {{ voice_locality_table }}"
+  register: verify_voice_nft
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: voice_locality_enforce | bool
+
+- name: Flag a missing locality ruleset
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'voice_locality_enforce is true but `nft list table inet ' ~ voice_locality_table ~
+        '` returned nothing — the presence has no wall around it at all. '
+        ~ 'Check voice-locality.service.'
+      ] }}
+  when:
+    - voice_locality_enforce | bool
+    - verify_voice_nft.rc | default(1) != 0
+
+- name: Flag a locality ruleset that names the wrong cgroup
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'the locality ruleset does not name ' ~ voice_locality_cgroup ~
+        ' — it is loaded and matching nothing, which looks identical to working '
+        ~ 'in `nft list ruleset`. Compare against `systemctl --user show '
+        ~ 'voice-gateway -p ControlGroup --value`.'
+      ] }}
+  when:
+    - voice_locality_enforce | bool
+    - verify_voice_nft.rc | default(1) == 0
+    - voice_locality_cgroup not in (verify_voice_nft.stdout | default(''))
+
+# ─── The egress ledger — what actually left, and on whose behalf ─────────────
+# Two questions no firewall can answer, because both are about the CONTENT of
+# what left rather than whether it was allowed to:
+#
+#   attribution   every outbound query must trace to a named brief. A row with a
+#                 null brief_id means something reached the network outside the
+#                 errand system — today that is the transitional presence-side
+#                 search path, which is exactly why it is recorded rather than
+#                 exempted.
+#   terms         "Queries are terms, not transcripts. Your utterance is not a
+#                 search query and is never forwarded as one." A query carrying a
+#                 routing prefix like "search for ..." is an utterance that was
+#                 passed through whole.
+- name: Read the egress ledger
+  ansible.builtin.command: >-
+    {{ voice_venv_dir }}/bin/python -c
+    "import sqlite3;
+    c=sqlite3.connect('file:{{ voice_ledger_path }}?mode=ro',uri=True);
+    t=c.execute('SELECT count(*) FROM egress').fetchone()[0];
+    o=c.execute('SELECT count(*) FROM egress WHERE brief_id IS NULL').fetchone()[0];
+    w=c.execute('SELECT count(*) FROM egress WHERE lower(query) LIKE ? OR lower(query) LIKE ? OR lower(query) LIKE ?',('search for %','google %','what%the latest%')).fetchone()[0];
+    print(t,o,w)"
+  become: true
+  become_user: "{{ username }}"
+  register: verify_voice_egress
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Flag egress that traces to no brief
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        (verify_voice_egress.stdout.split()[1]) ~ ' of ' ~ (verify_voice_egress.stdout.split()[0]) ~
+        ' outbound queries trace to no brief. Every packet that leaves is supposed to '
+        ~ 'name the errand that justified it; these are the presence reaching the '
+        ~ 'network directly (voice_presence_network: true).'
+      ] }}
+  when:
+    - verify_voice_egress.rc | default(1) == 0
+    - verify_voice_egress.stdout.split()[1] | int > 0
+
+- name: Flag a transcript that was forwarded as a search query
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        (verify_voice_egress.stdout.split()[2]) ~ ' outbound queries still carry a '
+        ~ 'routing prefix ("search for ...", "google ..."), which means an utterance '
+        ~ 'left the property whole rather than the terms extracted from it.'
+      ] }}
+  when:
+    - verify_voice_egress.rc | default(1) == 0
+    - verify_voice_egress.stdout.split()[2] | int > 0
+
 # The TTS sample rate is hard-coded in the wire protocol because
 # `response_format: pcm` comes back as bare `audio/pcm` with no rate to parse.
 # If an image bump changes it, nothing errors — the voice just plays at the

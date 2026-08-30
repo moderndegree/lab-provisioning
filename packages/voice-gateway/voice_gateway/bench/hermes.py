@@ -12,10 +12,23 @@ as long as the work takes; blocking a voice turn on it would mean minutes of
 silence. Instead the session acknowledges immediately, this runs in the
 background, and the result arrives later as an out-of-band `notice`.
 
-A delegation is bound to the session that asked for it. If the client has
-disconnected by the time the work finishes, the result is logged and dropped —
-there is no store-and-forward, because a spoken answer to a question asked an
-hour ago is worse than nothing.
+THE PROVIDER IS PINNED ON EVERY INVOCATION, and that is the whole reason this
+class is allowed to exist inside the bench at all. `docs/todo.md` records four
+live hosted credentials on this box — openrouter, opencode-zen, copilot and
+xai-oauth — each reachable on a fallback, an explicit `--provider`, or a `-m`
+naming a hosted model. Hermes also cannot be version-pinned: the NousResearch
+installer always fetches latest, so every converge is an unreviewed upgrade that
+could change its default routing without anything in this repo noticing.
+
+So the bench does not trust Hermes' configured default. It names the provider and
+the base URL on the command line every time, and the bench — not Hermes — is the
+policy point. If a future Hermes stops honouring these flags, the honest answer
+is to stop invoking it, not to widen the door.
+
+A delegation is no longer bound to the session that asked for it. It has a brief,
+the brief has a result, and the result waits in the Ledger for a seam. The old
+log-and-drop was correct when there was nowhere to put an answer; with a Ledger,
+"twenty minutes later if need be" is what was actually wanted.
 """
 
 from __future__ import annotations
@@ -28,9 +41,20 @@ log = logging.getLogger(__name__)
 
 
 class HermesDelegate:
-    def __init__(self, binary: str, *, timeout: int = 900) -> None:
+    def __init__(
+        self,
+        binary: str,
+        *,
+        timeout: int = 900,
+        provider: str = "",
+        base_url: str = "",
+        model: str = "",
+    ) -> None:
         self._binary = binary
         self._timeout = timeout
+        self._provider = provider
+        self._base_url = base_url
+        self._model = model
 
     def available(self) -> bool:
         """Whether the binary resolves on THIS process's PATH.
@@ -43,14 +67,22 @@ class HermesDelegate:
         """
         return shutil.which(self._binary) is not None
 
+    def _argv(self, prompt: str) -> list[str]:
+        argv = [self._binary, "chat", "-q", prompt, "-Q"]
+        # Named every time. An unpinned invocation inherits whatever the last
+        # unreviewed upgrade left in config.yaml, which for a while on this box
+        # was provider `xai-oauth` against api.x.ai — recorded in docs/todo.md
+        # as egress to a third party nobody had chosen.
+        if self._provider:
+            argv += ["--provider", self._provider]
+        if self._model:
+            argv += ["-m", self._model]
+        return argv
+
     async def run(self, prompt: str) -> str:
         """Run one delegation to completion and return what Hermes said."""
         proc = await asyncio.create_subprocess_exec(
-            self._binary,
-            "chat",
-            "-q",
-            prompt,
-            "-Q",
+            *self._argv(prompt),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )

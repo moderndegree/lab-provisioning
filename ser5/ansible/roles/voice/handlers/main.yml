@@ -58,3 +58,44 @@
   when:
     - not ansible_check_mode
     - voice_gateway_unit_file.stat.exists
+
+# Same shape and the same reason as the gateway handler above: on a first-ever
+# converge the VAD fetch flushes handlers before this unit has been templated,
+# and `state: restarted` hard-fails on a unit systemd has never heard of.
+- name: Check whether voice-bench.service exists yet
+  listen: "restart voice-bench"
+  ansible.builtin.stat:
+    path: "{{ user_home }}/.config/systemd/user/voice-bench.service"
+  register: voice_bench_unit_file
+
+- name: Restart voice-bench
+  listen: "restart voice-bench"
+  ansible.builtin.systemd:
+    name: voice-bench.service
+    state: restarted
+    scope: user
+  become: true
+  become_user: "{{ username }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ voice_user_uid.stdout }}"
+  when:
+    - not ansible_check_mode
+    - voice_bench_unit_file.stat.exists
+
+- name: voice system daemon-reload
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+# `restarted`, not `reloaded`: the unit is a oneshot whose ExecStop deletes the
+# table and whose ExecStart reloads it, so a restart is the only thing that
+# actually re-reads the file. A `reload` on a oneshot is a no-op that reports
+# success — the same class of lie as the network oneshot in roles/observability
+# that reported `active (exited)` for ten hours after its network was gone.
+- name: reload voice-locality
+  ansible.builtin.systemd:
+    name: voice-locality.service
+    state: restarted
+    daemon_reload: true
+  when:
+    - not ansible_check_mode
+    - voice_locality_enforce | bool

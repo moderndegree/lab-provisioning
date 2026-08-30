@@ -1,0 +1,71 @@
+# systemd USER unit — the bench.
+# Managed by ser5/ansible/roles/voice — do not edit by hand.
+#
+# A SECOND PROCESS, not a task in the gateway's event loop, and the separation
+# buys three specific things:
+#
+#   preemption   Nice and CPUWeight below. Deep work must never be able to
+#                starve the fast path; where silicon cannot guarantee that, the
+#                scheduler is the fallback and the strategy says to treat it as
+#                the weaker thing it is.
+#   blast radius a bench crash loses an errand, not the voice. The gateway keeps
+#                holding the floor and the brief goes back to pending.
+#   provability  one cgroup to name in the egress rule. "Only the bench reaches
+#                the network" stops being a claim in a comment and becomes
+#                something `nft list ruleset` can be asked about.
+#
+# It opens NO listening socket and takes no arguments. Everything in is an
+# environment variable; everything out is a row in the Ledger.
+
+[Unit]
+Description=Voice bench — briefs into results, and the only route off the box
+After=network-online.target voice-gateway.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory={{ voice_app_dir }}
+Environment=PATH={{ voice_gateway_path }}
+Environment=PYTHONUNBUFFERED=1
+
+# The same Ledger file the gateway writes. WAL is what lets both hold it at once
+# — roles/voice/tasks/verify.yml checks that it really is in WAL mode, because a
+# ledger that quietly fell back to rollback journalling would put this process's
+# reads directly in front of a conversational turn.
+Environment=VOICE_LEDGER_PATH={{ voice_ledger_path }}
+Environment=VOICE_VAULT_DIR={{ voice_vault_dir }}
+Environment=VOICE_RESULT_TTL_S={{ voice_result_ttl_s }}
+
+# :8091, the deep instance. NOT :8090 — that one belongs to the presence, and
+# the whole question `voicebench --load` exists to answer is whether work here
+# starves work there.
+Environment=VOICE_BENCH_ENABLED=true
+Environment=VOICE_BENCH_LLM_BASE_URL={{ voice_bench_llm_base_url }}
+Environment=VOICE_BENCH_LLM_MODEL={{ voice_bench_llm_model }}
+Environment=VOICE_BENCH_LLM_MAX_TOKENS={{ voice_bench_llm_max_tokens }}
+Environment=VOICE_BENCH_THINKING={{ voice_bench_thinking | bool | lower }}
+Environment=VOICE_BENCH_POLL_S={{ voice_bench_poll_s }}
+
+Environment=VOICE_SEARXNG_URL={{ voice_searxng_url }}
+Environment=VOICE_SEARCH_RESULTS={{ voice_search_results }}
+# Hermes is ONE capability here, not the policy point. The provider is named on
+# every invocation because Hermes cannot be version-pinned and four hosted
+# credentials are still live on this box — see docs/todo.md.
+Environment=VOICE_HERMES_BIN={{ voice_hermes_bin }}
+Environment=VOICE_HERMES_PROVIDER={{ voice_hermes_provider }}
+Environment=VOICE_HERMES_TIMEOUT={{ voice_hermes_timeout }}
+
+ExecStart={{ voice_venv_dir }}/bin/python -m voice_gateway.bench
+
+# Yield to everything the presence needs. These are the "policy where silicon
+# isn't available" half of the strategy's placement rule, and they are weaker
+# than a hardware guarantee — which is exactly why the load test exists.
+Nice=10
+CPUWeight=20
+IOWeight=20
+
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

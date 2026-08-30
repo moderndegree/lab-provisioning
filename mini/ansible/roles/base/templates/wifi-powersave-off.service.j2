@@ -1,0 +1,33 @@
+# Turn 802.11 power save off on every wireless interface, at boot.
+# Managed by mini/ansible/roles/base — do not edit by hand.
+#
+# WHY: this box is wifi-only and every voice turn crosses the link twice. With
+# power save on, an inbound packet to an idle station waits for the next DTIM
+# beacon — measured 2026-08-30, ser5 -> mini: avg 22.064 ms and a 175 ms worst
+# case, against 6.543 ms and 11.671 ms with it off, on a -56 dBm link. See the
+# comment block in ../tasks/main.yml for what that bought end to end (tail
+# latency and jitter; not the median).
+#
+# The setting is per-interface and survives a reconnect, but not a reboot or a
+# driver reload — which is the whole reason this unit exists.
+#
+# It is a oneshot, so `systemctl status` will report success forever regardless
+# of whether the setting still holds. Do not trust it: roles/base/tasks/verify.yml
+# asks `iw` for the live value instead, exactly as the observability role learned
+# to after a network vanished under a unit that still read `active (exited)`.
+[Unit]
+Description=Disable 802.11 power save (latency, not throughput)
+After=network.target
+Wants=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+{% for iface in base_wifi_ifaces.stdout_lines %}
+# `-` prefix: a missing interface must not fail the boot. The verify task is
+# what notices, not this unit.
+ExecStart=-/usr/sbin/iw dev {{ iface }} set power_save off
+{% endfor %}
+
+[Install]
+WantedBy=multi-user.target

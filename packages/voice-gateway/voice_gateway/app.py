@@ -18,6 +18,8 @@ answers /health perfectly too. /v1/status is the endpoint that refuses to.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -26,6 +28,10 @@ from fastapi import FastAPI, WebSocket
 
 from . import __version__
 from .config import Config, load
+from .delivery import Returner
+from .doorman import Doorman
+from .hands import Hands, default_registry
+from .ledger import Ledger
 from .llm import LlmClient
 from .session import Deps, Session
 from .stt import SttClient
@@ -67,11 +73,66 @@ def _system_prompt(cfg: Config) -> str:
     return DEFAULT_SYSTEM_PROMPT
 
 
+async def _locality(cfg: Config) -> tuple[str, str]:
+    """Try to reach the public internet from inside the presence's own cgroup.
+
+    Three outcomes, and the third is not a pass:
+
+        enforced      the connection was refused immediately — the wall is there
+        NOT enforced  the connection SUCCEEDED. The nftables rule is loaded and
+                      matching nothing, which is its most likely failure and the
+                      one that looks perfect in `nft list ruleset`
+        inconclusive  it timed out. That is what an unplugged network looks like
+                      too, so it proves nothing and must not be reported as ok
+
+    A bare TCP handshake to a literal IP, immediately closed: no DNS, no bytes,
+    no payload. When the rule is working nothing leaves at all.
+    """
+    loop = asyncio.get_running_loop()
+    target = (cfg.locality_probe_host, cfg.locality_probe_port)
+    started = loop.time()
+    try:
+        _, writer = await asyncio.wait_for(
+            asyncio.open_connection(*target), timeout=cfg.locality_probe_timeout
+        )
+    except (TimeoutError, asyncio.TimeoutError):
+        return "inconclusive", (
+            f"{target[0]}:{target[1]} timed out after "
+            f"{cfg.locality_probe_timeout:.0f}s — cannot tell a firewall from an "
+            f"unplugged network, so this proves nothing"
+        )
+    except OSError as exc:
+        return "enforced", (
+            f"egress to {target[0]}:{target[1]} refused in "
+            f"{(loop.time() - started) * 1000:.0f}ms ({type(exc).__name__})"
+        )
+    writer.close()
+    with contextlib.suppress(Exception):
+        await writer.wait_closed()
+    return "NOT enforced", (
+        f"the presence REACHED {target[0]}:{target[1]}. voice_locality_enforce is "
+        f"on, so the nftables rule is loaded and matching nothing — check "
+        f"voice_locality_cgroup_level and voice_locality_cgroup against "
+        f"`systemctl --user show voice-gateway -p ControlGroup --value`"
+    )
+
+
 def create_app(cfg: Config | None = None) -> FastAPI:
     cfg = cfg or load()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        ledger = Ledger(cfg.ledger_path)
+        try:
+            await ledger.open()
+        except Exception:  # noqa: BLE001
+            # Deliberately not fatal. The presence must come up and hold the
+            # floor even with no durable store behind it; /v1/status is where
+            # that shows, and the Doorman admits clients without memory rather
+            # than refusing them. Failing to boot here would mean a full-disk
+            # /data takes the voice down entirely.
+            log.exception("ledger failed to open at %s; running without memory",
+                          cfg.ledger_path)
         deps = Deps(
             stt=SttClient(
                 cfg.stt_url,
@@ -92,6 +153,14 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                 speed=cfg.tts_speed,
                 timeout=cfg.request_timeout,
             ),
+            ledger=ledger,
+            doorman=Doorman(ledger, history_turns=cfg.llm_history_turns),
+            returner=Returner(ledger, quiet_s=cfg.return_quiet_s),
+            hands=(
+                Hands(default_registry(), consent_window_s=cfg.hands_consent_s)
+                if cfg.hands_enabled
+                else None
+            ),
             search=WebSearch(cfg.searxng_url, results=cfg.search_results),
             hermes=HermesDelegate(cfg.hermes_bin, timeout=cfg.hermes_timeout),
             system_prompt=_system_prompt(cfg),
@@ -99,12 +168,13 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         app.state.cfg = cfg
         app.state.deps = deps
         log.info(
-            "voice-gateway %s up: llm=%s model=%s stt=%s tts=%s",
+            "voice-gateway %s up: llm=%s model=%s stt=%s tts=%s ledger=%s",
             __version__,
             cfg.llm_base_url,
             cfg.llm_model,
             cfg.stt_url,
             cfg.tts_url,
+            cfg.ledger_path,
         )
         try:
             yield
@@ -113,6 +183,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             await deps.llm.aclose()
             await deps.tts.aclose()
             await deps.search.aclose()
+            await ledger.aclose()
 
     app = FastAPI(title="voice-gateway", version=__version__, lifespan=lifespan)
 
@@ -151,6 +222,20 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             "detail": f"{cfg.tts_url} voice={cfg.tts_voice}",
         }
 
+        # Ledger — the only place state lives, so a gateway that talks
+        # beautifully and remembers nothing must not report ok. It asks the file
+        # a real question rather than checking that the path exists.
+        ok, detail = await deps.ledger.health()
+        checks["ledger"] = {"ok": ok, "detail": detail}
+
+        # Locality — the presence testing, on itself, that it cannot leave.
+        # Only meaningful when the rule is deployed; when it is not, the honest
+        # answer is that nothing is claimed, so the check is absent rather than
+        # green.
+        if cfg.locality_enforced:
+            state, detail = await _locality(cfg)
+            checks["locality"] = {"ok": state == "enforced", "detail": detail}
+
         checks["search"] = {
             "ok": await deps.search.health(),
             "detail": cfg.searxng_url,
@@ -159,6 +244,23 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             "ok": deps.hermes.available(),
             "detail": f"{cfg.hermes_bin} on the unit PATH",
         }
+
+        # The bench is a separate unit, so the gateway cannot see it directly.
+        # What it CAN see is whether briefs are being claimed: a pending brief
+        # older than a few minutes means the presence said "on it" about work
+        # nothing is doing, which is the one failure mode the strategy forbids
+        # outright and which every other check here would report as healthy.
+        if cfg.bench_enabled:
+            stalled = await deps.ledger.stalled_briefs(older_than_s=300)
+            checks["bench"] = {
+                "ok": not stalled,
+                "detail": (
+                    f"{len(stalled)} brief(s) pending over 5 min — is "
+                    f"voice-bench.service running?"
+                    if stalled
+                    else "no stalled briefs"
+                ),
+            }
 
         return {
             "ok": all(c["ok"] for c in checks.values()),

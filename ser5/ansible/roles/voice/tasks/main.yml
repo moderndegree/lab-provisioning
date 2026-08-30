@@ -17,6 +17,21 @@
       ansible.builtin.command: "id -u {{ username }}"
       register: voice_user_uid
       changed_when: false
+      # check_mode: false because `command` does not support check mode and is
+      # SKIPPED there — and a skipped register renders `.stdout` as the EMPTY
+      # STRING, not as undefined. Every `XDG_RUNTIME_DIR: /run/user/{{ ... }}`
+      # below then becomes `/run/user/`, and `systemctl --user` fails with
+      # "Failed to connect to user scope bus via local transport" — a message
+      # that reads like a broken user manager rather than an empty variable.
+      # Nothing about `id -u` needs to be withheld from a dry run.
+      check_mode: false
+
+    # The cgroup path in the locality ruleset is built from this. Reading it
+    # rather than assuming 1000 matters because a wrong path does not error —
+    # the nftables rule simply matches nothing and stops enforcing, silently.
+    - name: Record the UID as a fact
+      ansible.builtin.set_fact:
+        voice_user_uid_value: "{{ voice_user_uid.stdout | trim }}"
 
     - name: Ensure the voice directories exist
       ansible.builtin.file:
@@ -28,6 +43,22 @@
       loop:
         - "{{ voice_data_dir }}"
         - "{{ voice_models_dir }}"
+
+    # The Ledger's own directory is voice_data_dir above; this only makes the
+    # vault's errands folder exist up front so the first export is not also the
+    # first mkdir. Skipped when the export is disabled or roles/brain never ran —
+    # the exporter treats a missing vault as "do not export" rather than an
+    # error, so this is a convenience, not a dependency.
+    - name: Ensure the vault errands folder exists
+      ansible.builtin.file:
+        path: "{{ voice_vault_dir }}/notes/errands"
+        state: directory
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0750"
+      when:
+        - voice_vault_dir | length > 0
+        - enable_brain | default(false) | bool
 
     # voice_app_dir gets NO mode assertion here, deliberately. rsync's archive
     # mode copies the SOURCE directory's own permission bits onto this dest
@@ -229,6 +260,88 @@
       environment:
         XDG_RUNTIME_DIR: "/run/user/{{ voice_user_uid.stdout }}"
       when: not ansible_check_mode
+
+    # ─── The bench ───────────────────────────────────────────────────────────
+    # Same venv, same package, different entry point (`python -m
+    # voice_gateway.bench`). It shares nothing with the gateway but the Ledger
+    # file, which is the whole point: the handoff is a row, so either unit can
+    # restart without losing an errand.
+    - name: Template the bench unit
+      ansible.builtin.template:
+        src: voice-bench.service.j2
+        dest: "{{ user_home }}/.config/systemd/user/voice-bench.service"
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0644"
+      when: enable_voice_bench | bool
+      notify:
+        - voice daemon-reload
+        - restart voice-bench
+
+    - name: Flush handlers (daemon-reload before the bench starts)
+      ansible.builtin.meta: flush_handlers
+
+    - name: Enable and start voice-bench
+      ansible.builtin.systemd:
+        name: voice-bench.service
+        state: "{{ 'started' if (enable_voice_bench | bool) else 'stopped' }}"
+        enabled: "{{ enable_voice_bench | bool }}"
+        scope: user
+      become: true
+      become_user: "{{ username }}"
+      environment:
+        XDG_RUNTIME_DIR: "/run/user/{{ voice_user_uid.stdout }}"
+      failed_when: false
+      when: not ansible_check_mode
+
+    # ─── Locality, enforced on the wire ──────────────────────────────────────
+    # Its own nftables table, so removal is one `nft delete table` and UFW is
+    # never touched. See defaults/main.yml for why this is off until turned on
+    # deliberately.
+    - name: Deploy the locality ruleset
+      when: voice_locality_enforce | bool
+      block:
+        - name: Ensure the nftables directory exists
+          ansible.builtin.file:
+            path: "{{ voice_locality_ruleset | dirname }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0755"
+
+        - name: Template the locality ruleset
+          ansible.builtin.template:
+            src: voice-locality.nft.j2
+            dest: "{{ voice_locality_ruleset }}"
+            owner: root
+            group: root
+            mode: "0644"
+            # nft parses the file without touching the live ruleset. A typo here
+            # would otherwise land as a firewall that half-loaded.
+            validate: "/usr/sbin/nft --check --file %s"
+          notify: reload voice-locality
+
+        - name: Template the locality unit
+          ansible.builtin.template:
+            src: voice-locality.service.j2
+            dest: /etc/systemd/system/voice-locality.service
+            owner: root
+            group: root
+            mode: "0644"
+          notify:
+            - voice system daemon-reload
+            - reload voice-locality
+
+        - name: Flush handlers (load the ruleset before enabling)
+          ansible.builtin.meta: flush_handlers
+
+        - name: Enable and start voice-locality
+          ansible.builtin.systemd:
+            name: voice-locality.service
+            state: started
+            enabled: true
+            daemon_reload: true
+          when: not ansible_check_mode
 
     # ─── Exposure ────────────────────────────────────────────────────────────
     # ser5 is default-deny with NO blanket tailscale0 allow (mini has one; this

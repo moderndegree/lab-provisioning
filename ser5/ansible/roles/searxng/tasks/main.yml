@@ -16,6 +16,14 @@
       ansible.builtin.command: "id -u {{ username }}"
       register: searxng_user_uid
       changed_when: false
+      # check_mode: false because `command` does not support check mode and is
+      # SKIPPED there — and a skipped register renders `.stdout` as the EMPTY
+      # STRING, not as undefined. Every `XDG_RUNTIME_DIR: /run/user/{{ ... }}`
+      # below then becomes `/run/user/`, and `systemctl --user` fails with
+      # "Failed to connect to user scope bus via local transport" — a message
+      # that reads like a broken user manager rather than an empty variable.
+      # Nothing about `id -u` needs to be withheld from a dry run.
+      check_mode: false
 
     - name: Ensure SearXNG data directory exists
       ansible.builtin.file:

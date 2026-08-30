@@ -18,6 +18,14 @@
       ansible.builtin.command: "id -u {{ username }}"
       register: hermes_user_uid
       changed_when: false
+      # check_mode: false because `command` does not support check mode and is
+      # SKIPPED there — and a skipped register renders `.stdout` as the EMPTY
+      # STRING, not as undefined. Every `XDG_RUNTIME_DIR: /run/user/{{ ... }}`
+      # below then becomes `/run/user/`, and `systemctl --user` fails with
+      # "Failed to connect to user scope bus via local transport" — a message
+      # that reads like a broken user manager rather than an empty variable.
+      # Nothing about `id -u` needs to be withheld from a dry run.
+      check_mode: false
 
     - name: Ensure Hermes home directory exists
       ansible.builtin.file:
@@ -221,14 +229,25 @@
     # match against. Verified 2026-08-15. So this one is written as real YAML.
     # Read-compare-write rather than templating: Hermes owns config.yaml and
     # keeps session, auth and skill state in it.
+    #
+    # THE LIST ARRIVES IN THE ENVIRONMENT, NOT IN THE COMMAND STRING. It used to
+    # be interpolated as `want={{ '{{' }} ... | to_json {{ '}}' }}`, which renders
+    # `["opencode"]` — and those double quotes sit inside the `-c "..."` that
+    # wraps the whole script. `ansible.builtin.command` shlex-splits its cmd, the
+    # inner quotes close and reopen the outer ones, and python received
+    # `want=[opencode]`: a bare name, `NameError: name 'opencode' is not defined`.
+    # An empty allowlist renders `want=[]` and would have hidden this forever.
+    #
+    # os.environ carries the JSON with no shell in the middle of it, so no amount
+    # of punctuation in a future allowlist entry can break the quoting again.
     - name: Ensure the command allowlist contains what delegation needs
       ansible.builtin.command:
         cmd: >-
           python3 -c "
-          import yaml,sys,pathlib;
+          import json,os,yaml,sys,pathlib;
           p=pathlib.Path('{{ hermes_home }}/config.yaml');
           c=yaml.safe_load(p.read_text()) or {};
-          want={{ hermes_command_allowlist | to_json }};
+          want=json.loads(os.environ['HERMES_COMMAND_ALLOWLIST']);
           cur=c.get('command_allowlist');
           cur=cur if isinstance(cur,list) else [];
           new=sorted(set(cur)|set(want));
@@ -236,6 +255,8 @@
           p.write_text(yaml.safe_dump(c,sort_keys=False,default_flow_style=False,allow_unicode=True)),
           sys.exit(10))
           "
+      environment:
+        HERMES_COMMAND_ALLOWLIST: "{{ hermes_command_allowlist | to_json }}"
       become: true
       become_user: "{{ username }}"
       register: hermes_allowlist_set

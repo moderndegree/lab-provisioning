@@ -12,14 +12,33 @@ Audio out : int16 PCM at TTS_SAMPLE_RATE. We ask for response_format=pcm
             bytes go socket to socket.
 
 Client -> gateway
-    text  {"type":"hello","device":str,"mode":"ptt"|"vad","sample_rate":16000}
+    text  {"type":"hello","device":str,"mode":"ptt"|"vad","sample_rate":16000,
+           "speaker":str?}
+                             `speaker` is OPTIONAL and defaults to the lab's one
+                             user. It exists because the Ledger attributes every
+                             turn and every brief to a speaker and a device from
+                             day one: isolation can be built later on top of
+                             attributed history, and attribution cannot be
+                             recovered retroactively.
+    text  {"type":"start","mode":"ptt"|"vad"}
+                             opens a turn and picks its endpointing mode. The
+                             mode is PER TURN, not per connection: a push-to-talk
+                             hold and a wake-word turn want opposite endpointing,
+                             and the client should not have to open a second
+                             socket to get both. Optional — a client that never
+                             sends it keeps the mode from `hello`.
     bin   PCM frames
     text  {"type":"end"}     end of utterance. In ptt mode this IS the endpoint
                              and skips the VAD hangover entirely.
     text  {"type":"cancel"}  barge-in / abort whatever is in flight
 
 Gateway -> client
-    text  {"type":"ready"}
+    text  {"type":"ready","conversation":str,"resumed":int,"working":int,
+           "waiting":int}
+                             The counts are the Doorman's answer to "what am I
+                             rejoining": turns replayed from the Ledger, briefs
+                             still in flight, results waiting for a seam. Clients
+                             that only switch on `type` are unaffected.
     text  {"type":"partial","text":str}      live, not yet committed
     text  {"type":"final","text":str}        what we actually sent to the model
     text  {"type":"speaking","seq":int,"text":str}
@@ -27,6 +46,11 @@ Gateway -> client
     bin   PCM frames for the sentence just announced
     text  {"type":"done"}
     text  {"type":"cancelled"}
+    text  {"type":"brief","id":str,"statement":str}
+                                             an errand was dispatched; the id is
+                                             the Ledger row, and the statement is
+                                             what the bench was actually given
+    text  {"type":"working","n":int}         how many briefs are in flight
     text  {"type":"notice","text":str}       out-of-band, e.g. a delegated
                                              result arriving later
     text  {"type":"error","message":str}
@@ -59,6 +83,7 @@ Mode = Literal["ptt", "vad"]
 
 # ─── Client -> gateway ───────────────────────────────────────────────────────
 C_HELLO = "hello"
+C_START = "start"
 C_END = "end"
 C_CANCEL = "cancel"
 
@@ -69,12 +94,26 @@ S_FINAL = "final"
 S_SPEAKING = "speaking"
 S_DONE = "done"
 S_CANCELLED = "cancelled"
+S_BRIEF = "brief"
+S_WORKING = "working"
 S_NOTICE = "notice"
 S_ERROR = "error"
 
 
-def ready() -> dict[str, Any]:
-    return {"type": S_READY}
+def ready(
+    conversation: str = "",
+    *,
+    resumed: int = 0,
+    working: int = 0,
+    waiting: int = 0,
+) -> dict[str, Any]:
+    return {
+        "type": S_READY,
+        "conversation": conversation,
+        "resumed": resumed,
+        "working": working,
+        "waiting": waiting,
+    }
 
 
 def partial(text: str) -> dict[str, Any]:
@@ -95,6 +134,14 @@ def done() -> dict[str, Any]:
 
 def cancelled() -> dict[str, Any]:
     return {"type": S_CANCELLED}
+
+
+def brief(brief_id: str, statement: str) -> dict[str, Any]:
+    return {"type": S_BRIEF, "id": brief_id, "statement": statement}
+
+
+def working(n: int) -> dict[str, Any]:
+    return {"type": S_WORKING, "n": n}
 
 
 def notice(text: str) -> dict[str, Any]:

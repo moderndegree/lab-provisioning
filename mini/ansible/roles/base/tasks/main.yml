@@ -49,7 +49,65 @@
       - curl
       - ca-certificates
       - python3-pip       # general Python tooling
+      - iw                # read/set 802.11 power save — see the wifi block below
     state: present
+
+# ─── Wi-Fi power save ─────────────────────────────────────────────────────────
+# MEASURED, 2026-08-30. This box is wifi-only and every voice turn crosses the
+# link to it twice — once for speech recognition, once for the tokens. With
+# 802.11 power save ON, an inbound packet to an idle station waits for the next
+# DTIM beacon:
+#
+#     ser5 -> mini, 60 pings          min      avg      max     mdev
+#     power save on                 3.772   22.064  175.010   36.632 ms
+#     power save off                3.513    6.543   11.671    1.793 ms
+#
+# 3.4x on the average, 15x on the worst case, 20x less jitter — on a link whose
+# signal is -56 dBm at 650/702 Mbit/s, so none of this was ever about radio
+# quality. What it bought end to end, through the voice gateway (n=12 vs n=10,
+# identical stimulus): the MEDIAN barely moved (742 -> 740 ms) because the median
+# is compute, but STT finalize p95 went 207 -> 75 ms and the overall p95 went
+# 1088 -> 970 ms. It buys CONSISTENCY, not speed. Recorded that way rather than
+# as a win it was not.
+#
+# There is no NetworkManager here to hold a `wifi.powersave` key — this box runs
+# systemd-networkd + wpa_supplicant from the autoinstall netplan — so the setting
+# is applied with `iw` and made to survive a reboot by the unit below.
+#
+# NOTE the shape of that unit, and roles/observability's scar: a oneshot reports
+# `active (exited)` forever whether or not what it did still holds. So
+# tasks/verify.yml asks `iw` for the live value and never asks systemd.
+- name: Find the wireless interfaces
+  ansible.builtin.shell: |
+    set -o pipefail
+    ls -1 /sys/class/net | while read -r n; do
+      [ -d "/sys/class/net/$n/wireless" ] && echo "$n"
+    done
+  args:
+    executable: /bin/bash
+  register: base_wifi_ifaces
+  changed_when: false
+  check_mode: false
+
+- name: Install the wifi power-save unit
+  ansible.builtin.template:
+    src: wifi-powersave-off.service.j2
+    dest: /etc/systemd/system/wifi-powersave-off.service
+    owner: root
+    group: root
+    mode: "0644"
+  when: base_wifi_ifaces.stdout_lines | length > 0
+  notify: reload systemd
+
+- name: Enable and start the wifi power-save unit
+  ansible.builtin.systemd:
+    name: wifi-powersave-off.service
+    state: started
+    enabled: true
+    daemon_reload: true
+  when:
+    - base_wifi_ifaces.stdout_lines | length > 0
+    - not ansible_check_mode
 
 # ─── UFW firewall ─────────────────────────────────────────────────────────────
 - name: Set UFW default — deny incoming

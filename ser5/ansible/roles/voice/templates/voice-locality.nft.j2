@@ -1,0 +1,58 @@
+#!/usr/sbin/nft -f
+# Locality, enforced on the wire rather than asserted in a comment.
+# Managed by ser5/ansible/roles/voice — do not edit by hand.
+#
+# THE RULE: the presence may talk to the property. It may not talk to the world.
+#
+# "The property" is loopback, the lab LAN, and the tailnet — the presence has to
+# reach mini for both speech recognition (:8092) and every token it speaks
+# (:8090), and mini is a different machine. So this is NOT "the gateway may not
+# use the network"; it is "no prompt leaves the property", which is the claim the
+# strategy actually makes.
+#
+# Everything else is rejected, and only the bench's cgroup is exempt. That
+# asymmetry is the whole design: facts may come in through the bench, thinking
+# never goes out through anything.
+#
+# `reject` rather than `drop` deliberately. A dropped packet becomes a 30-second
+# hang somewhere and gets diagnosed as "the network is slow"; a rejected one is
+# an immediate connection-refused in the gateway's log, naming itself.
+#
+# Its own table, so `nft delete table inet {{ voice_locality_table }}` is a
+# complete rollback and UFW is untouched.
+
+table inet {{ voice_locality_table }} {
+    set property_v4 {
+        type ipv4_addr
+        flags interval
+        elements = {
+            127.0.0.0/8,        # this box
+            10.0.0.0/8,         # the lab LAN (both boxes are wifi-only on 10.0.0.0/24)
+            172.16.0.0/12,
+            192.168.0.0/16,
+            100.64.0.0/10       # the tailnet — mini lives here
+        }
+    }
+    set property_v6 {
+        type ipv6_addr
+        flags interval
+        elements = { ::1/128, fc00::/7, fe80::/10 }
+    }
+
+    chain output {
+        type filter hook output priority filter; policy accept;
+
+        # level {{ voice_locality_cgroup_level }} counts the components of
+        #   {{ voice_locality_cgroup }}
+        # Read it off the running unit before changing it:
+        #   systemctl --user show voice-gateway -p ControlGroup --value
+        # A wrong level does not error — it simply matches nothing, and the rule
+        # silently stops enforcing anything. That is the failure mode this file
+        # is most likely to have, so verify.yml tests it with a live connection
+        # rather than by reading the ruleset back.
+        socket cgroupv2 level {{ voice_locality_cgroup_level }} "{{ voice_locality_cgroup }}" \
+            ip daddr != @property_v4 reject with icmp type admin-prohibited
+        socket cgroupv2 level {{ voice_locality_cgroup_level }} "{{ voice_locality_cgroup }}" \
+            ip6 daddr != @property_v6 reject with icmpv6 type admin-prohibited
+    }
+}

@@ -194,6 +194,106 @@ voice_llm_base_url: "http://mini:8090/v1"
 voice_llm_model: "qwen3.6-35b-a3b-mtp"
 voice_llm_max_tokens: 400
 
+# ─── The Bench — deep work, and the only route off the box ───────────────────
+# A second systemd user unit sharing only the Ledger with the gateway. See
+# templates/voice-bench.service.j2 for why it is a separate process rather than
+# a task in the gateway's event loop.
+#
+# OFF BY DEFAULT. With no bench running, a dispatched brief would sit pending
+# forever and the presence would have said "on it" about work nobody was doing —
+# the one thing the strategy forbids outright. Turning this on is what flips the
+# gateway from "refuse honestly" to "dispatch"; the gateway reads its own
+# VOICE_BENCH_ENABLED, which this sets on both units together.
+enable_voice_bench: false
+
+# :8091, the deep instance (qwen3.8-27b, ctx 262144, parallel 1). NOT :8090,
+# which is the presence's own four-slot MoE. Two llama-server processes, one GPU
+# — whether the second starves the first is exactly what
+# `voicebench.py --load N` measures, and the strategy's only non-negotiable
+# number: the fast path within ~15% of idle while errands run.
+voice_bench_llm_base_url: "http://mini:8091/v1"
+voice_bench_llm_model: "qwen3.8-27b"
+# Ten times the presence's cap and for the opposite reason: nobody is waiting on
+# this, so the bound exists only to stop one runaway errand holding the single
+# deep slot indefinitely.
+voice_bench_llm_max_tokens: 4000
+# Reasoning is the entire reason the deep tier exists. The presence turns it OFF
+# because a 300-token cap consumed by reasoning returns empty content — silence,
+# then nothing (docs/operating-manual.md). Neither setting is a preference.
+voice_bench_thinking: true
+voice_bench_poll_s: 2.0
+voice_search_results: 5
+
+# Hermes is ONE capability behind the bench, not the system's policy point.
+# Named explicitly on every invocation: it cannot be version-pinned (the
+# NousResearch installer always fetches latest, so every converge is an
+# unreviewed upgrade) and docs/todo.md records four live hosted credentials on
+# this box, each reachable on a fallback or an explicit flag. Verified on the box
+# 2026-08-30 that `hermes chat` accepts both --provider and -m.
+voice_hermes_provider: "custom"
+# Only bounds how long the bench holds a delegation before giving up and saying
+# so. Delegations are long by design; nobody is waiting on the first token.
+voice_hermes_timeout: 900
+
+# ─── Hands — spoken commands that act on the box ─────────────────────────────
+# OFF by default, and the default registry contains only read-only actions, so
+# turning this on is a deliberate act twice over. What counts as irreversible is
+# a DECLARATION, not a derivation — see voice_gateway/hands/registry.py and the
+# worked examples beside it. The strategy leaves that decision open on purpose.
+enable_voice_hands: false
+
+# ─── The floor — the bench yields the GPU to the presence ────────────────────
+# MEASURED ON THIS LAB, 2026-08-30, and it is the reason this exists at all.
+# With one deep generation running on mini's :8091, the presence on :8090:
+#
+#                              idle    1 errand    drift
+#   STT finalize               61ms       155ms    +155%
+#   model -> first sentence   498ms      2041ms    +310%
+#   synthesis (ser5 CPU)      284ms       263ms      -8%
+#   TO FIRST AUDIBLE WORD     861ms      2451ms    +184%
+#
+# Two llama-server processes sharing one GPU do not isolate. Note synthesis is
+# untouched: everything hosted on ser5 is fine, everything on mini collapses.
+# voice-bench.service's Nice/CPUWeight are decorative against this — the
+# contention is not CPU.
+#
+# So the presence claims a floor in the Ledger at the moment of intent (the
+# client's `start` frame, sent at key-press) and the bench abandons its
+# generation within a few dozen tokens, then waits. Errands get slower; talking
+# does not. That is the strategy's own accepted tradeoff, extended from
+# steering to contention.
+#
+# A DEADLINE, NOT A LOCK: the presence pushes it forward and never releases it,
+# so a crashed gateway frees the bench by itself after this many seconds.
+voice_floor_hold_s: 5.0
+
+# ─── Locality, enforced on the wire ──────────────────────────────────────────
+# "No prompt leaves the property. Verified on the wire, not in config."
+#
+# The rule is NOT "the gateway may not use the network" — the presence has to
+# reach mini for speech recognition and for every token it speaks, and mini is a
+# different machine. It is "the presence may reach the property, and not the
+# world": loopback, the lab LAN, and the tailnet. Only the bench's cgroup is
+# exempt.
+#
+# OFF BY DEFAULT because it is a firewall change on an always-on box and the
+# cgroup path below must match reality before it enforces anything useful. Read
+# the live value before turning it on:
+#     systemctl --user show voice-gateway -p ControlGroup --value
+# Confirmed on ser5 2026-08-30 (kernel 7.0.0-30, nftables 1.1.6): the path is
+# /user.slice/user-1000.slice/user@1000.service/app.slice/voice-gateway.service
+# and `nft --check` accepts this exact ruleset.
+#
+# A WRONG LEVEL DOES NOT ERROR. It matches nothing and the rule silently stops
+# enforcing, which is why verify.yml proves it with a live connection attempt
+# rather than by reading the ruleset back.
+voice_locality_enforce: false
+voice_locality_table: "voice_locality"
+voice_locality_ruleset: "/etc/nftables/voice-locality.nft"
+voice_locality_cgroup_level: 5
+voice_locality_cgroup: >-
+  user.slice/user-{{ voice_user_uid_value | default('1000') }}.slice/user@{{ voice_user_uid_value | default('1000') }}.service/app.slice/voice-gateway.service
+
 # ─── Endpointing ─────────────────────────────────────────────────────────────
 # Silero VAD as a bare ONNX graph. Deliberately NOT the `silero-vad` pip
 # package, which drags in torch + torchaudio — about 2 GB of wheels on a box
@@ -203,7 +303,49 @@ voice_vad_model_sha256: "2623a2953f6ff3d2c1e61740c6cdb7168133479b267dfef114a4a3c
 voice_vad_model_path: "{{ voice_models_dir }}/silero_vad.onnx"
 voice_vad_silence_ms: 250
 
+# ─── The Ledger — the only place state lives ─────────────────────────────────
+# Durable conversation, briefs, results and egress, each attributed to a speaker
+# and a device. SQLite in WAL mode, under voice_data_dir, which is already inside
+# restic's /data — no new backup path to remember (roles/backups).
+#
+# Before this existed, conversation was a Python list on the WebSocket. Both
+# boxes are wifi-only, so a dropped socket is routine rather than exotic, and
+# every one of them silently started the conversation over; the phone and the
+# workstation were also two assistants that had never met. The Ledger is what
+# makes a reconnect a resumption.
+#
+# ATTRIBUTION IS RECORDED FROM DAY ONE even though there is exactly one user and
+# the answer is always the same. Isolation can be built later on top of
+# attributed history. Attribution cannot be recovered retroactively.
+voice_ledger_path: "{{ voice_data_dir }}/ledger.db"
+
+# Closed briefs are exported into the second brain as plain markdown, under
+# notes/errands/ beside the notes/decisions and notes/postmortems that
+# roles/brain already creates. docs/brain.md's rule applies: files are sacred,
+# indexes are disposable — the Ledger is the index, the exported errand is the
+# file. Turns are NOT exported; conversational chatter would drown the vault.
+# Set to "" to disable the export entirely.
+voice_vault_dir: "{{ brain_root | default(data_mount ~ '/brain') }}"
+
+# How long a finished errand stays worth volunteering. Past this it is answered
+# for if asked, but never spoken unprompted — the result of a question asked
+# yesterday, arriving out of nowhere, is worse than no answer.
+voice_result_ttl_s: 21600      # 6 hours
+
 # ─── Tools ───────────────────────────────────────────────────────────────────
+# THE PRESENCE MUST NOT TOUCH THE NETWORK. If the fast path can reach the
+# internet then the fast path's latency IS the internet's latency and the
+# response guarantee is gone: a "search for ..." turn spends ~1.6s on the SearXNG
+# round trip, on a budget whose whole target is under 600ms to the first audible
+# word. Retrieval belongs to errands exclusively.
+#
+# TRUE here only because the bench that will own retrieval does not exist yet, so
+# turning it off today would take a working feature dark for nothing. Set false
+# to measure this phase's actual claim — one room, one voice, no network at all,
+# with honest refusal of anything beyond it. It flips permanently, and this
+# variable is deleted, when the bench lands.
+voice_presence_network: true
+
 # SearXNG already runs here for Open WebUI and publishes on loopback, which is
 # where the gateway sits. Its role sets `formats: [html, json]` and disables the
 # limiter; without both of those this returns 403.

@@ -1,6 +1,12 @@
-"""Things the gateway can do besides talk to the model."""
+"""Kept as a shim while the bench takes over. Nothing new belongs here.
 
-from .hermes import HermesDelegate
-from .web_search import WebSearch
+`WebSearch` and `HermesDelegate` moved to `voice_gateway.bench` when the
+presence stopped being allowed to reach either of them. The session still
+imports them from here for the transitional `presence_network` path, which is
+the last caller and dies with that flag.
+"""
+
+from ..bench.hermes import HermesDelegate
+from ..bench.web_search import WebSearch
 
 __all__ = ["HermesDelegate", "WebSearch"]

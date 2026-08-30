@@ -9,15 +9,23 @@ Two ways to start a turn, both available at once:
   wake word      openWakeWord runs locally; the gateway's VAD decides when you
                  stopped. Hands-free, costs the hangover.
 
-ONE CONNECTION PER TURN, opened at the moment of intent — key press, or wake
-word firing — which is before you have finished speaking. Connection setup is
-therefore off the critical path entirely, and each turn gets the endpointing
-mode it actually wants instead of a compromise. A persistent socket would have
-to pick one mode for both, and in vad mode a mid-sentence pause during a
-push-to-talk hold would cut you off.
+ONE CONNECTION, held for the life of the client. It used to be one connection
+per turn, on the reasoning that connection setup was then off the critical path
+and each turn could pick its own endpointing mode. The first half was solved
+better by never disconnecting at all, and the second by moving `mode` from the
+handshake onto a per-turn `start` frame — so a push-to-talk hold and a wake-word
+turn still get opposite endpointing over the same socket.
+
+What the per-turn socket could not do is RECEIVE. An errand that finishes twenty
+minutes later has to come back through the same voice at a conversational seam,
+and there was no socket open to come back through. Two sockets — one for turns,
+one to listen on — would have meant two things that could speak at once, which is
+the one thing this system is built never to have.
 
 The mic KEEPS STREAMING while the assistant talks. That is not an oversight: it
-is what makes barge-in work. Speaking over the answer cancels it.
+is what makes barge-in work. Speaking over the answer cancels it. Between turns
+it stops: silence on the wire is what tells the gateway the floor is free, and
+that is what a returning result waits for.
 
 Install (on the workstation, not ser5):
     pip install -e "packages/voice-gateway[client]"
@@ -157,65 +165,78 @@ class WakeWord:
         return hit
 
 
-async def do_turn(url: str, mode: str, mic: queue.Queue, play: Playback, hold: threading.Event) -> None:
-    """One connection, one turn: stream, listen, keep the mic open for barge-in."""
-    async with websockets.connect(url, compression=None, max_size=None) as ws:
-        await ws.send(json.dumps({"type": "hello", "device": "workstation", "mode": mode, "sample_rate": IN_RATE}))
-        finished = asyncio.Event()
+class Presence:
+    """One socket, many turns, and whatever the lab says between them."""
+
+    def __init__(self, ws, play: Playback, device: str, speaker: str) -> None:
+        self._ws = ws
+        self._play = play
+        self.device = device
+        self.speaker = speaker
+        # Set when the floor comes free. A turn waits on it; between turns the
+        # receive loop keeps running so a returning errand can still be heard.
+        self._floor = asyncio.Event()
+
+    async def hello(self) -> dict:
+        frame = {"type": "hello", "device": self.device, "mode": "ptt",
+                 "sample_rate": IN_RATE}
+        if self.speaker:
+            frame["speaker"] = self.speaker
+        await self._ws.send(json.dumps(frame))
+        while True:
+            msg = json.loads(await self._ws.recv())
+            if msg.get("type") == "ready":
+                return msg
+
+    async def receive_forever(self) -> None:
+        """The only place anything is read. Runs for the life of the connection."""
+        async for raw in self._ws:
+            if isinstance(raw, bytes):
+                self._play.write(raw)
+                continue
+            msg = json.loads(raw)
+            kind = msg.get("type")
+            if kind == "partial":
+                print(f"\r  ... {msg['text']:<70}", end="", flush=True)
+            elif kind == "final":
+                print(f"\r  you: {msg['text']:<70}")
+            elif kind == "speaking":
+                print(f"  lab: {msg['text']}")
+            elif kind == "brief":
+                print(f"  [errand] {msg['statement']}")
+            elif kind == "working":
+                print(f"  [{msg['n']} errand(s) in flight]")
+            elif kind == "notice":
+                print(f"  [detail] {msg['text'][:500]}")
+            elif kind == "cancelled":
+                self._play.flush()
+                print("  (interrupted)")
+                self._floor.set()
+            elif kind == "error":
+                print(f"  ! {msg['message']}", file=sys.stderr)
+                self._floor.set()
+            elif kind == "done":
+                self._floor.set()
+
+    async def turn(self, mode: str, mic: queue.Queue, hold: threading.Event) -> None:
+        """Stream one utterance and wait for the floor to come back."""
+        self._floor.clear()
+        await self._ws.send(json.dumps({"type": "start", "mode": mode}))
         ended = False
-
-        async def pump() -> None:
-            nonlocal ended
-            loop = asyncio.get_running_loop()
-            while not finished.is_set():
-                try:
-                    frame = await loop.run_in_executor(None, mic.get, True, 0.1)
-                except queue.Empty:
-                    continue
-                try:
-                    await ws.send(frame)
-                except websockets.ConnectionClosed:
-                    return
-                # ptt: the key came up. Send the endpoint once, then keep
-                # streaming so barge-in still works during the answer.
-                if mode == "ptt" and not ended and not hold.is_set():
-                    ended = True
-                    await ws.send(json.dumps({"type": "end"}))
-
-        async def recv() -> None:
-            async for raw in ws:
-                if isinstance(raw, bytes):
-                    play.write(raw)
-                    continue
-                msg = json.loads(raw)
-                kind = msg.get("type")
-                if kind == "partial":
-                    print(f"\r  ... {msg['text']:<70}", end="", flush=True)
-                elif kind == "final":
-                    print(f"\r  you: {msg['text']:<70}")
-                elif kind == "speaking":
-                    print(f"  lab: {msg['text']}")
-                elif kind == "notice":
-                    print(f"  [hermes] {msg['text'][:500]}")
-                elif kind == "cancelled":
-                    play.flush()
-                    print("  (interrupted)")
-                    finished.set()
-                    return
-                elif kind == "error":
-                    print(f"  ! {msg['message']}", file=sys.stderr)
-                    finished.set()
-                    return
-                elif kind == "done":
-                    finished.set()
-                    return
-
-        pump_task = asyncio.create_task(pump())
-        try:
-            await recv()
-        finally:
-            finished.set()
-            pump_task.cancel()
+        loop = asyncio.get_running_loop()
+        while not self._floor.is_set():
+            try:
+                frame = await loop.run_in_executor(None, mic.get, True, 0.1)
+            except queue.Empty:
+                continue
+            await self._ws.send(frame)
+            # ptt: the key came up. Send the endpoint once, then keep streaming
+            # so barge-in still works during the answer.
+            if mode == "ptt" and not ended and not hold.is_set():
+                ended = True
+                await self._ws.send(json.dumps({"type": "end"}))
+        # The mic stops here. Silence on the wire is how the gateway knows the
+        # floor is free, and a finished errand waits for exactly that.
 
 
 async def main() -> None:
@@ -225,6 +246,12 @@ async def main() -> None:
     ap.add_argument("--hotkey", default="ctrl+alt+space")
     ap.add_argument("--wake-word", default="", help="openWakeWord model name, e.g. hey_jarvis. Empty disables.")
     ap.add_argument("--wake-threshold", type=float, default=0.5)
+    # Recorded on every turn and every brief in the Ledger. There is one user and
+    # the answer is always the same, which is exactly why it is worth sending
+    # now: isolation can be built later on top of attributed history, and
+    # attribution cannot be recovered retroactively.
+    ap.add_argument("--device", default="workstation", help="how this client is named in the ledger")
+    ap.add_argument("--speaker", default="", help="who is talking; blank uses the lab default")
     args = ap.parse_args()
 
     url = f"ws://{args.host}:{args.port}/v1/stream"
@@ -265,16 +292,44 @@ async def main() -> None:
     print("ctrl+c to quit\n")
 
     loop = asyncio.get_running_loop()
+
+    async def serve() -> None:
+        """Hold one connection, take turns on it, until it drops."""
+        async with websockets.connect(url, compression=None, max_size=None) as ws:
+            presence = Presence(ws, play, args.device, args.speaker)
+            ready = await presence.hello()
+            note = []
+            if ready.get("resumed"):
+                note.append(f"{ready['resumed']} turns resumed")
+            if ready.get("working"):
+                note.append(f"{ready['working']} errand(s) in flight")
+            if ready.get("waiting"):
+                note.append(f"{ready['waiting']} result(s) waiting")
+            print(f"  connected{' — ' + ', '.join(note) if note else ''}")
+            # Receiving runs for the whole connection, not just during a turn:
+            # that is what lets an errand come back twenty minutes later.
+            listener = asyncio.create_task(presence.receive_forever())
+            try:
+                while not listener.done():
+                    mode = await loop.run_in_executor(None, trigger.get)
+                    while not mic.empty():  # drop pre-trigger audio
+                        mic.get_nowait()
+                    await presence.turn(mode, mic, hold)
+                    play.flush()
+            finally:
+                listener.cancel()
+
     try:
         while True:
-            mode = await loop.run_in_executor(None, trigger.get)
-            while not mic.empty():  # drop pre-trigger audio
-                mic.get_nowait()
             try:
-                await do_turn(url, mode, mic, play, hold)
+                await serve()
             except (OSError, websockets.WebSocketException) as exc:
-                print(f"  ! gateway unreachable: {exc}", file=sys.stderr)
-            play.flush()
+                # Both boxes are wifi-only, so a dropped socket is routine rather
+                # than exotic. Reconnecting is not a fallback path — it is the
+                # normal one, and the conversation survives it because the Ledger
+                # holds it, not this process.
+                print(f"  ! gateway unreachable: {exc}; retrying", file=sys.stderr)
+                await asyncio.sleep(2.0)
     except KeyboardInterrupt:
         pass
     finally:

@@ -30,8 +30,22 @@ client = [
     "pynput>=1.7",
 ]
 
+# The tests. Not installed on ser5 — the box runs the service, not the suite.
+# pytest-asyncio in auto mode so async tests need no per-test decorator; the
+# ledger and the bench are both async all the way down.
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "httpx>=0.27",
+]
+
 [project.scripts]
 voice-gateway = "voice_gateway.__main__:main"
+voice-bench = "voice_gateway.bench.__main__:main"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
 
 [build-system]
 requires = ["setuptools>=68"]

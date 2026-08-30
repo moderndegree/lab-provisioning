@@ -88,6 +88,25 @@ enable_searxng: false         # SearXNG metasearch backend for Open WebUI web se
 enable_voice: false           # Speech in/out: speaches (STT+TTS) + the voice gateway on :8772
                               # Needs enable_searxng for the "search for ..." route, and
                               # mini's llama-server on :8090 for every spoken answer.
+                              # See docs/presence.md for what this is trying to be.
+
+enable_voice_bench: false     # The deep tier: voice-bench.service, briefs into results on
+                              # mini's :8091. ALSO flips the presence from refusing errands
+                              # out loud to dispatching them — one flag, because two could
+                              # disagree and the presence would promise work nothing does.
+
+voice_presence_network: true  # Whether the PRESENCE may reach SearXNG on the fast path.
+                              # false is the honest posture (errands are the bench's job,
+                              # and a search turn costs ~1.6s on a sub-600ms budget); true
+                              # only until enable_voice_bench takes retrieval over.
+
+voice_locality_enforce: false # Load the nftables table that lets only the bench's cgroup
+                              # reach past the tailnet. Read the cgroup path off the running
+                              # unit before enabling — see roles/voice/defaults/main.yml.
+
+enable_voice_hands: false     # Let spoken commands act on the box. Ships read-only actions
+                              # only; irreversible ones are declared by you, in
+                              # voice_gateway/hands/registry.py, and always confirmed aloud.
 
 # ─── Cloudflare Zero Trust tunnel ────────────────────────────────────────────
 # System-level Podman quadlet. Token lives in vault (vault_cloudflared_token).

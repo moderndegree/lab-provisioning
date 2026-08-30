@@ -101,3 +101,40 @@
   when: >-
     ansible_facts.services['prometheus-node-exporter.service'] is not defined
     or ansible_facts.services['prometheus-node-exporter.service'].state != 'running'
+
+# ─── Wi-Fi power save ────────────────────────────────────────────────────────
+# Asks `iw` for the LIVE value. Deliberately does not ask systemd: the unit that
+# sets this is a oneshot, and a oneshot reports `active (exited)` forever whether
+# or not what it did still holds — the exact shape that hid a ten-hour
+# observability outage on ser5. A driver reload, a firmware update or an
+# interface rename all put power save back on with nothing reporting a fault.
+#
+# The cost of missing it is not an outage, which is why it needs a check at all:
+# everything keeps working, slightly and intermittently worse. Measured
+# ser5 -> mini, 60 pings: avg 22.064 ms and a 175 ms worst case with it on,
+# against 6.543 ms and 11.671 ms with it off.
+- name: Read 802.11 power save on every wireless interface
+  ansible.builtin.shell: |
+    set -o pipefail
+    for n in $(ls -1 /sys/class/net); do
+      [ -d "/sys/class/net/$n/wireless" ] || continue
+      echo "$n=$(iw dev "$n" get power_save 2>/dev/null | awk '{print $3}')"
+    done
+  args:
+    executable: /bin/bash
+  register: verify_wifi_powersave
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Flag wireless interfaces still in power save
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'wifi power save is ON for ' ~ (item | regex_replace('=.*$', '')) ~
+        ' — inbound packets wait for the next DTIM beacon. Measured cost on this '
+        ~ 'link: avg 22ms and a 175ms worst case, against 6.5ms and 11.7ms with '
+        ~ 'it off. Every voice turn crosses this twice.'
+      ] }}
+  loop: "{{ verify_wifi_powersave.stdout_lines | default([]) }}"
+  when: item.endswith('=on')
