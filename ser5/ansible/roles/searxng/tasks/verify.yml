@@ -1,0 +1,112 @@
+---
+# Read-only probes for roles/searxng. Appends to `problems`; changes nothing.
+#
+# This role had no verify.yml at all until the voice role's plan flagged it as
+# a gap: voice-gateway depends on SearXNG answering, and until now nothing
+# asked SearXNG directly whether it does — only indirectly, via whatever
+# consumed it.
+
+- name: Check the SearXNG unit is active
+  ansible.builtin.command: systemctl --user is-active searxng.service
+  become: true
+  become_user: "{{ username }}"
+  environment: "{{ user_systemd_env }}"
+  register: verify_searxng_unit
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Flag an inactive SearXNG
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + ['searxng.service is ' ~ (verify_searxng_unit.stdout | default('unknown')) ~ '.'] }}
+  when: verify_searxng_unit.stdout | default('') != 'active'
+
+# Ask the search API itself, not just the container health check — a container
+# can be "healthy" while the search engines behind it are all erroring out.
+- name: Check SearXNG actually returns search results
+  ansible.builtin.uri:
+    url: "http://{{ searxng_host }}:{{ searxng_port }}/search?q=test&format=json"
+    timeout: "{{ verify_http_timeout }}"
+    return_content: true
+  register: verify_searxng_search
+  failed_when: false
+  check_mode: false
+
+- name: Flag SearXNG not answering
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'SearXNG is not answering on ' ~ searxng_host ~ ':' ~ searxng_port ~ '.'
+      ] }}
+  when: verify_searxng_search.status | default(0) != 200
+
+- name: Flag SearXNG answering with no results field
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'SearXNG returned 200 but the JSON has no "results" key — the JSON format '
+        ~ 'may be disabled in settings.yml, which fails Open WebUI and voice-gateway '
+        ~ 'searches identically: silently, with an empty answer.'
+      ] }}
+  when:
+    - verify_searxng_search.status | default(0) == 200
+    - verify_searxng_search.json is not defined or 'results' not in verify_searxng_search.json
+
+# searxng_autoupdate leaves a stale `:latest` pull invisible unless the timer
+# that would actually fetch a new one is running. Unlike the roles that pin an
+# exact tag, this role has no version to compare against — the timer being live
+# IS the freshness guarantee, so its absence is the whole finding.
+#
+# NOTE: nothing in this role enables podman-auto-update.timer; roles/openwebui
+# and roles/cloudflared do. SearXNG exists to serve Open WebUI, so in practice
+# enable_openwebui is always true alongside it — but if that ever stops being
+# true, searxng_autoupdate: true silently does nothing, and this is where that
+# would first show up.
+- name: Check the podman auto-update timer is active
+  ansible.builtin.command: systemctl --user is-active podman-auto-update.timer
+  become: true
+  become_user: "{{ username }}"
+  environment: "{{ user_systemd_env }}"
+  register: verify_searxng_autoupdate_timer
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: searxng_autoupdate | bool
+
+- name: Flag SearXNG configured to auto-update with no timer running it
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'searxng_autoupdate is true but podman-auto-update.timer is '
+        ~ (verify_searxng_autoupdate_timer.stdout | default('unknown'))
+        ~ ' — SearXNG is pinned to :latest and nothing will ever pull a newer one. '
+        ~ 'Enable roles/openwebui or roles/cloudflared (either enables the timer), '
+        ~ 'or start it by hand.'
+      ] }}
+  when:
+    - searxng_autoupdate | bool
+    - verify_searxng_autoupdate_timer.stdout | default('') != 'active'
+
+# SearXNG is deliberately loopback-only — no UFW rule, unlike hermes/voice —
+# because it is meant to be reached only by other containers on openwebui.network
+# via the container name, not from outside ser5 at all. Confirm the deployed
+# quadlet still says so; a future default change to 0.0.0.0 would put a metasearch
+# proxy on the wifi LAN with no UFW rule catching it, because none is expected.
+- name: Read the deployed SearXNG quadlet
+  ansible.builtin.slurp:
+    src: "{{ user_home }}/.config/containers/systemd/searxng.container"
+  register: verify_searxng_quadlet
+  failed_when: false
+
+- name: Flag SearXNG published on more than loopback
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'SearXNG'"'"'s quadlet publishes on ' ~ searxng_host ~ ', not 127.0.0.1 — it is '
+        ~ 'reachable beyond ser5 itself with no UFW rule scoping it, because none is '
+        ~ 'expected for a loopback-only service.'
+      ] }}
+  when:
+    - verify_searxng_quadlet.content is defined
+    - searxng_host != '127.0.0.1'

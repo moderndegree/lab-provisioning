@@ -101,6 +101,12 @@
         tasks_from: verify
       when: enable_observability | bool
 
+    - name: Verify SearXNG
+      ansible.builtin.include_role:
+        name: searxng
+        tasks_from: verify
+      when: enable_searxng | default(false) | bool
+
     - name: Verify the voice stack
       ansible.builtin.include_role:
         name: voice
