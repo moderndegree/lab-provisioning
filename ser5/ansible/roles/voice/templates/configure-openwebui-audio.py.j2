@@ -1,0 +1,44 @@
+"""Point an existing Open WebUI DB at speaches/whisper-stt for voice.
+
+Idempotent. Open WebUI reads these PersistentConfig keys on the next request
+(or after a container restart). Does nothing if the DB file is missing.
+
+Sibling to roles/searxng/templates/configure-openwebui.py.j2, which does the
+same thing for web search — kept as a separate script because it is a
+separate concern gated by a different role/flag, not because the mechanism
+differs.
+
+Key names verified against a live Open WebUI database (`SELECT key FROM
+config WHERE key LIKE 'audio.%'`), not guessed from memory of the source —
+Open WebUI seeds every PersistentConfig key with a default on first start,
+which is the only reliable way to know the exact nesting.
+"""
+import json
+import sqlite3
+import time
+
+DB = {{ openwebui_db_path | to_json }}
+NOW = int(time.time())
+UPDATES = {
+    "audio.stt.engine": "openai",
+    "audio.stt.openai.api_base_url": {{ voice_stt_url_openwebui | to_json }},
+    "audio.stt.openai.api_key": {{ voice_openwebui_api_key | to_json }},
+    "audio.stt.model": {{ voice_stt_model | to_json }},
+    "audio.tts.engine": "openai",
+    "audio.tts.openai.api_base_url": {{ voice_tts_url_openwebui | to_json }},
+    "audio.tts.openai.api_key": {{ voice_openwebui_api_key | to_json }},
+    "audio.tts.model": {{ voice_tts_model | to_json }},
+    "audio.tts.voice": {{ voice_tts_voice | to_json }},
+}
+
+con = sqlite3.connect(DB)
+cur = con.cursor()
+for key, value in UPDATES.items():
+    cur.execute(
+        "INSERT INTO config(key, value, updated_at) VALUES (?, ?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+        (key, json.dumps(value), NOW),
+    )
+con.commit()
+con.close()
+print("updated", len(UPDATES), "openwebui audio config keys")

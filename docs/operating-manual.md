@@ -160,6 +160,14 @@ Reach for it when: your hands are busy, you want an answer rather than a
 document, or you want to hand a long job to Hermes without sitting down. Say
 "search for X" to route through SearXNG; say "have hermes ..." to delegate.
 
+Also wired into **Open WebUI** (`roles/voice/templates/configure-openwebui-audio.py.j2`,
+runs automatically whenever both `enable_voice` and `enable_openwebui` are
+true) — the mic/speaker buttons in the browser and on the iPhone use the same
+mini-GPU STT and speaches TTS, no separate setup. That path is
+record-then-transcribe-then-send, not the gateway's live streaming loop with
+barge-in — reach for the desktop client instead when the turn-by-turn feel
+matters, Open WebUI when you just want voice in a browser tab.
+
 Start it:
 
 ```bash

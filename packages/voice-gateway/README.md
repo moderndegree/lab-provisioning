@@ -184,6 +184,22 @@ VAD hangover entirely — that is why push-to-talk is the fast path. With
 `--wake-word` the phrase opens a turn hands-free and the gateway's VAD decides
 when you stopped.
 
+## Open WebUI
+
+`roles/voice/tasks/main.yml` also points Open WebUI's `audio.stt.*`/
+`audio.tts.*` PersistentConfig at whichever STT backend is active and at
+speaches for TTS — automatic whenever both `enable_voice` and
+`enable_openwebui` are true, no separate step. Gives mic/speaker in the
+browser and on the iPhone. This is Open WebUI's own record → transcribe →
+send flow, not this package's streaming loop — no barge-in, no sentence
+chunking, no sub-second turnaround. Use the desktop client above when that
+matters.
+
+`voice-speech`'s quadlet joins `openwebui.network` when `enable_openwebui` is
+true (in addition to its usual loopback publish) specifically so this works:
+Open WebUI's backend calls STT/TTS from inside its own container, where
+`127.0.0.1` means the openwebui container itself, not ser5.
+
 ## Benchmarking
 
 ```bash

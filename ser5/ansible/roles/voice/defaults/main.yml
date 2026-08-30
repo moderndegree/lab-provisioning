@@ -155,6 +155,34 @@ voice_stt_model: >-
   {{ 'ggml-base.en.bin' if voice_stt_backend == 'mini'
      else 'Systran/faster-whisper-base.en' }}
 
+# ─── Open WebUI voice wiring ──────────────────────────────────────────────────
+# Self-gates on Open WebUI's own DB existing (tasks/main.yml), same idiom
+# roles/searxng already uses for its own config script — no separate
+# enable_openwebui check needed.
+#
+# openwebui_db_path is ALSO defined in roles/searxng/defaults/main.yml with the
+# identical value. Duplicated deliberately rather than relied on cross-role:
+# this role's own audio wiring must not silently depend on searxng happening to
+# be enabled (or loaded first in site.yml) just to know where Open WebUI's
+# database is.
+openwebui_db_path: "{{ data_mount }}/services/openwebui/data/webui.db"
+
+# Open WebUI's backend calls STT/TTS from INSIDE its own container, on
+# openwebui.network — 127.0.0.1 there means the openwebui container itself,
+# not this host, and speaches is loopback-only on ser5. voice-speech.container.j2
+# joins openwebui.network when enable_openwebui is true specifically so
+# `voice-speech` resolves there. mini needs no such join: Open WebUI's existing
+# LLM chat backends (openwebui_openai_base_urls) already reach it by hostname,
+# proving that path already works.
+voice_stt_url_openwebui: >-
+  {{ ('http://mini:8092' if voice_stt_backend == 'mini' else 'http://voice-speech:8000') ~ '/v1' }}
+voice_tts_url_openwebui: "http://voice-speech:8000/v1"
+
+# speaches/whisper-stt enforce no auth; Open WebUI's OpenAI-compatible client
+# still wants a non-empty key. Same placeholder roles/openwebui already uses
+# for mini's equally-unauthenticated llama-server (openwebui_openai_api_keys).
+voice_openwebui_api_key: "llamacpp"
+
 # ─── Reasoning: mini, directly ───────────────────────────────────────────────
 # NOT through Hermes. `hermes proxy` on :8645 is a Nous Portal proxy that
 # forwards to a Nous subscription regardless of its configured model.base_url,

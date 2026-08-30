@@ -6,18 +6,29 @@
 #   /v1/audio/speech           piper, en_US-amy-medium
 # See defaults/main.yml for the measurements behind both choices.
 #
-# Loopback-only. The gateway is the only thing that talks to it and runs on this
-# same host; nothing on the tailnet needs it. Open WebUI, when it is pointed
-# here in a later pass, is also local.
+# Loopback-only via PublishPort — nothing on the tailnet needs this, and that
+# does not change below. Open WebUI is the exception: its backend calls STT/TTS
+# from INSIDE its own container, where 127.0.0.1 means the openwebui container
+# itself, not this host — so when enable_openwebui is true, this container ALSO
+# joins openwebui.network (same reason roles/searxng does), reachable there by
+# its ContainerName. PublishPort still works identically either way; joining an
+# extra named network does not touch host port publishing.
 
 [Unit]
 Description=speaches — speech to text and text to speech for the voice gateway
+{% if enable_openwebui | default(false) | bool %}
+After=network-online.target openwebui-network.service
+{% else %}
 After=network-online.target
+{% endif %}
 Wants=network-online.target
 
 [Container]
 Image={{ voice_speech_image }}
 ContainerName=voice-speech
+{% if enable_openwebui | default(false) | bool %}
+Network=openwebui.network
+{% endif %}
 PublishPort={{ voice_speech_host }}:{{ voice_speech_port }}:8000
 
 # UserNS=keep-id is REQUIRED, not stylistic. The image runs as its own `ubuntu`

@@ -242,3 +242,30 @@
         interface: "{{ voice_tailnet_interface }}"
         to_port: "{{ voice_gateway_port }}"
         proto: tcp
+
+    # ─── Open WebUI voice wiring ────────────────────────────────────────────
+    # Same self-gating idiom as roles/searxng's identical step: check for the
+    # DB rather than enable_openwebui directly, so this naturally does nothing
+    # if Open WebUI has never actually run.
+    - name: Check for an existing Open WebUI database
+      ansible.builtin.stat:
+        path: "{{ openwebui_db_path }}"
+      register: voice_openwebui_db
+
+    - name: Write Open WebUI audio config helper
+      ansible.builtin.template:
+        src: configure-openwebui-audio.py.j2
+        dest: "{{ voice_data_dir }}/configure-openwebui-audio.py"
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0750"
+      when: voice_openwebui_db.stat.exists
+
+    - name: Point Open WebUI's audio PersistentConfig at voice
+      ansible.builtin.command:
+        cmd: python3 {{ voice_data_dir }}/configure-openwebui-audio.py
+      register: voice_openwebui_audio_config
+      changed_when: true
+      when:
+        - voice_openwebui_db.stat.exists
+        - not ansible_check_mode
