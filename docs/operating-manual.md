@@ -16,7 +16,7 @@ This lab is three things: the dev environment for a solo AI consulting practice,
 
 | Tier | Name | Endpoint | Use it for | Never use it for | Rationale |
 |---|---|---|---|---|---|
-| L | Sovereign | llama-server on mini over the tailnet (`:8090` quality, `:8091` throughput) | Client-confidential work, lab operations, private evals | Public chat gateways | Default tier. Data never leaves controlled hardware. |
+| L | Sovereign | llama-server on mini over the tailnet (`:8090` quality, `:8091` deep) | Client-confidential work, lab operations, private evals | Public chat gateways | Default tier. Data never leaves controlled hardware. |
 | G | Governed | GitHub Copilot Pro+ with data retention disabled | Owner repos, infra, client work with written consent | Client-confidential work without consent | Frontier quality, flat-rate economics, strong ergonomics. |
 | X | Personal | xAI SuperGrok / Grok Build | Own repos, research, long autonomous runs | Client-confidential material | Useful autonomy; not a confidentiality boundary. |
 | Z | Throwaway | OpenCode Zen free models | OSS scaffolding only | Client deliverables | Fine for disposable glue; not where quality or privacy lives. |
@@ -228,9 +228,9 @@ Start it: run AI Workstation with `CORTEX_VAULT_DIR=/data/brain`, or open `/data
 | Symptom | Likely cause | Check | Fix |
 |---|---|---|---|
 | First request is suddenly slow | Instance restarted and is reloading weights | `systemctl --user status llama-quality llama-deep` on mini | Wait out the load; llama-server holds weights for the process lifetime, so this is a restart, not eviction. |
-| Nothing streams for minutes | Prefill wall, or thinking | Prompt size versus the slot window (262144 on :8090, 131072 on :8091); check whether `reasoning_content` is filling instead of `content` | Cut context, or disable thinking with `chat_template_kwargs: {enable_thinking: false}`. |
+| Nothing streams for minutes | Prefill wall, or thinking | Prompt size versus the slot window (262144 on both; `:8090` × 4 slots, `:8091` × 1); check whether `reasoning_content` is filling instead of `content` | Cut context, or disable thinking with `chat_template_kwargs: {enable_thinking: false}`. |
 | A model is missing from the list | That instance is down, or Ollama got started and is contending | `curl mini:8090/v1/models`, `curl mini:8091/v1/models`, `systemctl is-active ollama` on mini | Restart the instance; stop Ollama — it and llama-server cannot both hold weights in 122 GiB. |
-| Jobs queue behind each other | More concurrent requests than slots (4 on `:8090`, 8 on `:8091`) | `llamacpp:requests_deferred` and `llamacpp:requests_processing` in Prometheus | Let it queue, or send bulk fan-out to `:8091`. Raising slots lowers ctx/slot. |
+| Jobs queue behind each other | More concurrent requests than slots (4 on `:8090`, 1 on `:8091`) | `llamacpp:requests_deferred` and `llamacpp:requests_processing` in Prometheus | Let it queue. Do not send the critic fan-out to `:8091` — that serialises at 4× the latency. Raising slots lowers ctx/slot. |
 | Throughput is far below the table | Estimate treated as fact | Re-measure with `packages/inference-bench` | Keep `(est.)` labels until measured; adopt only measured wins. |
 | A voice turn takes seconds instead of about one | Prefix-cache miss on mini — the system prompt drifted, so every turn pays a cold prefill | Compare `/data/services/voice/system-prompt.md` against the copy in `roles/voice/files/`; 774 ms cold vs 75 ms warm | Restore the file and restart `voice-gateway`. It is byte-stable on purpose. |
 | Voice hears nothing, but everything is "active" | speaches holds no model — it does NOT download on demand and returns 500 | `curl 127.0.0.1:8770/v1/models`, or `cd ser5 && make verify` | Re-run `make provision`; it pre-pulls each model in `voice_speech_models`. |

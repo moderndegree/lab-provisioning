@@ -114,8 +114,12 @@ Bad answers usually come from thin handoffs. Full rules:
 `.moderndegree/skills/task-package.md`.
 
 - Orchestrator **must** clarify the problem and build a **TASK PACKAGE** (goal,
-  done-when, constraints, assumptions, pasted context excerpts) before dispatching
-  any non-trivial subagent.
+  done-when, constraints, assumptions, **paths not payloads**) before dispatching
+  any non-trivial subagent. `task` arguments are JSON: fenced code and a pasted
+  implementation plan break the parser (`invalid` / unterminated string,
+  measured 2026-08-22) and the subagent never starts. Point at ASK.md / seams.
+  An `invalid` result → one shorter retry, then stop. Narrating "READY TO
+  DISPATCH" without a `task` call is a failed turn.
 - **Cortex (second brain): dispatch `librarian`, do not search yourself.** The
   orchestrator holds no vault tools — a prose "cortex pass" never fired once in
   measured runs, so recall is a `task` call now. `librarian` returns 1–3 note
@@ -179,9 +183,9 @@ The orchestrator must not edit files, write implementations, run tests, or read 
 file in full to "understand the repo". Those are dispatches, not shortcuts.
 
 Roles live in agent prompts, not baked model variants. Reasoning mode is set
-per agent via `reasoningEffort` in `opencode.json` (`"none"` on the
-orchestrator and devops for deterministic tool dispatch; everything else
-thinks). `reasoningEffort: "none"` maps to `reasoning_effort` on the wire and
+per agent via `reasoningEffort` in `opencode.json` (`"none"` on devops only.
+The orchestrator must NOT have it — measured 2026-08-05, it drops subagent
+dispatches to zero. Everything else thinks). `reasoningEffort: "none"` maps to `reasoning_effort` on the wire and
 **llama-server honours it** — verified 2026-08-04, 660 reasoning characters
 drop to 0 with the same final answer. (`chat_template_kwargs.enable_thinking:
 false` does the same thing and is what you use when calling the endpoint
@@ -208,8 +212,9 @@ work through Ollama's `/v1` endpoint — never rely on them.
 Vault at `/data/brain`; OpenCode loads **cortex** MCP (`opencode.json`). Full
 rules: `.moderndegree/skills/second-brain.md` and the cortex pass in task-package.
 
-- **Before work:** search vault → 1–3 notes into TASK PACKAGE.
-- **After painful misses:** `cortex_vault_capture` (preferred) or postmortem file; promote
-  durable rules to ACE playbooks.
+- **Before work:** dispatch `librarian` (RECALL) → 1–3 notes into TASK PACKAGE.
+- **After painful misses:** `qa` calls `cortex_vault_capture` before it closes
+  (the run ends at its `@@RESULT`; an orchestrator capture afterwards never
+  fires). Promote durable rules to ACE playbooks.
 - Do not treat unreviewed drafts as ground truth; no client secrets in the vault.
 

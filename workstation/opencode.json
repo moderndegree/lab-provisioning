@@ -8,8 +8,8 @@
         "apiKey": "llamacpp"
       },
       "models": {
-        "qwen3.6-35b-a3b-mtp": {
-          "name": "Qwen3.6 35B-A3B MTP (general — 262144 ctx, 4 slots, ~80-90 t/s solo)",
+        "qwen3.8-flash-next": {
+          "name": "Qwen3.8 Flash-Next UD-Q4_K_XL (general — 262144 ctx, 1 slot)",
           "limit": {
             "context": 262144,
             "output": 8192
@@ -20,15 +20,15 @@
     "deep": {
       "npm": "@ai-sdk/openai-compatible",
       "options": {
-        "baseURL": "http://mini:8091/v1",
+        "baseURL": "http://mini:8090/v1",
         "apiKey": "llamacpp"
       },
       "models": {
-        "qwen3.8-27b": {
-          "name": "Qwen3.8 27B (coding — 262144 ctx, 1 slot, ~19 t/s, reasoning_effort=medium server-side)",
+        "qwen3.8-flash-next": {
+          "name": "Qwen3.8 Flash-Next UD-Q4_K_XL (coding — same :8090 slot, 262144 ctx)",
           "limit": {
             "context": 262144,
-            "output": 8192
+            "output": 32768
           }
         }
       }
@@ -36,8 +36,8 @@
     "github-copilot": {},
     "xai": {}
   },
-  "model": "quality/qwen3.6-35b-a3b-mtp",
-  "small_model": "quality/qwen3.6-35b-a3b-mtp",
+  "model": "quality/qwen3.8-flash-next",
+  "small_model": "quality/qwen3.8-flash-next",
   "compaction": {
     "auto": true,
     "prune": true,
@@ -64,7 +64,7 @@
   "agent": {
     "build": {
       "mode": "primary",
-      "model": "quality/qwen3.6-35b-a3b-mtp",
+      "model": "quality/qwen3.8-flash-next",
       "permission": {
         "edit": "deny",
         "write": "deny",
@@ -81,12 +81,12 @@
         "read_mcp_resource": "deny",
         "list_mcp_resource_templates": "deny"
       },
-      "description": "Orchestrator. Routes work; does NOT do it. DO NOT add reasoningEffort:'none' here \u2014 measured 2026-08-05, it drops subagent dispatches to ZERO (the model stops deciding to delegate). The edit/write/patch/bash denials are load-bearing too: with prose alone the no-implementation rule held on some runs and not others.",
+      "description": "Orchestrator. Routes work; does NOT do it. DO NOT add reasoningEffort:'none' here — measured 2026-08-05, it drops subagent dispatches to ZERO (the model stops deciding to delegate). The edit/write/patch/bash denials are load-bearing too: with prose alone the no-implementation rule held on some runs and not others.",
       "prompt": "{file:./.moderndegree/prompts/orchestrator.md}"
     },
     "planner": {
       "mode": "subagent",
-      "model": "quality/qwen3.6-35b-a3b-mtp",
+      "model": "quality/qwen3.8-flash-next",
       "description": "Produces an implementation plan from context provided in-prompt. Reasoning only.",
       "permission": {
         "task": "deny",
@@ -101,8 +101,8 @@
     },
     "architect": {
       "mode": "subagent",
-      "model": "deep/qwen3.8-27b",
-      "description": "Designs structure and interfaces from provided context. Reasoning only. On the DEEP endpoint (:8091) deliberately \u2014 architecture errors are the most expensive to find late, and this agent runs ONCE per task, so its ~4x latency (59s -> 247s on a measured design task) is paid once rather than in a loop. Measured 2026-08-14 head-to-head on the same brief: 3.8 specified FOR UPDATE SKIP LOCKED as the work-queue primitive while 3.6 specified a polling worker pool with no concurrency control (a double-delivery bug), and quantified its trade-offs where 3.6 argued them generically. Shares :8091's SINGLE slot with `deep`, so a concurrent architect+deep dispatch queues.",
+      "model": "deep/qwen3.8-flash-next",
+      "description": "Designs structure and interfaces from provided context. Reasoning only. Shares mini:8090's single Flash-Next slot with the rest of the team, so a concurrent architect+deep dispatch queues.",
       "permission": {
         "task": "deny",
         "*": "deny",
@@ -112,13 +112,15 @@
         "list": "allow"
       },
       "prompt": "{file:./.moderndegree/prompts/architect.md}",
+      "reasoningEffort": "medium",
       "steps": 80
     },
     "coder": {
-      "mode": "subagent",
-      "model": "deep/qwen3.8-27b",
-      "description": "Implements changes. Edits files, verifies they parse/build. On DEEP (:8091) with architect — 27B is the coding model. ONE slot shared with architect+deep, so a concurrent dispatch queues. Slower (~19 t/s) than the 35B; paid because implementation quality compounds.",
+      "mode": "primary",
+      "model": "deep/qwen3.8-flash-next",
+      "description": "Implements changes. Edits files, verifies they parse/build. On mini:8090 Flash-Next with architect — ONE slot shared with architect+deep, so a concurrent dispatch queues.",
       "prompt": "{file:./.moderndegree/prompts/coder.md}",
+      "reasoningEffort": "medium",
       "permission": {
         "task": "deny",
         "external_directory": "allow"
@@ -127,7 +129,7 @@
     },
     "devops": {
       "mode": "subagent",
-      "model": "quality/qwen3.6-35b-a3b-mtp",
+      "model": "quality/qwen3.8-flash-next",
       "reasoningEffort": "none",
       "description": "Infra and shell operations. Deterministic, no reasoning.",
       "prompt": "{file:./.moderndegree/prompts/devops.md}",
@@ -139,8 +141,8 @@
     },
     "reviewer": {
       "mode": "subagent",
-      "model": "quality/qwen3.6-35b-a3b-mtp",
-      "description": "Critiques diffs handed to it. Reasoning only. FAN-OUT agent \u2014 dispatched in parallel with the other critics. Since 2026-08-14 the critics share :8090 with the orchestrator (4 slots), so a 4-wide fan-out fully occupies the endpoint and the orchestrator queues behind it.",
+      "model": "quality/qwen3.8-flash-next",
+      "description": "Critiques diffs handed to it. Reasoning only. FAN-OUT agent — dispatched in parallel with the other critics. Since 2026-08-14 the critics share :8090 with the orchestrator (4 slots), so a 4-wide fan-out fully occupies the endpoint and the orchestrator queues behind it.",
       "permission": {
         "task": "deny",
         "*": "deny",
@@ -154,7 +156,7 @@
     },
     "security-auditor": {
       "mode": "subagent",
-      "model": "quality/qwen3.6-35b-a3b-mtp",
+      "model": "quality/qwen3.8-flash-next",
       "description": "Audits provided diffs for security issues. Reasoning only. FAN-OUT agent.",
       "permission": {
         "task": "deny",
@@ -169,7 +171,7 @@
     },
     "tester": {
       "mode": "subagent",
-      "model": "quality/qwen3.6-35b-a3b-mtp",
+      "model": "quality/qwen3.8-flash-next",
       "description": "Writes and runs tests, reads results. FAN-OUT agent.",
       "prompt": "{file:./.moderndegree/prompts/tester.md}",
       "permission": {
@@ -180,7 +182,7 @@
     },
     "doc-writer": {
       "mode": "subagent",
-      "model": "quality/qwen3.6-35b-a3b-mtp",
+      "model": "quality/qwen3.8-flash-next",
       "description": "Writes docs from provided material. Reasoning only. FAN-OUT agent.",
       "permission": {
         "task": "deny",
@@ -195,7 +197,7 @@
     },
     "qa": {
       "mode": "subagent",
-      "model": "quality/qwen3.6-35b-a3b-mtp",
+      "model": "quality/qwen3.8-flash-next",
       "description": "Final acceptance gate. Runs the delivered system against its DONE-WHEN list black-box, with real dependencies, and pastes actual output per criterion. Distinct from tester: tester proves the logic, qa proves the thing works. Runs AFTER the critic fan-out, not inside it. Runs ALONE, after the fan-out has drained. There is no longer a second endpoint to split across: the throughput endpoint was retired 2026-08-14 because :8090 with MTP beat it on BOTH aggregate and single-stream. Measured 2026-08-05: on gpt-oss-20b it spent 11 of 17 tool calls globbing and reading (which qa.md forbids) and never emitted its @@RESULT block at all, so the orchestrator improvised an extra tester dispatch that then hung the run.",
       "prompt": "{file:./.moderndegree/prompts/qa.md}",
       "permission": {
@@ -209,8 +211,8 @@
     },
     "librarian": {
       "mode": "subagent",
-      "model": "quality/qwen3.6-35b-a3b-mtp",
-      "description": "Second brain. RECALL: searches the cortex vault for prior lessons before work starts. CAPTURE: records a lesson after a run with a real miss. The ONLY agent with vault tools \u2014 the orchestrator is denied them, because measured 2026-08-05 a prose \"cortex pass\" never fired once while a dispatch does.",
+      "model": "quality/qwen3.8-flash-next",
+      "description": "Second brain. RECALL: searches the cortex vault for prior lessons before work starts. CAPTURE: records a lesson after a run with a real miss. The ONLY agent with vault tools — the orchestrator is denied them, because measured 2026-08-05 a prose \"cortex pass\" never fired once while a dispatch does.",
       "permission": {
         "task": "deny",
         "*": "deny",
@@ -231,8 +233,8 @@
     },
     "deep": {
       "mode": "subagent",
-      "model": "deep/qwen3.8-27b",
-      "description": "Hard problems only. qwen3.8-27b on :8091 \u2014 ONE slot, ~4x slower; a second dispatch queues behind it.",
+      "model": "deep/qwen3.8-flash-next",
+      "description": "Hard problems only. qwen3.8-flash-next on :8090 — ONE slot; a second dispatch queues behind it.",
       "permission": {
         "task": "deny",
         "*": "deny",
@@ -242,6 +244,7 @@
         "list": "allow"
       },
       "prompt": "{file:./.moderndegree/prompts/deep.md}",
+      "reasoningEffort": "medium",
       "steps": 80
     },
     "research": {

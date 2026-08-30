@@ -11,10 +11,12 @@ Wants=network-online.target
 Image={{ openwebui_image }}
 ContainerName=openwebui
 Network=openwebui.network
-# mini is a different physical machine, reached over the tailnet — DNSSearch=
-# is what makes "mini" resolve here (Tailscale MagicDNS suffix).
+# Tailnet hosts (mini, desktop) are different machines — DNSSearch= is what
+# makes short MagicDNS names resolve here.
 DNSSearch={{ tailnet_dns_search }}
+Environment=ENABLE_OLLAMA_API={{ openwebui_enable_ollama_api | lower }}
 Environment=OLLAMA_BASE_URL={{ openwebui_ollama_base_url }}
+Environment=OLLAMA_BASE_URLS={{ openwebui_ollama_base_urls }}
 # llama-server speaks the OpenAI API, not Ollama's, so it needs its own wiring — see
 # openwebui_openai_base_urls in defaults/main.yml. Plural *_URLS/*_KEYS is the
 # multi-endpoint form; the lists are positional and an empty key drops that

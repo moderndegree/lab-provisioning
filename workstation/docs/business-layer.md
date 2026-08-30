@@ -60,7 +60,7 @@ judgment."
 
 - **Gateway / remote surfaces:** `ser5/ansible/roles/hermes`.
 - **Inference (Tier L):** `mini/ansible/roles/llamacpp` (two `llama-server`
-  instances, `:8090` quality and `:8091` throughput). Note `ser5/ansible/roles/hermes`
+  instances, `:8090` quality and `:8091` deep). Note `ser5/ansible/roles/hermes`
   above is **not** Tier L today — it egresses to OpenRouter; see `docs/todo.md`.
 - **Agent team:** [../opencode.json](../opencode.json) + [../AGENTS.md](../AGENTS.md).
 - **Operator decision tree:** [../../docs/operating-manual.md](../../docs/operating-manual.md).

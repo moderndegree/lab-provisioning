@@ -6,7 +6,8 @@ The second brain is a **markdown vault** at `/data/brain` (ser5). OpenCode is
 wired to the **cortex** MCP server from ai-workstation (`opencode.json`).
 
 This skill is **required** for: (1) learning after misses, (2) MCP-first capture.
-It does **not** replace TASK PACKAGE (which already requires a cortex search
+It does **not** replace TASK PACKAGE (which already requires a librarian
+RECALL before the package is finished).
 
 ## Cortex tools (use these names)
 
@@ -68,9 +69,10 @@ Drafts are not ground truth until a human accepts. No client-confidential dumps.
 ## Governance
 
 - Personal/lab vault only
-- Packaging + cortex search **before** work; capture **after** misses
+- Packaging + librarian RECALL **before** work; capture **after** misses
+  (`qa` on a real miss — the run ends at its `@@RESULT`)
 
 ## Related
 
-- `task-package.md` — cortex search in the package loop
+- `task-package.md` — librarian RECALL in the package loop
 - `docs/brain.md` — vault layout

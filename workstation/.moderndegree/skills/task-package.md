@@ -7,7 +7,7 @@ understanding and context packaging.** This skill is **mandatory** before
 dispatching any subagent on non-trivial work.
 
 **Packaging means POINTERS, not payloads.** Every subagent except `research` can
-`read`, `grep`, `glob` and `list`. Their context is disposable — 131072 tokens
+`read`, `grep`, `glob` and `list`. Their context is disposable — 262144 tokens
 discarded when they finish — while yours has to survive the whole session. So a
 file you paste costs you permanently and saves them nothing. Give coordinates
 (paths, symbols, ranges), the goal, and done-when; let them fetch the detail.
@@ -16,16 +16,29 @@ Paste literal content only where it is NOT retrievable from the repo: the user's
 own words, a runtime error, a log excerpt, a vault note, a decision you made. A
 change under review is named by its PATHS, not pasted as a diff.
 
+**A package that does not parse is not a package.** `task` arguments are JSON.
+Measured 2026-08-22: a ~28k-character coder prompt full of fenced JSON and
+function bodies failed with `Invalid input for tool task: JSON parsing failed:
+Unterminated string`. Coder never ran. The ASK.md file was already on disk;
+pointing at it would have been a complete handoff.
+
+- No fenced code, no raw `{...}`, no function bodies in the `task` prompt.
+- If ASK.md (or another spec file) is in the repo, name the path. Do not paste it.
+- Architect/planner output stays in *your* context; hand coder **seams and
+  paths**, not the plan verbatim.
+- If a `task` call comes back `invalid`, retry once with a shorter pointer-only
+  prompt. Do not resend the fat one. Do not write "ready to dispatch" as text.
+
 ## Decision tree (follow in order)
 
 1. **Trivial plumbing only** (one known command, pure path copy, single fact
    already in the user message) → no full package; act or answer directly.
 2. Else → build a **TASK PACKAGE** before planner/architect/coder/doc-writer/
    reviewer/security/tester/devops for the real work.
-3. **Cortex (second brain) — required when MCP tools are available.** Before
-   finishing the package, query the vault for prior lessons (see below). If cortex
-   MCP is missing/errors, continue with repo tools only and note
-   `cortex: unavailable` in your final summary — do not block forever.
+3. **Cortex (second brain) — dispatch `librarian` (RECALL), do not search
+   yourself.** You hold no vault tools. A prose "cortex pass" never fired once
+   in measured runs. If librarian returns `cortex: empty` or `unavailable`,
+   continue and note it — do not block forever.
 4. **Prefer tools over user questions.** If the repo/logs/vault can answer it,
    load it. Ask the user only for **blocking** unknowns (intent, priority, risk,
    client consent, which environment). Label everything else as an assumption.
@@ -105,25 +118,22 @@ So when the work touches a framework or library:
 If no skill covers the technology, say so in the package rather than implying
 coverage — an unstated gap is how a plan ends up asserting syntax nobody checked.
 
-## Cortex pass (mandatory when tools exist)
+## Cortex pass (mandatory — a `librarian` dispatch, not a tool you hold)
 
-Use the **cortex** MCP server (configured in `opencode.json`). Pull **1–3**
-relevant notes max into the package — never the whole vault.
+You hold **no vault tools**. Measured 2026-08-05: a prose "cortex pass" never
+fired once, which is why recall is a `task` call now.
 
-| Step | Tool | How |
-|------|------|-----|
-| 1. Search lessons | `cortex_vault_search` | Query from goal keywords + domain (e.g. "ser5 ollama eviction", "postmortem handoff") |
-| 2. Optional list | `cortex_vault_list_notes` | Filter `kind` if useful (`playbook`, `note`) |
-| 3. Read hits | `cortex_vault_get_note` | Only the top 1–3 ids that match this task |
-| 4. Optional neighborhood | `cortex_vault_backlinks` / `cortex_vault_local_graph` | When a hit is central and you need related context |
-| 5. Skip capture here | — | Capture/postmortems are `second-brain.md` after work |
+Dispatch `librarian` with job RECALL before finishing the package. It searches
+and returns 1–3 note excerpts + ids, or `cortex: empty` / `cortex: unavailable`.
+Paste what it returns under **Lessons from vault**. Do not call `cortex_vault_*`
+yourself — the tools are denied, and a denied call is not a BLOCKED report.
 
-Paste into TASK PACKAGE under **Context** as short excerpts + note ids
-(e.g. `notes/postmortems/2026-…`, `playbooks/infra`). Prefer postmortems and
-playbooks over random MOCs unless the MOC is the topic.
+Capture is not this step. `qa` records a miss before it closes; a clean run
+needs none. See `second-brain.md`.
 
-If `cortex_vault_stats` shows `exists: false` or zero notes, skip cortex content and
-proceed (empty vault is fine).
+If librarian reports the vault missing or empty, skip cortex content and proceed
+(empty vault is fine). Note `cortex: empty` or `cortex: unavailable` in your
+final summary — do not block forever.
 
 ## Understanding pass (before first subagent)
 
@@ -139,7 +149,8 @@ Produce (internally; keep terse):
 | Assumptions | Labeled guesses if work proceeds |
 | Context map | Paths, diffs, logs, APIs, **+ cortex note ids** to load |
 
-Then **load** the context map with tools (repo + cortex). Paste **excerpts**.
+Then **load** the repo side of the context map with grep/glob (pointers, not
+payloads). Cortex excerpts come from the librarian dispatch, not from you.
 
 ## TASK PACKAGE skeleton (paste into every subagent prompt)
 
@@ -164,26 +175,30 @@ Then **load** the context map with tools (repo + cortex). Paste **excerpts**.
 
 | Do | Don't |
 |----|--------|
-| Relevant files, diffs, error logs | Entire chat history or whole repo |
-| 1–3 vault notes / playbook bullets | Dumping cortex_vault_search full JSON |
-| Interfaces + call sites that matter | Every transitive dependency |
-| Prior failing @@RESULT text | "See earlier discussion" |
+| Paths, symbol names, done-when list | Entire chat history or whole repo |
+| "Read ASK.md; implement the seams named below" | Fenced code / raw JSON / function bodies in `task` prompt |
+| 1–3 vault note ids | Dumping cortex_vault_search full JSON |
+| Interfaces + call sites that matter | Pasting architect/planner output verbatim |
+| Prior failing @@RESULT text | "See earlier discussion" / "READY TO DISPATCH" |
 
 Heuristic: a cold subagent must succeed **without** asking what the user meant.
+Second heuristic: if the `task` prompt would look like source code, it will
+fail JSON parse. Cut it.
 
 ## Who receives what
 
 | Subagent | Package must include |
 |----------|----------------------|
-| planner / architect | Goal, constraints, done-when, relevant design/code + vault lessons |
-| coder / tester / devops | Full package; they may read more files but must not redefine goal |
+| planner / architect | Goal, constraints, done-when, paths + vault note ids |
+| coder / tester / devops | Goal, done-when, seam/path list; they read ASK.md and the tree. Do not paste the plan. |
 | reviewer / security | Changed paths + what changed + stated requirements; they read the files |
-| doc-writer | All material to write from; no "look it up" |
+| doc-writer | Paths of the material to write from; they read it |
 
 ## Subagent contract (they already enforce; you must enable it)
 
-No-tools agents return `BLOCKED` and name exact missing inputs rather than
-guessing. When you see that, fix the package and re-dispatch.
+Read-only agents return `BLOCKED` and name exact missing *intent or pointers*
+rather than guessing. Missing file contents are not a gap — they can read.
+When you see BLOCKED, fix the package and re-dispatch.
 
 ## User questions (template)
 

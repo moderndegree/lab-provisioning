@@ -94,36 +94,30 @@ Always run `make lint` and `make syntax-check` after editing roles or vars.
 
 ## Model policy (bandwidth-bound, not task-depth-bound)
 
-Serving is `llama-server`, not Ollama. Two instances run as Podman quadlets, defined
+Serving is `llama-server`, not Ollama. One instance runs as a Podman quadlet, defined
 in `roles/llamacpp` (`llamacpp_instances`), named by ROLE rather than by model so the
 model can be swapped without renaming the unit:
 
 | Unit | Port | Model | Slots | Ctx/slot | MTP | Speed |
 |---|---|---|---|---|---|---|
-| `llama-quality` | 8090 | `qwen3.6-35b-a3b-mtp-q4_K_M` | 4 | **262144** | n-max 3 | 106 t/s solo |
-| `llama-deep` | 8091 | `qwen3.8-27b-q4_K_M` | 1 | **262144** | n-max 5 | ~25 t/s |
+| `llama-quality` | 8090 | `qwen3.8-flash-next` (Unsloth UD-Q4_K_XL) | 1 | **up to 262144** (probe then raise) | off until measured | TBD |
+| `llama-deep` | 8091 | RETIRED 2026-08-26 — XL is the whole 122 Gi budget | — | — | — | — |
 
-`llama-quality` is the GENERAL slot — orchestration, planning, critique, docs,
-infra, chat. It is MoE with ~3B active parameters, because Strix Halo decode
-speed tracks active parameters read per token, not headline size.
+`llama-quality` is the only live slot — orchestration, planning, critique, docs,
+infra, chat, coding, and hard design. Unsloth Qwen3.8-Flash-Next UD-Q4_K_XL
+(125B MoE, 6B active, 111.3 GB) fills the 122 Gi box; a second instance would
+OOM. Decode still tracks active parameters. Thinking on, `reasoning_effort=medium`,
+`--reasoning-budget 6000`. Do not restore `:8091` unless asked.
 
-`llama-deep` is the CODING + hard-design slot: a DENSE 27B, ~4x slower, used by
-`architect`, `coder`, and `deep`. One slot — a second dispatch queues. Dense is
-still the wrong default — raw it decodes at 11.4 t/s, matching the old dense
-`qwen3.6:27b-mtp-q4_K_M` at ~11-15 t/s — but MTP recovers 2.79x
-(to 31.8 t/s short-prompt, ~25 sustained), which is what makes it usable at all.
-Do not generalise this into "dense is fine now"; it is fine HERE because the
-endpoint is low-volume and MTP-assisted.
-
-`llama-throughput` (nemotron-3.5-lightning) was RETIRED 2026-08-14. It was dominated:
-quality-with-MTP beat it on aggregate (106.4 vs 92.1) AND single-stream (90.8 vs 70.8)
-at the same ctx/slot. The critic fan-out moved onto `:8090`'s 4 slots.
+`llama-deep` (qwen3.8-27b) was RETIRED 2026-08-26 with this swap. `llama-throughput`
+(nemotron-3.5-lightning) was RETIRED 2026-08-14.
 
 Context is per SLOT and partitioned statically at startup (`-c` total / `-np` slots),
-so a single chat can never exceed its slot's window no matter how idle the box is —
-262144 on both endpoints now (`:8090` 4 slots, `:8091` 1). Raising ctx/slot means lowering slot count or raising
-total, and total has a hard ceiling measured in KV BYTES, not cells — see the context
-warning below.
+so a single chat can never exceed its slot's window no matter how idle the box is.
+Flash-Next probes at 8192 then raises `-c` to min(262144, what `MemAvailable`
+allows). KV is ~24 KB/token, so the native 262k window is ~6 GiB — that is the
+intended spend of the leftover RAM. The ceiling is KV BYTES, not cells. Do not
+YaRN past 262144 (interleaved mrope; yarn was a silent no-op on Qwen3.8-27B).
 
 Ollama is installed but `stopped`/`disabled` (`ollama_service_*` in group_vars). It is
 for trying a model by hand, not for serving; it cannot hold weights at the same time as

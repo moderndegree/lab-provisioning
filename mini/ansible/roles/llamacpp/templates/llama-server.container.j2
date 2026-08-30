@@ -26,7 +26,7 @@ ContainerName=llama-{{ item.name }}
 Image={{ item.image | default(llamacpp_image) }}
 # llama-server directly as PID 1 of the container — this is what makes systemd
 # able to stop it.
-Entrypoint=/usr/bin/llama-server
+Entrypoint={{ item.entrypoint | default('/usr/bin/llama-server') }}
 
 # Host networking: ports bound here are real ports on mini, matching how the
 # toolbox behaved and keeping mini's UFW (tailnet-only) the single control point.
@@ -44,6 +44,9 @@ PodmanArgs=--security-opt seccomp=unconfined
 
 # Models read-only: nothing here should ever write to the shared model dir.
 Volume={{ llamacpp_models_dir }}:{{ llamacpp_models_dir }}:ro
+{% for vol in item.extra_volumes | default([]) %}
+Volume={{ vol }}
+{% endfor %}
 
 Exec=-m {{ item.model }} \
      --alias {{ item.alias }} \
@@ -52,7 +55,7 @@ Exec=-m {{ item.model }} \
      -c {{ item.ctx }} \
      -np {{ item.parallel }} \
      {{ item.base_args | default(llamacpp_base_args) }} \
-{% if item.cache_ram | default(llamacpp_cache_ram) %}
+{% if item.cache_ram is defined or llamacpp_cache_ram %}
      --cache-ram {{ item.cache_ram | default(llamacpp_cache_ram) }} \
 {% endif %}
 {% if item.cache_reuse | default(llamacpp_cache_reuse) %}
@@ -94,6 +97,9 @@ Exec=-m {{ item.model }} \
 {% if item.chat_template_kwargs | default('') %}
      --chat-template-kwargs '{{ item.chat_template_kwargs | to_json if item.chat_template_kwargs is mapping else item.chat_template_kwargs }}' \
 {% endif %}
+{% if item.reasoning_budget is defined %}
+     --reasoning-budget {{ item.reasoning_budget }} \
+{% endif %}
 {% if item.extra_args | default('') %}
      {{ item.extra_args }} \
 {% endif %}
@@ -112,7 +118,7 @@ Exec=-m {{ item.model }} \
 # so the wrapper was redundant as well as broken.
 HealthCmd=curl -sf http://127.0.0.1:{{ item.port }}/health
 HealthInterval={{ llamacpp_health_interval }}
-HealthStartPeriod={{ llamacpp_health_start_period }}
+HealthStartPeriod={{ item.health_start_period | default(llamacpp_health_start_period) }}
 HealthTimeout=10s
 HealthRetries=3
 
@@ -120,7 +126,8 @@ HealthRetries=3
 Restart=on-failure
 RestartSec={{ llamacpp_restart_sec }}
 # Loading tens of GiB off a cold page cache blows the default 90s.
-TimeoutStartSec=600
+# Flash-Next UD-Q4_K_XL is ~111 GB — 600s is not enough from a cold cache.
+TimeoutStartSec={{ item.timeout_start_sec | default(llamacpp_timeout_start_sec) }}
 
 [Install]
 # Both a normal boot start and membership of the group target, so

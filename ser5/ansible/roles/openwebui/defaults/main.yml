@@ -29,20 +29,33 @@ openwebui_port: 8080
 # tunnel (enable_cloudflared) once a hostname is routed to it.
 openwebui_host: "127.0.0.1"
 
-# Reaches mini's Ollama over the tailnet — see openwebui.network.j2 for the
-# DNSSearch trick that makes "mini" resolve from inside the container netns.
-openwebui_ollama_base_url: "http://mini:11434"
+# Ollama backends over the tailnet. DNSSearch= on the container (MagicDNS
+# suffix) is what makes short names like "desktop" and "mini" resolve from
+# inside the netns.
+#
+# desktop (Windows, tailnet name `desktop`) is the LIVE Ollama — currently
+# serving qwen3.5:4b, qwen3.5:9b, gpt-oss:20b. mini:11434 is installed but
+# STOPPED: llama-server holds the GPU, and the two cannot both stay resident.
+# Do not point the enabled Ollama connection at mini unless you have stopped
+# a llama-server instance and started ollama.service by hand.
+#
+# Plural, semicolon-separated. Seed only — once Admin -> Connections is saved,
+# webui.db wins (see the OpenAI comment block below).
+openwebui_ollama_base_urls: "http://desktop:11434"
+# Legacy singular; kept as the first URL so anything still reading
+# OLLAMA_BASE_URL does not silently go back to dead mini:11434.
+openwebui_ollama_base_url: "http://desktop:11434"
+openwebui_enable_ollama_api: true
 
 # ─────────────────────────────────────────────────────────────────────────────
 # OpenAI-compatible backends (mini's llama-server)
 # ─────────────────────────────────────────────────────────────────────────────
-# Ollama and llama-server speak DIFFERENT protocols. OLLAMA_BASE_URL above only
-# makes Open WebUI query mini:11434/api/tags; it will never discover the
-# llama-server on :8090, which serves the OpenAI API. Without these vars the
-# model list is empty whenever ollama.service is stopped — which is now the
-# normal state, because llama-server holds ~22 GiB resident and cannot coexist
-# with two warm Ollama models at 131072 context in 122 GiB
-# (see ../../../mini/ansible/roles/llamacpp/defaults/main.yml).
+# Ollama and llama-server speak DIFFERENT protocols. OLLAMA_BASE_URLS above
+# only makes Open WebUI query those hosts' /api/tags; it will never discover
+# llama-server on mini:8090/:8091, which serve the OpenAI API. Without the
+# OpenAI vars below, the model list is empty whenever no Ollama is reachable.
+# mini's ollama.service is STOPPED by design (llama-server holds the GPU);
+# desktop is the live Ollama. See ../../../mini/ansible/roles/llamacpp/defaults/main.yml.
 #
 # SEEDS ONLY — these do NOT override a configured instance. Open WebUI keeps its
 # live settings in the `config` table of webui.db and falls back to DEFAULT_CONFIG
@@ -70,40 +83,27 @@ openwebui_ollama_base_url: "http://mini:11434"
 # at. Those were dropped because vLLM measured ~3x slower single-stream
 # (25 vs 87 tok/s); add them back only for a bench.
 #
-# Both models are discovered dynamically from each endpoint's /v1/models, so a
-# model swap on mini needs NO change here — the new alias simply appears in the
-# picker after the llama-server restart. These notes exist so the picker's two
-# entries are legible; keep them true.
+# Models are discovered dynamically from each endpoint's /v1/models, so a
+# model swap on mini needs no URL change — the new alias appears in the
+# picker after llama-server restart.
 #
-#   :8090  qwen3.6-35b-a3b-mtp  GENERAL — 106 tok/s single-stream, 109 at
-#          4-way. 262144 ctx per chat = 1048576 total / 4 slots, the model's
-#          full native window. Default for chat, planning, critique, docs.
-#   :8091  qwen3.8-27b          CODING — ~25 tok/s. 262144 ctx per chat on a
-#          SINGLE slot, the full native window. A second concurrent request
-#          QUEUES. FOUR TIMES SLOWER than :8090. Use for implementation and
-#          hard design. A long answer here is a two-to-three MINUTE wait;
-#          that is expected, not a hang.
-#
-# Measured 2026-08-14 on llama.cpp b10380 with fanoutsim.py. Earlier figures in
-# this file came from long-generation synthetics and read about twice as fast as
-# real traffic; these do not.
-#
-# :8091 replaced nemotron-3.5-lightning on 2026-08-14, which had in turn replaced
-# gpt-oss-20b. Nemotron was retired because :8090 with MTP beat it on BOTH
-# aggregate (106.4 vs 92.1) and single-stream (90.8 vs 70.8) — it was dominated,
-# not merely slower.
+# Restored 2026-08-27 — quality+deep pair (Flash-Next / 122B tests rolled back):
+#   :8090  qwen3.6-35b-a3b-mtp  MoE 35B-A3B q4_K_M, MTP n-max 3, 262144/slot x 4
+#   :8091  qwen3.8-27b         dense 27B q4_K_M + separate MTP head n-max 5,
+#                              262144 x 1, reasoning_effort=medium, budget 6000
 #
 # Qwen3.8-27B is a reasoning model: expect a collapsed "thinking" section before
-# the answer. llama.cpp separates that into reasoning_content, so it will not
-# contaminate the visible reply. The server pins reasoning_effort=medium; the
-# model's own default (xhigh) spends 8192 tokens thinking and returns NOTHING.
-#
-# It is also natively multimodal (image + video), but the vision projector is
-# staged on mini WITHOUT being wired into the server, so image uploads to :8091
-# will NOT work until --mmproj is added there.
+# the answer. llama.cpp separates that into reasoning_content. The server pins
+# reasoning_effort=medium; xhigh spends 8192 tokens thinking and returns NOTHING.
+# Vision projector is staged on mini but NOT wired (--mmproj), so image uploads
+# to :8091 will not work until that is added.
 #
 # Context is per SLOT and statically partitioned at startup, so a single chat can
 # never exceed the per-slot figure no matter how idle the box is.
+#
+# SEEDS ONLY — once Admin -> Connections is saved, webui.db wins. Changing these
+# vars alone will not update an existing install; edit the DB (container stopped)
+# or the UI.
 openwebui_enable_openai_api: true
 openwebui_openai_base_urls: "http://mini:8090/v1;http://mini:8091/v1"
 openwebui_openai_api_keys: "llamacpp;llamacpp"

@@ -67,16 +67,13 @@ llamacpp_images: >-
 # ever downloaded stays until someone removes it by hand. Audit with
 # `du -sh /data/models/*.gguf` after any model evaluation.
 #
-# Contents as of 2026-08-14, and why each is there:
-#   qwen3.6-35b-a3b-mtp-q4_K_M   21 GB  LIVE  :8090 quality (the driver)
-#   qwen3.8-27b-q4_K_M           19 GB  LIVE  :8091 deep
-#   qwen3.8-27b-mtp-q8_0        3.2 GB  LIVE  its MTP head — a SEPARATE file,
-#                                       passed with -md. Deleting this does not
-#                                       break startup, it silently drops :8091
-#                                       from ~32 to ~11 tok/s.
-#   qwen3.8-27b-mmproj-q8_0     0.6 GB  vision projector. NOT wired up; staged
-#                                       because the model is natively
-#                                       multimodal and it is cheap to keep.
+# Contents as of 2026-08-27, and why each is there:
+#   qwen3.6-35b-a3b-mtp-q4_K_M      21 GB  LIVE  :8090 quality (restored)
+#   qwen3.8-27b-q4_K_M              19 GB  LIVE  :8091 deep (restored)
+#   qwen3.8-27b-mtp-q8_0           3.2 GB  LIVE  deep's MTP head (-md)
+#   qwen3.8-27b-mmproj-q8_0        0.6 GB  vision projector. NOT wired up.
+#   Qwen3.8-Flash-Next UD-Q4_K_XL  111 GB  KEPT  rollback of the 2026-08-26 driver
+#   Qwen3.5-122B-A10B MTP UD-Q4_K_XL 79 GB KEPT  2026-08-27 perf test (~14 t/s)
 #   gpt-oss-20b-MXFP4            12 GB  KEPT ON PURPOSE — rollback, and still
 #                                       the FASTEST aggregate measured on this
 #                                       box (140.8 tok/s at n=4 on 2026-08-14,
@@ -189,6 +186,9 @@ llamacpp_restart_sec: 10
 # restarts a server that was only still loading, forever.
 llamacpp_health_interval: "30s"
 llamacpp_health_start_period: "600s"
+# systemd TimeoutStartSec for the generated service. 600s covers 20-40 GB
+# GGUFs; Flash-Next XL (~111 GB) needs the per-instance override below.
+llamacpp_timeout_start_sec: 600
 
 # ─────────────────────────────────────────────────────────────────────────────
 # THE KV CEILING — READ BEFORE RAISING ANY ctx
@@ -335,71 +335,16 @@ llamacpp_instances:
   # instance: append an entry with a free port — it joins llama-servers.target
   # automatically. To A/B a backend: set `image:` on one instance only.
 
-  # THE GENERAL SLOT, AND SINCE 2026-08-23 THE CODING SLOT TOO. Serves
-  # orchestration, planning, critique, docs, infra and chat, and now also the
-  # interactive coding agent -- which is why the sampling below changed from the
-  # general preset to the precise-coding one. :8091 keeps hard design and the
-  # deep/architect roles; it is ~3.8x slower and reserved for problems that earn
-  # it. MTP on, because agent loops are mostly SINGLE-STREAM and that is exactly
-  # what MTP buys.
+  # RESTORED 2026-08-27 — quality+deep pair after the Qwen3.5-122B-A10B MTP
+  # performance test. Flash-Next XL and the 122B GGUF stay on disk as rollbacks;
+  # do not delete either without asking. 122B measured ~12–14 tok/s with MTP on
+  # Vulkan0 — GPU path was correct, just too slow for daily driving.
   #
-  # SAMPLING IS THE PRECISE-CODING PRESET AS OF 2026-08-23, not the general one.
-  # Qwen's card lists two thinking-mode presets and they are tuned as SETS:
-  #   general        temp 1.0, top_p 0.95, top_k 20, min_p 0, presence 1.5
-  #   precise coding temp 0.6, top_p 0.95, top_k 20, min_p 0, presence 0.0
-  # This slot now drives coding as well as orchestration, so it runs the latter.
-  # Do not mix rows. llama.cpp's own defaults (0.8 / 40 / 0.05) are wrong for
-  # this card under either preset.
-  #
-  # NO reasoning_effort KNOB EXISTS ON THIS TEMPLATE -- confirmed by grepping
-  # /props: zero occurrences, versus 5 in qwen3.8-27b's. Passing it here is a
-  # silent no-op, NOT an error, which is exactly how it goes unnoticed. The
-  # working control is reasoning_budget below.
-  #
-  # reasoning_budget 1500 because this model does not self-limit: measured
-  # 2026-08-23 it spent ~3058 reasoning tokens on "write an LRU cache" and
-  # ~5542 on a harder prompt, so the 6000 used on :8091 would never bind here.
-  # Unbounded, it will consume an entire max_tokens allowance in <think> and
-  # emit nothing -- that is the mechanism behind the truncated opencode tool
-  # calls seen the same day, where a write's JSON arguments were cut mid-string.
-  # At budget 500 the trace was cut mid-sentence yet the answer got BETTER
-  # (content 5.7k -> 15.6k chars, still complete and correct); 1500 is a
-  # deliberately loose starting point. Tune DOWN if answers stay truncated.
-  #
-  # WHY ONE ENDPOINT NOW (measured 2026-08-14, fanoutsim -n 4, all back-to-back
-  # on b10380 so they are directly comparable — aggregate / per-stream / solo):
-  #
-  #   gpt-oss-20b MXFP4          140.8 / 37.2 / 76.6    session  64.5s
-  #   qwen3.6-35b-a3b NO MTP     134.1 / 35.6 / 73.9    session  76.5s
-  #   qwen3.6-35b-a3b MTP n=1    106.4 / 54.5 / 90.8    session  88.7s
-  #   nemotron-3.5-lightning      92.1 / 23.5 / 70.8    session 104.2s
-  #
-  # Nemotron was DOMINATED — this model with MTP beat it on aggregate (106.4 vs
-  # 92.1) AND single-stream (90.8 vs 70.8) at the same 262144/slot. It was
-  # retired rather than resized. gpt-oss stays on disk as the rollback.
-  #
-  # Dropping the second endpoint costs ~22% fan-out aggregate (109.4 vs 140.8)
-  # and buys critics that reason on 35B-A3B instead of a 20B, one fewer moving
-  # part, and ~40 GiB of headroom. Accepted deliberately.
-  #
-  # MTP's aggregate cost is STRUCTURAL, not queuing — raising parallel does not
-  # buy it back. At n-max 3, np 8: n=2 -> 112.2, n=4 -> 109.4, n=8 -> 125.5
-  # aggregate. Going np 2 -> 8 moved n=4 by 3 tok/s. Do not "fix" it with slots.
-  #
-  # mtp_draft_max: 3 — MEASURED PEAK, and it replaced 1. Greedy, 3 reps:
-  #   n-max 1 -> 93.2 t/s   n-max 2 -> 103.5   n-max 3 -> 106.4   n-max 5 -> 102.0
-  # This CONTRADICTS the older note above ("n=1 beating n=3", from 82.5 vs 86.7).
-  # That measurement predates b10380; the MTP path has since improved. +14%
-  # single-stream for a one-line change.
-  #
-  # ctx 1048576 / parallel 4 = 262144 per slot, the model's FULL native window
-  # (qwen35moe.context_length = 262144). 1048576 total is the LARGEST value
-  # measured safe in one process — see THE KV CEILING above and do not raise it
-  # without re-reading that section. At 20 KB/token this is ~20 GiB of KV.
-  #
-  # Consequence to accept: a 4-wide critic fan-out fully occupies this endpoint
-  # and the orchestrator queues behind it. parallel 6 would leave two slots
-  # clear but needs ctx 1572864 (~30 GiB KV), past anything measured safe here.
+  # QUALITY — general / orchestration / critique / docs / chat.
+  # qwen3.6-35b-a3b-mtp-q4_K_M, MoE 35B-A3B (3B active), MTP embedded.
+  # mtp_draft_max 3 is the measured peak (n=1 93.2 | n=2 103.5 | n=3 106.4 |
+  # n=5 102.0). ctx 1048576 / np 4 = 262144 per slot — largest single-process
+  # total measured safe. extra_args pins thinking/general sampling.
   - name: "quality"
     alias: "qwen3.6-35b-a3b-mtp"
     model: "{{ llamacpp_models_dir }}/qwen3.6-35b-a3b-mtp-q4_K_M.gguf"
@@ -408,82 +353,15 @@ llamacpp_instances:
     parallel: 4
     mtp: true
     mtp_draft_max: 3
-    reasoning_budget: 1500
-    extra_args: "--temp 0.6 --top-k 20 --top-p 0.95 --min-p 0 --presence-penalty 0.0"
+    chat_template_kwargs:
+      enable_thinking: true
+    extra_args: "--temp 1.0 --top-k 20 --top-p 0.95 --min-p 0 --presence-penalty 1.5"
 
   # DEEP — coding + hard design. coder/architect/deep share the single slot.
-  # Qwen3.8-27B since 2026-08-14, replacing nemotron-3.5-lightning on this port.
-  # Port reused on purpose: Open WebUI's openwebui_openai_base_urls already reads
-  # "8090;8091", so the swap needs no change on ser5.
-  #
-  # WHY: it is ~3.8x slower than :8090 and worth it for hard problems only.
-  # Same prompt, both endpoints (2026-08-14): :8090 88.5 t/s / 39.7s wall;
-  # this 24.6 t/s / 151.8s, for a materially more thorough answer. Published
-  # benchmarks against Qwen3.6-27B: QwenSWEBench 79.0 vs 49.3, DeepSWE 42.2 vs
-  # 13.3, SWE-bench Pro 61.7 vs 53.5, LiveCodeBench 90.3 vs 83.9. NOTE those
-  # compare to the DENSE 27B, not to the 35B-A3B on :8090 — there is no
-  # published head-to-head against what we actually run. Do not assume.
-  #
-  # ARCHITECTURE. Dense 27B but hybrid: 64 layers = 16 x (3 x GatedDeltaNet ->
-  # 1 x Gated Attention). Only 16 layers do full attention, but head_dim 256 x 4
-  # KV heads still gives 64 KB/token — 3.2x the 20 KB/token of :8090 and 10x
-  # nemotron's ~6 KB. KV, not weights, is what constrains this instance.
-  # Authoritative footprint from a `-lv 4` load at 262144 x 1, f16 KV:
-  #   weights 18,084 MiB | KV 16,384 MiB | recurrent 150 MiB | compute 666 MiB
-  # It is also natively MULTIMODAL (image+video); the mmproj is staged but not
-  # wired up — serving vision needs --mmproj and is untested here.
-  #
-  # cache_type q8_0 IS NOT USED HERE, AND THE REASON IS A CORRECTED MEASUREMENT.
-  # It halves KV (64 -> 34 KB/token; 262144 drops 16,384 -> 8,192 MiB) and on a
-  # SHORT 622-token generation it looked free — 31.95 t/s q8_0 vs 31.27 f16.
-  # On a real long generation it is not. Re-measured 2026-08-14 with only one
-  # other server resident, ~2.5k tokens out:
-  #
-  #   262144 x 1  f16    25.30 t/s   GTT 71.7   <- CHOSEN
-  #   262144 x 1  q8_0   22.58 t/s   GTT 64.2      -11%
-  #   524288 x 2  q8_0   22.19 t/s   GTT 74.6      slots are free, quant is not
-  #
-  # It also CHANGES THE OUTPUT. Under greedy decoding (temp 0, top_k 1) the f16
-  # and q8_0 runs diverged hard — 11,112 vs 1,664 characters of reasoning on an
-  # identical prompt. Quantised KV perturbs the logits enough to take a different
-  # path. For an endpoint whose entire job is careful reasoning, that is the
-  # wrong trade at any speed, let alone a negative one.
-  #
-  # Slot count, by contrast, IS free (22.58 vs 22.19 for 1 vs 2 slots). The
-  # single slot below is a MEMORY decision, not a speed one: f16 at 2 slots
-  # needs ~32 GiB of KV and pushes the box to ~94 GB total, which is where the
-  # host OOM killer starts taking live services (see the ceiling note above).
-  # A second concurrent `deep` call therefore QUEUES. Accepted — this endpoint
-  # is dispatched deliberately and never in a loop.
-  #
-  # An earlier reading of 14.6 t/s for this config was an artefact of measuring
-  # while the retired nemotron endpoint was still resident (~105 GB total). It
-  # was memory pressure, not the configuration. Do not re-derive it.
-  #
-  # mtp_draft_max: 5 — MEASURED PEAK, and far deeper than :8090 wants. Greedy:
-  #   off 11.39 | n=2 24.57 | n=3 28.16 | n=4 30.38 | n=5 31.78 | n=6 31.82
-  #   | n=8 COLLAPSES to ~20
-  # 2.79x over raw. Left at the repo's old default of 1 this would run 18.9 t/s
-  # and give up 40%. On real long-context work the rate settles to ~23-25 t/s;
-  # 31.8 is a short-prompt figure.
-  #
-  # draft_model IS REQUIRED. ggml-org ships the MTP head as a SEPARATE gguf, not
-  # embedded like qwen3.6's. Without -md, llama.cpp logs "unused tensor ...
-  # -- ignoring" and runs at raw 11 t/s while the config still says mtp: true.
-  #
-  # chat_template_kwargs IS NOT OPTIONAL. reasoning_effort defaults to `xhigh`,
-  # and at xhigh this model burned 8192 tokens of thinking and returned an EMPTY
-  # answer after 408s. Supported: xhigh (default) / medium / low. `medium` is
-  # chosen here as the deep endpoint's job is thoroughness; `low` still produced
-  # a correct, well-structured answer ~20% faster.
-  #
-  # CONTEXT CANNOT BE EXTENDED past 262144. --rope-scaling yarn is SILENTLY
-  # IGNORED (log still reads "rope scaling = linear") because the model uses
-  # mrope (mrope_section [11,11,10]). -c 524288 on ONE slot is accepted via
-  # LINEAR scaling with freq_scale 0.5 and a "n_ctx_seq > n_ctx_train -- possible
-  # training context overflow" warning, and measured 17.9 t/s against 31.9 at
-  # native. ctx below is 262144 on a single slot — the native window, and there
-  # is nothing above it worth having. Do not raise it.
+  # Qwen3.8-27B, dense hybrid. draft_model REQUIRED (separate MTP head).
+  # mtp_draft_max 5 measured peak. f16 KV (q8_0 was -11% and diverged under
+  # greedy). reasoning_effort medium + reasoning_budget 6000 — xhigh returns
+  # empty; unbounded think starves OpenCode tools. Do not YaRN past 262144.
   - name: "deep"
     alias: "qwen3.8-27b"
     model: "{{ llamacpp_models_dir }}/qwen3.8-27b-q4_K_M.gguf"
@@ -495,11 +373,6 @@ llamacpp_instances:
     mtp_draft_max: 5
     chat_template_kwargs:
       reasoning_effort: "medium"
-    # Qwen3.8 thinking-mode official sampler. min_p 0 (not llama.cpp's 0.05).
-    # CODIFIES DRIFT. The live server has run --reasoning-budget 6000 since at
-    # least 2026-08-22 while this flag existed nowhere in the repo, so any
-    # converge would have silently removed it. Unlike :8090 this model also has
-    # a real reasoning_effort knob (medium, below); the budget is the backstop.
     reasoning_budget: 6000
     extra_args: "--temp 1.0 --top-k 20 --top-p 0.95 --min-p 0 --presence-penalty 0"
 

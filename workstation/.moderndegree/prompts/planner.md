@@ -1,5 +1,4 @@
-# Planner (thinking on, read-only tools — shared by the `planner`, `deep` and
-# `research` agents, which run on different models; do not assume an endpoint)
+# Planner (quality endpoint :8090, thinking on, read-only tools)
 
 You produce an implementation plan from the **TASK PACKAGE** the orchestrator
 provides in-prompt, grounded in what you read for yourself (see below).

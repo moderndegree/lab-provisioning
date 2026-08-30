@@ -68,11 +68,9 @@ Consequence to know: a 4-wide fan-out now fully occupies `:8090` and the
 orchestrator queues behind it. MTP's aggregate cost is structural — raising
 `parallel` does not buy it back (np 2 → 8 moved n=4 by 3 tok/s).
 
-Why this split: `:8090` peaks at 2 concurrent streams and is SLOWER at 4, while
-MTP is worth +21% at one stream but -18% at two. `:8091` peaks at 4 and is
-slower at 8. So there are exactly four fan-out agents, and steady state is ~2
-streams on `:8090` plus up to 4 on `:8091` — where both endpoints measure
-fastest. Numbers in `../mini/AGENTS.md`.
+`:8091` has **one** slot. A second `architect`/`coder`/`deep` dispatch queues.
+Do not put the critic fan-out there — those four stay on `:8090` so they
+actually run in parallel. Numbers in `../mini/AGENTS.md`.
 
 mini is memory-bandwidth-bound, not compute-bound. Decode speed tracks active
 parameters per token, so MoE wins; a dense model is a mistake here.
@@ -214,16 +212,15 @@ them — no agent uses them until you log in:
 opencode auth login    # pick github-copilot, then xai
 ```
 
-Only two agents route off Ollama, and both are opt-in subagents you have to
-invoke by name:
+Only `research` routes off mini, and only when you invoke it by name:
 
 | Agent | Model | Tier | Guardrail |
 |---|---|---|---|
-| `heavy` | `ollama/gpt-oss:120b` | L | Still local, but loading it **evicts a warm model** on mini. Deliberate use only, never in a loop. |
 | `research` | `xai/grok-build-0.1` | X | Third-party. **Never** give it client-confidential material. |
 
-If you never log in, both `build` and every default subagent keep running
-entirely on mini, so the sovereign path is the failure-safe default.
+`opencode auth login` is required before `research` works. If you never log in,
+`build` and every default subagent keep running entirely on mini, so the
+sovereign path is the failure-safe default.
 
 ## Cortex MCP (second brain)
 
@@ -234,20 +231,23 @@ differs. Requires `pnpm install` in ai-workstation.
 
 Agents **must** use it when available:
 
-1. **Before dispatch** — `vault_search` → up to 3 notes in the TASK PACKAGE  
+1. **Before dispatch** — `librarian` RECALL → up to 3 notes in the TASK PACKAGE  
    (see `.moderndegree/skills/task-package.md`).
-2. **After painful misses** — `vault_capture` / postmortem  
+2. **After painful misses** — `qa` calls `cortex_vault_capture` before it closes
    (see `.moderndegree/skills/second-brain.md`).
 
 ## Reasoning control (verified against Ollama 0.31.2)
 
 Reasoning mode is per **agent**, set via `reasoningEffort` passthrough in
-`opencode.json`: `"none"` on the orchestrator and devops (terse, deterministic
-tool dispatch), unset (thinking on for the Qwen stack) everywhere else.
+`opencode.json`: `"none"` on devops only (terse, deterministic shell). Do
+**not** set it on `build` — measured 2026-08-05, it drops subagent dispatches
+to zero. Unset (thinking on for the Qwen stack) everywhere else.
 
 Two things that look like they work but **don't** through the `/v1` endpoint:
 the `/think`/`/no_think` soft switches in prompts, and a `think: false` body
 field. Both were tested and are ignored. `reasoning_effort: "none"` is the
+only /v1 mechanism that disables thinking; native `/api/chat` honours
+`think: false` for scripts.
 
 ## Voice client
 
@@ -285,5 +285,3 @@ Three things to know:
 - If it cannot connect, check the UFW rule first: ser5 is default-deny with no
   blanket tailnet allow, so `:8772` needs its own rule on `tailscale0`.
   `cd ser5 && make verify` reports that as a finding.
-only /v1 mechanism that disables thinking; native `/api/chat` honours
-`think: false` for scripts.

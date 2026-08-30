@@ -63,6 +63,31 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Upstream reachability
 # ─────────────────────────────────────────────────────────────────────────────
+- name: Check each configured Ollama backend answers
+  ansible.builtin.uri:
+    url: "{{ item }}/api/tags"
+    timeout: "{{ verify_http_timeout }}"
+    return_content: true
+  loop: "{{ openwebui_ollama_base_urls | split(';') | map('trim') | reject('eq', '') | list }}"
+  register: verify_owui_ollama
+  failed_when: false
+  check_mode: false
+  when: openwebui_enable_ollama_api | bool
+
+- name: Flag an unreachable Ollama backend
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'Open WebUI Ollama backend ' ~ item.item ~ ' is not answering — Ollama '
+        ~ 'models from that host will not appear in the picker.'
+      ] }}
+  loop: "{{ verify_owui_ollama.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item | default('') }}"
+  when:
+    - item.skipped is not defined
+    - item.status | default(0) != 200
+
 # The model picker is populated from each backend's /v1/models at request time.
 # When mini's llama-server is down the UI still loads perfectly and simply offers
 # no models — a failure that looks like a UI bug from the browser and produces no
