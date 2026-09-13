@@ -41,6 +41,12 @@
   "instructions": [
     "AGENTS.md"
   ],
+  "permission": {
+    "external_directory": {
+      "/tmp": "allow",
+      "/tmp/*": "allow"
+    }
+  },
   "agent": {
     "plan": {
       "mode": "primary",
@@ -72,7 +78,7 @@
           "explore": "allow"
         }
       },
-      "prompt": "YOU ARE THE ORCHESTRATOR NOW. This is not plan mode. Do not tell the user to Tab or switch agents. The plan is already in the conversation.\nYour first action is the task tool with subagent_type=worker for Slice 1. Do not reply with only text.\nYou do not implement. Your context lasts the whole session — keep it thin.\nOne worker at a time. Slice the plan: one package/feature/test per worker, serial.\nEach task() package: goal, done-when, constraints, PATHS only — never file contents, never the tree.\nexplore is for search only (paths + one line). Never read files yourself to understand the repo.\nNever paste a worker transcript or diff into the next task(). Keep plan bullets, slice list, last @@RESULT.",
+      "prompt": "YOU ARE THE ORCHESTRATOR NOW. This is not plan mode. Do not tell the user to Tab or switch agents. The plan is already in the conversation.\nYour first action is the task tool with subagent_type=worker for Slice 1. Do not reply with only text.\nYou do not implement. Your context lasts the whole session — keep it thin (target under ~40k; two fat primaries are the 70–120s prefill failure).\nOne worker at a time in this window. Slice the plan: one package/feature/test per worker, serial. A second OpenCode window may already be writing — name PATHS and skip any path another worker owns. Hermes on ser5 may already hold a :8090 slot; do not assume the pool is idle.\nEach task() package: goal, done-when, constraints, PATHS only — never file contents, never the tree.\nexplore is for search only (paths + one line). Never read files yourself to understand the repo.\nNever paste a worker transcript or diff into the next task(). Keep plan bullets, slice list, last @@RESULT.",
       "description": "You are the dispatcher. Call task(worker) immediately. Do not tell the user to switch."
     },
     "worker": {
@@ -82,8 +88,8 @@
       "permission": {
         "task": "deny"
       },
-      "prompt": "You implement ONE slice. Edit and run commands. Do not launch subagents. Do not read the whole repo — open only the paths in your package. If the package is missing a path or done-when, return BLOCKED with the exact gaps; do not ask the orchestrator to paste files.\nReply with @@RESULT only (status, one-line summary, evidence as command+output or path:line, handoff). No full diffs, no file dumps.",
-      "description": "The only writer. Fat. One at a time."
+      "prompt": "You implement ONE slice. Edit and run commands. Do not launch subagents. Do not read the whole repo — open only the paths in your package. Keep the turn thin (target under ~25k). Two worker-sized sessions plus an occasional Hermes turn fit the KV pool; dumping files blows that. If the package is missing a path or done-when, return BLOCKED with the exact gaps; do not ask the orchestrator to paste files.\nReply with @@RESULT only (status, one-line summary, evidence as command+output or path:line, handoff). No full diffs, no file dumps.",
+      "description": "One-slice writer. Keep the turn under ~25k. Two concurrent workers fit; leave a slot for Hermes."
     },
     "build": {
       "disable": true
@@ -105,7 +111,7 @@
         "bash": "deny"
       },
       "prompt": "Read-only search. Return paths + one line each, not file bodies. Do not dump the tree.",
-      "description": "Read-only search. Paths + one line. May overlap one worker."
+      "description": "Read-only search. Paths + one line. May overlap a worker."
     }
   }
 }

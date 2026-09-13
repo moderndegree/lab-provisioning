@@ -1,13 +1,24 @@
 # How to use OpenCode on Yoga
 
-One model on mini:8090. One window.
+One model on mini:8090. Shared 262144-position KV pool; each in-flight request
+reserves `prompt + 32768` (OpenCode's `max_tokens`).
 
 If you are **plan**: write a short slice list, then stop. Do not dispatch.
 If you are **orchestrator**: you already switched. Call `task` with `worker` for
 the next slice. Do not tell the user to Tab. Do not implement.
 
 User loop: Plan until the design is right → Tab to Orchestrator → it launches
-one worker. Do not open a second OpenCode. Build is disabled.
+one worker. Build is disabled. Headless `opencode run` cannot Tab — pass
+`--agent orchestrator`.
+
+Pool (measured 2026-09-12 on autonomy-clone): worker turns 15–25k, orchestrator
+~40k after four slices. Two worker-sized sessions fit. Hermes on ser5 uses the
+same `:8090` (`qwen3.8-flash-next`, `max_tokens` 32768) and can join without
+warning — phone dashboard, gateway, or an `opencode run` it launched. Treat
+Hermes as a third occupant: **two OpenCode windows is the default**. Do not
+open a third unless you know Hermes is idle. Two fat primaries (137k+71k + two
+32k reservations) is the 70–120s prefill failure — do not. A second window is
+allowed on disjoint paths. Do not start a second fat orchestrator.
 
 ## Slice the work (worker context)
 
@@ -46,4 +57,5 @@ handoff: <next slice or done>
 @@END
 
 Plan → Orchestrator in the same session costs a cold prefill (~45–50s at 60k).
-Expected. Two writers at once is the 70–120s failure.
+Expected. Two fat writers at once is the 70–120s failure; two thin workers plus
+an occasional Hermes turn are not.

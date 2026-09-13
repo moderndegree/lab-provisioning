@@ -25,7 +25,13 @@ One endpoint: **halogen-flash 0.5.8** at `http://mini:8090/v1`, model
 `qwen3.8-flash-next`. Four HTTP slots over **one 262144-position KV pool**
 (not llama.cpp partitioned `-np`). Each request reserves `prompt + max_tokens`
 (OpenCode sends 32768). Two fat coding agents do not fit (measured 2026-09-12:
-137k+71k + two 32k reservations = 274k → 70–120 s prefills).
+137k+71k + two 32k reservations = 274k → 70–120 s prefills). Worker-sized
+sessions do: the same day, autonomy-clone workers were 15–25k/turn and the
+orchestrator ~40k after four slices, so two concurrent OpenCode windows fit.
+Hermes on ser5 shares `:8090` (`max_tokens` 32768) and can appear mid-run
+(dashboard, gateway, or an `opencode run` it launched). **Two OpenCode windows
+is the default** — leave a slot. Three fit only while last-turn prompts stay
+under ~25k **and** Hermes is idle.
 
 Three roles:
 
@@ -35,9 +41,10 @@ Three roles:
 | `orchestrator` | primary | Dispatch **one** `worker` | no edit; `task` allowed |
 | `worker` | subagent | Write | full tools; `task` deny |
 
-Stock `build` is demoted (no Tab, no edits). `general` is an alias of `worker`.
-Loop: Plan until ready, **Tab to Orchestrator**, it launches one worker.
-One window. Two writers = 70–120s prefills.
+Stock `build` and `general` are disabled. Loop: Plan until ready, **Tab to
+Orchestrator**, it launches one worker. Inside one window the worker is serial.
+A second window is allowed on disjoint paths. Headless `opencode run` cannot
+Tab — pass `--agent orchestrator`.
 
 `:8091` is retired. Ollama on mini is stopped. No second GPU host.
 
