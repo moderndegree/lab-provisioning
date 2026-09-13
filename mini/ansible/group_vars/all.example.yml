@@ -78,19 +78,18 @@ auto_reboot: true
 # token is safe. Open WebUI now lives on ser5 (roles/openwebui there), not mini.
 # enable_cloudflared: true
 
-# ─── llama.cpp serving path (roles/llamacpp) ───
-# Podman quadlets, one per entry in llamacpp_instances: llama-quality on :8090
-# (THE DRIVER — 4 slots, MTP n-max 3, 105 tok/s single-stream) and llama-deep on
-# :8091 (Qwen3.8-27B, 1 slot, ~30 tok/s, called deliberately for hard problems).
-# 105 tok/s against vLLM's 25 on the same model and hardware — see that role's
-# defaults for why the gap is the checkpoint, not the runtime.
+# ─── halogen-flash serving path (roles/halogen) ───
+# Closed-source gfx1151 engine for Qwen3.8-Flash-Next. Replaces llama.cpp on
+# :8090 (same alias `qwen3.8-flash-next`, so ser5/Open WebUI/Hermes/opencode
+# keep working). Holds most of 128 GB — llama-quality must not run beside it.
+# Stage ~118 GiB of .hgn weights first, or run mini/scripts/halogen-setup.sh:
+#   hf download peonist-ai/halogen-qwen3.8-flash-next \
+#     --local-dir /data/models/halogen-qwen3.8-flash-next
+# enable_halogen: true
 #
-#   systemctl --user start|stop|status llama-servers.target
-#
-# Needs the GGUFs staged first (the role asserts they exist) — see
-# docs/provisioning-checklist.md. Holds ~83 GiB resident across both instances
-# (measured together 2026-08-14), hence the two Ollama lines below. The old
-# llama-throughput/nemotron instance was retired 2026-08-14 as dominated.
+# Keep enable_llamacpp on if you still want that role's udev rule, HF CLI, and
+# toolbox image (whisper.cpp reuses them). The llamacpp role will not start
+# llama-server while enable_halogen is true.
 # enable_llamacpp: true
 
 # ─── whisper.cpp GPU STT (roles/whispercpp) ───

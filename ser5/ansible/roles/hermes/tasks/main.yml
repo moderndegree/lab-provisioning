@@ -181,6 +181,69 @@
         - restart hermes-proxy
         - restart hermes-dashboard
 
+    - name: Set Hermes agent reasoning effort for Flash-Next
+      ansible.builtin.command:
+        cmd: "{{ hermes_bin }} config set agent.reasoning_effort {{ hermes_agent_reasoning_effort }}"
+      environment:
+        HOME: "{{ user_home }}"
+        HERMES_HOME: "{{ hermes_home }}"
+        PATH: "{{ hermes_path }}"
+      become: true
+      become_user: "{{ username }}"
+      register: hermes_effort_set
+      changed_when: hermes_effort_set.rc == 0
+      when:
+        - hermes_manage_model | bool
+        - ((hermes_config_raw.content | default('') | b64decode | from_yaml) or {}).get('agent', {}).get('reasoning_effort')
+          | default('') | string != (hermes_agent_reasoning_effort | string)
+      notify:
+        - restart hermes-gateway
+
+    # extra_body is a nested map; `hermes config set` stringifies JSON. Same
+    # env-carried Python write as command_allowlist.
+    - name: Merge Qwen thinking sampler into the mini custom provider
+      ansible.builtin.command:
+        cmd: >-
+          python3 -c "
+          import json,os,yaml,sys,pathlib;
+          p=pathlib.Path('{{ hermes_home }}/config.yaml');
+          c=yaml.safe_load(p.read_text()) or {};
+          want=json.loads(os.environ['HERMES_CUSTOM_EXTRA_BODY']);
+          url=os.environ['HERMES_MODEL_BASE_URL'];
+          model=os.environ['HERMES_MODEL_DEFAULT'];
+          cps=c.get('custom_providers') or [];
+          if not isinstance(cps, list):
+              cps=[];
+          hit=False; changed=False;
+          for cp in cps:
+              if not isinstance(cp, dict):
+                  continue
+              if str(cp.get('base_url') or '') != url:
+                  continue
+              hit=True
+              if cp.get('extra_body') != want or cp.get('model') != model:
+                  cp['extra_body']=want; cp['model']=model;
+                  cp['models']=[model]; changed=True
+          if not hit:
+              cps.append({'name':'mini-quality','base_url':url,'model':model,'models':[model],'extra_body':want});
+              changed=True
+          sys.exit(0) if not changed else (c.__setitem__('custom_providers',cps),
+          p.write_text(yaml.safe_dump(c,sort_keys=False,default_flow_style=False,allow_unicode=True)),
+          sys.exit(10))
+          "
+      environment:
+        HERMES_CUSTOM_EXTRA_BODY: "{{ hermes_custom_extra_body | to_json }}"
+        HERMES_MODEL_BASE_URL: "{{ hermes_model_base_url }}"
+        HERMES_MODEL_DEFAULT: "{{ hermes_model_default }}"
+      become: true
+      become_user: "{{ username }}"
+      register: hermes_extra_body_set
+      changed_when: hermes_extra_body_set.rc == 10
+      failed_when: hermes_extra_body_set.rc not in [0, 10]
+      when: hermes_manage_model | bool
+      notify:
+        - restart hermes-gateway
+
     # Fail loudly rather than leaving Hermes silently on its previous route. The
     # whole point of this block is that a wrong route here is invisible: Hermes
     # does not error when its configured endpoint is unreachable, it falls

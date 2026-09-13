@@ -53,13 +53,30 @@ hermes_terminal_timeout: 300
 hermes_command_allowlist:
   - opencode
 
-# :8090 is the "quality" llama-server instance from mini/ansible/roles/llamacpp —
-# qwen3.6-35b-a3b with MTP, ~106 tok/s single-stream, THE driver model.
-# The name must match the server's --alias exactly; Hermes sends it as the model
-# field and llama-server rejects anything else.
+# :8090 is halogen-flash (Qwen3.8-Flash-Next). The name must match
+# HALOGEN_MODEL_ID exactly; Hermes sends it as the model field.
 hermes_model_provider: "custom"
 hermes_model_base_url: "http://mini:8090/v1"
-hermes_model_default: "qwen3.6-35b-a3b-mtp"
+hermes_model_default: "qwen3.8-flash-next"
+
+# Qwen thinking sampler for agentic coding. halogen default is greedy (temp 0)
+# when the client sends nothing — that is the wrong default for this model.
+# extra_body is merged into every chat-completions request for this provider.
+# halogen maps reasoning_effort "high" → "xhigh". max_tokens 16384 so thinking
+# cannot eat the whole budget (empty content + finish_reason=length).
+hermes_agent_reasoning_effort: "high"
+hermes_custom_extra_body:
+  temperature: 1.0
+  top_p: 0.95
+  top_k: 20
+  min_p: 0
+  presence_penalty: 0
+  max_tokens: 32768
+  reasoning_effort: high
+  enable_thinking: true
+  chat_template_kwargs:
+    enable_thinking: true
+    preserve_thinking: true
 
 # Per-SLOT context, not the instance total. :8090 runs ctx 1048576 across
 # parallel 4, statically partitioned at startup, so one conversation can never

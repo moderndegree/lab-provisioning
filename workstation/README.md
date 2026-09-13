@@ -9,9 +9,9 @@ symlink into, your development machine.
 
 | Path | Goes where on the workstation | Purpose |
 |---|---|---|
-| [opencode.json](opencode.json) | project root **or** `~/.config/opencode/` | Two llama-server providers + model limits + the 11-agent team (plus `deep` and `research` escalations) |
-| [AGENTS.md](AGENTS.md) | project root | Injected at session start; the `@@RESULT` contract |
-| [.moderndegree/prompts/](.moderndegree/prompts/) | project root | Per-agent system prompts referenced by `opencode.json` |
+| [opencode.json](opencode.json) | `~/.config/opencode/` (symlink) | halogen-flash on mini:8090 + plan → orchestrator → worker |
+| [AGENTS.md](AGENTS.md) | `~/.config/opencode/` and/or project root | Pool rule + `@@RESULT` contract. Injected at session start. |
+| [.moderndegree/prompts/](.moderndegree/prompts/) | project root | Optional longer prompts; the four-agent config does not require them |
 | [docs/business-layer.md](docs/business-layer.md) | reference | Tier L/G/X/Z routing, sovereignty, OpenSpec gates |
 | [.moderndegree/skills/task-package.md](.moderndegree/skills/task-package.md) | project root | **Required** problem understanding + context packaging before subagent handoffs |
 | [.moderndegree/skills/second-brain.md](.moderndegree/skills/second-brain.md) | project root | Postmortems + playbook promotion after misses (`/data/brain`) |
@@ -19,7 +19,33 @@ symlink into, your development machine.
 | [.moderndegree/skills/tdd.md](.moderndegree/skills/tdd.md) | project root | Test-first discipline; tests sit at the public seam, not an inner helper |
 | [bin/](bin/) | ser5 `~/.local/bin/` via `roles/devtools` | Measurement harness for the agent chain — see [bin/README.md](bin/README.md) |
 
-## The split that drives everything
+## Current topology (2026-09-12)
+
+One endpoint: **halogen-flash 0.5.8** at `http://mini:8090/v1`, model
+`qwen3.8-flash-next`. Four HTTP slots over **one 262144-position KV pool**
+(not llama.cpp partitioned `-np`). Each request reserves `prompt + max_tokens`
+(OpenCode sends 32768). Two fat coding agents do not fit (measured 2026-09-12:
+137k+71k + two 32k reservations = 274k → 70–120 s prefills).
+
+Three roles:
+
+| Agent | Mode | Job | Tools |
+|---|---|---|---|
+| `plan` | primary (default) | Think | no edit / no `task` |
+| `orchestrator` | primary | Dispatch **one** `worker` | no edit; `task` allowed |
+| `worker` | subagent | Write | full tools; `task` deny |
+
+Stock `build` is demoted (no Tab, no edits). `general` is an alias of `worker`.
+Loop: Plan until ready, **Tab to Orchestrator**, it launches one worker.
+One window. Two writers = 70–120s prefills.
+
+`:8091` is retired. Ollama on mini is stopped. No second GPU host.
+
+## Historical: llama.cpp two-endpoint split (superseded 2026-08 / 2026-09)
+
+The text below describes `qwen3.6-35b` on `:8090` and `qwen3.8-27b` on `:8091`
+with statically partitioned slots. That is not what Yoga talks to now. Kept as
+measurement archive.
 
 Two `llama-server` endpoints on mini. **As of 2026-08-14 the split is by
 DIFFICULTY, not by concurrency** — that inverts the previous design, and the

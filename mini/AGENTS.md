@@ -35,14 +35,16 @@ ansible/
     ollama/              Ollama server + systemd override
     tailscale/           tailnet join
     containers/          rootless Podman; user lingering; subuid/subgid; quadlet support
-    llamacpp/            llama-server Podman quadlets, one per instance (enable_llamacpp)
+    llamacpp/            llama-server Podman quadlets, one per instance (enable_llamacpp; rollback)
+    halogen/             halogen-flash-server quadlet for Qwen3.8-Flash-Next (enable_halogen)
     cloudflared/         Cloudflare Tunnel (Podman quadlet; remote-managed token)
 ```
 
 Role execution order is fixed in `ansible/site.yml`:
-`base → amdgpu_rocm → ollama → tailscale → containers → llamacpp → cloudflared`.
+`base → amdgpu_rocm → ollama → tailscale → containers → llamacpp → halogen → cloudflared`.
 Dependencies flow top-to-bottom (e.g. `ollama` assumes GPU userspace is already
-installed; `cloudflared` assumes `containers` has already set up quadlet support).
+installed; `halogen` stops llama-quality before binding `:8090`; `cloudflared`
+assumes `containers` has already set up quadlet support).
 Open WebUI lives on ser5 now (`roles/openwebui` there) — mini stays inference-only.
 
 ## Commands
@@ -94,30 +96,35 @@ Always run `make lint` and `make syntax-check` after editing roles or vars.
 
 ## Model policy (bandwidth-bound, not task-depth-bound)
 
-Serving is `llama-server`, not Ollama. One instance runs as a Podman quadlet, defined
-in `roles/llamacpp` (`llamacpp_instances`), named by ROLE rather than by model so the
-model can be swapped without renaming the unit:
+Serving is **halogen-flash**, not llama.cpp and not Ollama. One instance runs as
+a Podman quadlet from `roles/halogen`, on the same port and model id clients
+already use:
 
-| Unit | Port | Model | Slots | Ctx/slot | MTP | Speed |
-|---|---|---|---|---|---|---|
-| `llama-quality` | 8090 | `qwen3.8-flash-next` (Unsloth UD-Q4_K_XL) | 1 | **up to 262144** (probe then raise) | off until measured | TBD |
-| `llama-deep` | 8091 | RETIRED 2026-08-26 — XL is the whole 122 Gi budget | — | — | — | — |
+| Unit | Port | Model | Slots | Ctx | Engine |
+|---|---|---|---|---|---|
+| `halogen-flash` | 8090 | `qwen3.8-flash-next` (peonist-ai HGN W4B + quality sidecar) | 4 (shared KV pool) | **262144** native | `ghcr.io/peonist-ai/halogen-flash-server:0.5.8` |
+| `llama-quality` | 8090 | RETIRED 2026-09-11 — Unsloth UD-Q4_K_XL GGUF kept on disk as rollback | — | — | llama.cpp Vulkan |
+| `llama-deep` | 8091 | RETIRED 2026-08-26 | — | — | — |
 
-`llama-quality` is the only live slot — orchestration, planning, critique, docs,
-infra, chat, coding, and hard design. Unsloth Qwen3.8-Flash-Next UD-Q4_K_XL
-(125B MoE, 6B active, 111.3 GB) fills the 122 Gi box; a second instance would
-OOM. Decode still tracks active parameters. Thinking on, `reasoning_effort=medium`,
-`--reasoning-budget 6000`. Do not restore `:8091` unless asked.
+`halogen-flash` is the only live slot — orchestration, planning, critique, docs,
+infra, chat, coding, and hard design. Qwen3.8-Flash-Next (125B MoE, 6B active,
+plus a 51B n-gram table) fills the 122 Gi box; a second LLM would OOM. The
+engine is gfx1151-only and closed source; the weights are `.hgn` and will not
+load in llama.cpp. Do not restore `llama-quality` alongside it.
 
-`llama-deep` (qwen3.8-27b) was RETIRED 2026-08-26 with this swap. `llama-throughput`
-(nemotron-3.5-lightning) was RETIRED 2026-08-14.
+Thinking is on by default (`reasoning_effort=xhigh`). Thinking tokens count
+against `max_tokens` / `max_completion_tokens`; an empty `content` with
+`finish_reason: "length"` means the budget died mid-thought, not a silent
+model. Send at least 8192, or `"enable_thinking": false` for a short reply.
+Do not YaRN past 262144 unless you set `HALOGEN_ROPE_YARN` deliberately.
 
-Context is per SLOT and partitioned statically at startup (`-c` total / `-np` slots),
-so a single chat can never exceed its slot's window no matter how idle the box is.
-Flash-Next probes at 8192 then raises `-c` to min(262144, what `MemAvailable`
-allows). KV is ~24 KB/token, so the native 262k window is ~6 GiB — that is the
-intended spend of the leftover RAM. The ceiling is KV BYTES, not cells. Do not
-YaRN past 262144 (interleaved mrope; yarn was a silent no-op on Qwen3.8-27B).
+`llama-deep` (qwen3.8-27b) was RETIRED 2026-08-26. `llama-throughput`
+(nemotron-3.5-lightning) was RETIRED 2026-08-14. The Unsloth XL GGUF stays
+under `/data/models/unsloth-Qwen3.8-Flash-Next-UD-Q4_K_XL` as rollback.
+
+`MemAvailable` lies by ~68 GiB while halogen is loaded (locked weights counted
+as reclaimable cache). Believe the server's own startup line about contiguous
+2 MiB blocks.
 
 Ollama is installed but `stopped`/`disabled` (`ollama_service_*` in group_vars). It is
 for trying a model by hand, not for serving; it cannot hold weights at the same time as
@@ -126,10 +133,30 @@ editing its env vars does not start it — handlers flush after the task that st
 
 Roles live in opencode prompts, not baked Modelfiles.
 
-## llama.cpp serving path (`roles/llamacpp`, `enable_llamacpp`)
+## halogen-flash serving path (`roles/halogen`, `enable_halogen`)
 
-Podman **quadlets**, one per entry in `llamacpp_instances`, enabled at boot. This
-is what Open WebUI on ser5 points at. Full rationale and measurements are in
+One Podman **quadlet**, `halogen-flash.service`, enabled at boot. This is what
+Open WebUI on ser5, Hermes, and opencode point at (`http://mini:8090/v1`,
+model `qwen3.8-flash-next`). Unattended bring-up: `mini/scripts/halogen-setup.sh`.
+Full flags are in `roles/halogen/defaults/main.yml`.
+
+```
+systemctl --user restart halogen-flash
+journalctl --user -u halogen-flash -f
+curl -sf http://127.0.0.1:8090/health
+```
+
+Pin stays on `0.5.8`. Do not run Cockpit's 0.5.4 image — sampled output from
+0.4.x through 0.5.4 is unreliable. Do not flip `amd_iommu=off` for a first
+measurement; mini keeps `iommu=pt` for the NPU.
+
+`roles/llamacpp` remains for udev, the HF CLI, the toolbox image, and rollback.
+While `enable_halogen` is true it will not start llama-server.
+
+## llama.cpp serving path (`roles/llamacpp`, `enable_llamacpp`) — rollback
+
+Podman **quadlets**, one per entry in `llamacpp_instances`, enabled at boot
+only when halogen is off. Full rationale and historical measurements are in
 `roles/llamacpp/defaults/main.yml`.
 
 ```
@@ -288,11 +315,10 @@ matters for gated repos; unset writes no token file.
   build on kernel 7.0 and is unnecessary).
 - **Never switch to ROCm 7 NIGHTLIES** — they cap memory at 64 GB. 7.14.0 is a
   production release and is not affected; do not confuse the two.
-- **Nothing on the serving path consumes host ROCm.** Ollama runs Vulkan
-  (`OLLAMA_VULKAN=1`) and `roles/llamacpp` carries Mesa/RADV inside its image.
-  ROCm is here as the `gpu_backend: rocm` fallback and for host tooling
-  (`rocminfo`, `rocm-smi`). Judge changes to it on that basis, not on serving
-  throughput.
+- **halogen-flash carries its own ROCm 7.14 userspace in the image.** Host ROCm
+  is still not on the serving path (Ollama/Vulkan rollback and `rocminfo` /
+  `rocm-smi` only). Do not "fix" serving by changing the host TheRock tarball.
+  halogen talks to the in-tree `amdgpu`/KFD driver; WSL2 is not supported.
 - **Never install `linux-firmware-20251125`** — it breaks ROCm. The `base` role pins it
   out via `/etc/apt/preferences.d/no-bad-firmware`.
 - Kernel cmdline (`iommu=pt amd_iommu=on amdgpu.gttsize=131072 ttm.pages_limit=33554432`) is

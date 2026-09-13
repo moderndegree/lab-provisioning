@@ -22,6 +22,9 @@
 # to run this instead are MTP (Ollama's fork does not expose --spec-type) and
 # real control over --parallel.
 enable_llamacpp: false
+# When roles/halogen is enabled, this role still installs udev / HF / the
+# toolbox image but llamacpp_active_instances is empty — llama-server must not
+# start beside halogen.
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Defaults shared by every instance (override per-instance where it matters)

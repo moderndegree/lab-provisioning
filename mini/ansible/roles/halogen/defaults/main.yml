@@ -1,0 +1,70 @@
+---
+# halogen-flash serving path — Qwen3.8-Flash-Next on gfx1151 via the closed-source
+# peonist-ai engine. One Podman quadlet, OpenAI-compatible API on the same port
+# llama-quality used to occupy, so ser5/Open WebUI/Hermes/opencode keep working.
+#
+# WHY THIS EXISTS. llama.cpp GGUF on this model is the thing halogen is 2–4×
+# faster than on prefill, which is most of wall clock for agent/coding prompts.
+# The checkpoint is halogen's own .hgn format and will not load in llama.cpp.
+# Native Linux + amdgpu/KFD only; WSL2 is not a supported host.
+#
+# THIS HOLDS MOST OF 128 GB once loaded (~68 GiB resident weights + ~35 GiB KV
+# pool + the n-gram table in page cache). llama-server and Ollama cannot run
+# beside it. whisper-stt is small enough to leave up; if halogen hangs for
+# minutes at 100% of one core with no output, stop whisper and retry.
+#
+# enable_halogen is opt-in (same pattern as enable_llamacpp) because the role
+# asserts the ~118 GiB checkpoint is on disk. Stage it first:
+#   hf download peonist-ai/halogen-qwen3.8-flash-next \
+#     --local-dir /data/models/halogen-qwen3.8-flash-next
+# or run mini/scripts/halogen-setup.sh on the box.
+enable_halogen: false
+
+# PINNED TO A RELEASE TAG, DELIBERATELY. 0.5.4 and earlier have a use-after-free
+# on temperature > 0 (sampled output is unreliable, and concurrent sampled
+# requests can take the container down). 0.5.7 raised the HTTP keep-alive from
+# the framework default of 5 s to 300 s — agents idle between tool turns longer
+# than 5 s. Do not "upgrade" to a moving :latest.
+halogen_image: "ghcr.io/peonist-ai/halogen-flash-server:0.5.8"
+
+# Same directory the llama.cpp role uses. The HGN bundle lives in a subdirectory
+# so the Unsloth GGUF can stay on disk as a rollback.
+halogen_models_dir: "{{ data_mount }}/models/halogen-qwen3.8-flash-next"
+halogen_checkpoint: "{{ halogen_models_dir }}/qwen38-flash-next-w4b.hgn"
+halogen_overlay: "{{ halogen_models_dir }}/qwen38-flash-next-w4b.overlay.hgn"
+halogen_tokenizer: "{{ halogen_models_dir }}/tokenizer/tokenizer.json"
+
+# Exact LFS sizes from huggingface.co/peonist-ai/halogen-qwen3.8-flash-next
+# (retrieved 2026-09-11). A truncated download is a 115 GiB file that fails
+# minutes into load, which is why these are exact rather than a floor.
+halogen_checkpoint_bytes: 124068083904
+halogen_overlay_bytes: 2477677120
+
+# :8090 and qwen3.8-flash-next are the contract with every client. Changing
+# either is a client-breaking rename, not a local tweak.
+halogen_api_port: 8090
+halogen_model_id: "qwen3.8-flash-next"
+
+# Engine protocol has no auth and binds loopback inside the container (the
+# image's `all` mode hardcodes --bind 127.0.0.1). Leave it unpublished.
+halogen_engine_port: 8730
+
+# On for agentic coding: Open WebUI / Hermes / OpenCode can send screenshots.
+# 0.84 GiB sidecar; ~5–25 s per image. Text-only requests are byte-identical
+# to a server without the tower.
+halogen_vision: true
+
+# Same udev rule as roles/llamacpp. Duplicated so this role does not depend on
+# enable_llamacpp: true — halogen is the serving path, llama.cpp is the fallback.
+halogen_permissive_udev: true
+halogen_udev_rule_path: "/etc/udev/rules.d/70-kfd.rules"
+
+halogen_health_interval: "30s"
+halogen_health_start_period: "1800s"
+halogen_health_timeout: "35s"
+halogen_restart_sec: 10
+halogen_timeout_start_sec: 1800
+
+halogen_quadlet_dir: "{{ node_home }}/.config/containers/systemd"
+halogen_quadlet_path: "{{ halogen_quadlet_dir }}/halogen-flash.container"
+halogen_unit: "halogen-flash.service"

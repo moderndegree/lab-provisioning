@@ -201,17 +201,24 @@ Ollama serving path, which is no longer used.)
 
 ---
 
-## Model policy - two llama-server instances
+## Model policy - halogen-flash on :8090
 
-Serving is `llama-server`, not Ollama. Two instances run as Podman quadlets from
-`llamacpp_instances` in `roles/llamacpp`, named by ROLE so the model can be
-swapped without renaming the unit. No baked system prompts — agent roles live in
-the workstation opencode config.
+Serving is **halogen-flash**, not Ollama and not llama.cpp. One instance runs as
+a Podman quadlet from `roles/halogen`. The alias and port are the contract with
+every client — renaming either breaks Open WebUI / Hermes / opencode.
 
-| Unit | Port | Model | Shape | Slots | Ctx/slot | MTP | Measured |
-|---|---|---|---|---|---|---|---|
-| `llama-quality` | 8090 | `qwen3.6-35b-a3b-mtp-q4_K_M` | 35B-A3B MoE (3B active), 22 GB | 4 | **262144** | n-max 3 | 106 tok/s c=1; 109 agg c=4 |
-| `llama-deep` | 8091 | `qwen3.8-27b-q4_K_M` | 27B DENSE hybrid, 19 GB (+3.2 GB MTP head) | 1 | **262144** | n-max 5 | ~25 tok/s sustained |
+| Unit | Port | Model | Shape | Engine |
+|---|---|---|---|---|
+| `halogen-flash` | 8090 | `qwen3.8-flash-next` | 125B MoE, 6B active, ~118 GiB HGN W4B + quality sidecar | `halogen-flash-server:0.5.8` |
+| `llama-quality` | 8090 | RETIRED 2026-09-11 — Unsloth UD-Q4_K_XL GGUF kept as rollback | llama.cpp Vulkan |
+
+The box is full. Do not start llama-server or Ollama beside halogen. Bring-up:
+
+```bash
+# on mini, after the ~118 GiB download
+mini/scripts/halogen-setup.sh
+# or: enable_halogen: true and make provision (weights must already be staged)
+```
 
 `llama-quality` is the driver — every agent role runs there except `deep`.
 `llama-deep` is called deliberately, never in a loop; it is ~4x slower.
@@ -278,20 +285,15 @@ since reasoning can consume the whole `max_tokens` and return empty content.
 
 ---
 
-## llama.cpp serving path (`enable_llamacpp: true`)
+## halogen-flash serving path (`enable_halogen: true`)
 
-Podman quadlets, one per entry in `llamacpp_instances`, generated into
-`llama-<name>.service`. Two by default:
-
-| Instance | Port | Model | Sizing |
-|----------|------|-------|--------|
-| `llama-quality` | 8090 | `qwen3.6-35b-a3b-mtp` (q4_K_M) | 262144/slot x 4, MTP n-max 3 |
-| `llama-deep` | 8091 | `qwen3.8-27b` (q4_K_M) | 262144/slot x 1, MTP n-max 5, f16 KV, separate `-md` head |
+One Podman quadlet, `halogen-flash.service`. llama.cpp remains installed as
+the rollback (`enable_llamacpp`) but does not start while halogen is on.
 
 ```bash
-systemctl --user start|stop|status llama-servers.target   # all instances
-systemctl --user restart llama-quality                     # just one
-journalctl --user -u llama-quality -f
+systemctl --user restart halogen-flash
+journalctl --user -u halogen-flash -f
+curl -sf http://127.0.0.1:8090/health
 ```
 
 `name` is the **role** and becomes the unit and container; `alias` is the **model
@@ -325,10 +327,10 @@ nothing a quadlet does not do better and cost the ability to stop the server.
   where gfx1151 became officially supported (2026-07-15). Do not "fix" this back to
   7.2.x: that is only what `repo.radeon.com/rocm/apt` is frozen at, not the current
   release.
-- **Leave RAM headroom.** The two llama-server instances hold 22 + 12 = 34 GB of
-  weights plus their KV, and measured ~72 GB resident of the ~110 GB GPU pool.
-  KV cost is ctx × slots, so raising one means lowering the other. Do not start
-  Ollama while they run — it cannot hold weights alongside them in 122 GiB.
+- **Leave RAM headroom.** halogen-flash holds most of 128 GB once loaded (~68 GiB
+  resident weights plus the KV pool). Do not start llama-server or Ollama
+  beside it. `MemAvailable` will overstate free RAM by ~68 GiB; believe the
+  server's own startup line.
 - **Re-verify after any bump.** Re-run the verify block above after any kernel or ROCm
   upgrade before trusting the node.
 - **gfx1151 is community-supported only.** Pin versions; nothing here is on AMD's

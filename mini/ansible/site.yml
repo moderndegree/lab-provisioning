@@ -9,6 +9,7 @@
 #   tailscale   → tailnet access
 #   containers  → rootless Podman; user lingering; quadlet support
 #   llamacpp    → llama-server Podman quadlets + GPU/model prerequisites
+#   halogen     → halogen-flash-server for Qwen3.8-Flash-Next (enable_halogen)
 #   whispercpp  → whisper.cpp Vulkan STT quadlet, reuses llamacpp's image/udev
 #                 (enable_whispercpp: true to activate)
 #   cloudflared → Cloudflare Zero Trust tunnel (enable_cloudflared: true to activate)
@@ -33,6 +34,11 @@
     - role: llama_benchy
       when: enable_llamacpp | bool
       tags: [llama_benchy, bench]
+    # Closed-source gfx1151 engine for Qwen3.8-Flash-Next. After llamacpp so it
+    # can stop llama-quality before binding :8090. Holds most of 128 GB.
+    - role: halogen
+      when: enable_halogen | default(false) | bool
+      tags: [halogen]
     # Reuses llamacpp's pinned toolbox image and GPU udev rule — kept after it
     # for the same reason llama_benchy is.
     - role: whispercpp

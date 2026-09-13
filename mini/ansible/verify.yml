@@ -75,7 +75,15 @@
       ansible.builtin.include_role:
         name: llamacpp
         tasks_from: verify
-      when: enable_llamacpp | bool
+      when:
+        - enable_llamacpp | bool
+        - not (enable_halogen | default(false) | bool)
+
+    - name: Verify the halogen-flash serving path
+      ansible.builtin.include_role:
+        name: halogen
+        tasks_from: verify
+      when: enable_halogen | default(false) | bool
 
     - name: Verify the whisper.cpp STT path
       ansible.builtin.include_role:

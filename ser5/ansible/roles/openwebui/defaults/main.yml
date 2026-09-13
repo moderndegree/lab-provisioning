@@ -87,10 +87,9 @@ openwebui_enable_ollama_api: true
 # model swap on mini needs no URL change — the new alias appears in the
 # picker after llama-server restart.
 #
-# Restored 2026-08-27 — quality+deep pair (Flash-Next / 122B tests rolled back):
-#   :8090  qwen3.6-35b-a3b-mtp  MoE 35B-A3B q4_K_M, MTP n-max 3, 262144/slot x 4
-#   :8091  qwen3.8-27b         dense 27B q4_K_M + separate MTP head n-max 5,
-#                              262144 x 1, reasoning_effort=medium, budget 6000
+# :8090 is halogen-flash (qwen3.8-flash-next). :8091 is retired; keep the URL
+# in the seed list only if a live DB already has a fourth slot — the live
+# openai.api_configs on ser5 already has index 3 disabled.
 #
 # Qwen3.8-27B is a reasoning model: expect a collapsed "thinking" section before
 # the answer. llama.cpp separates that into reasoning_content. The server pins

@@ -26,6 +26,14 @@
       HOME: "{{ node_home }}"
       XDG_RUNTIME_DIR: "/run/user/{{ ansible_facts['getent_passwd'][node_user][1] }}"
 
+# halogen-flash holds most of 128 GB. When it is the serving path this role
+# still installs udev, the HF CLI, and the toolbox image (whisper.cpp reuses
+# them) but must not start a llama-server — a .container left WantedBy=default
+# would come back at boot and fight halogen for RAM.
+- name: Do not serve llama.cpp instances while halogen holds the box
+  ansible.builtin.set_fact:
+    llamacpp_active_instances: "{{ [] if (enable_halogen | default(false) | bool) else llamacpp_instances }}"
+
 # ─── GPU device permissions ──────────────────────────────────────────────────
 # See the trade-off note in defaults/main.yml before disabling this. Applied
 # before any container starts: a quadlet launched against device nodes still at
@@ -142,7 +150,7 @@
 - name: Stat each configured model file
   ansible.builtin.stat:
     path: "{{ item.model }}"
-  loop: "{{ llamacpp_instances }}"
+  loop: "{{ llamacpp_active_instances }}"
   loop_control:
     label: "{{ item.name }}"
   register: llamacpp_model_stat
@@ -163,16 +171,16 @@
 - name: Require instance ports to be unique
   ansible.builtin.assert:
     that:
-      - llamacpp_instances | map(attribute='port') | list | unique | length
-        == llamacpp_instances | length
+      - llamacpp_active_instances | map(attribute='port') | list | unique | length
+        == llamacpp_active_instances | length
     fail_msg: "llamacpp_instances contains duplicate ports."
 
 # Names become unit and container names, so collisions are worse than confusing.
 - name: Require instance names to be unique
   ansible.builtin.assert:
     that:
-      - llamacpp_instances | map(attribute='name') | list | unique | length
-        == llamacpp_instances | length
+      - llamacpp_active_instances | map(attribute='name') | list | unique | length
+        == llamacpp_active_instances | length
     fail_msg: "llamacpp_instances contains duplicate names."
 
 # The KV ceiling is a hazard, not a style rule — exceeding it wedges the amdgpu
@@ -186,7 +194,7 @@
       {{ llamacpp_ctx_warn }} measured-safe per-process ceiling. Bring it up by
       hand first and confirm it loads — an over-large KV request hangs the amdgpu
       DRM allocator in unkillable D state rather than failing, costing a reboot.
-  loop: "{{ llamacpp_instances }}"
+  loop: "{{ llamacpp_active_instances }}"
   loop_control:
     label: "{{ item.name }}"
   when: item.ctx > llamacpp_ctx_warn
@@ -229,7 +237,7 @@
   ansible.builtin.command:
     cmd: "pkill -f '^llama-server -m {{ item.model }}'"
   become_user: "{{ node_user }}"
-  loop: "{{ llamacpp_instances }}"
+  loop: "{{ llamacpp_active_instances }}"
   loop_control:
     label: "{{ item.name }}"
   register: llamacpp_reap
@@ -265,7 +273,7 @@
     owner: "{{ node_user }}"
     group: "{{ node_user }}"
     mode: "0644"
-  loop: "{{ llamacpp_instances }}"
+  loop: "{{ llamacpp_active_instances }}"
   loop_control:
     label: "{{ item.name }}"
   register: llamacpp_quadlets
@@ -291,7 +299,7 @@
     label: "{{ item.path | basename }}"
   when: >-
     (item.path | basename | regex_replace('^llama-', '') | regex_replace('\\.container$', ''))
-    not in (llamacpp_instances | map(attribute='name') | list)
+    not in (llamacpp_active_instances | map(attribute='name') | list)
   failed_when: false
 
 - name: Remove quadlets for removed instances
@@ -303,7 +311,7 @@
     label: "{{ item.path | basename }}"
   when: >-
     (item.path | basename | regex_replace('^llama-', '') | regex_replace('\\.container$', ''))
-    not in (llamacpp_instances | map(attribute='name') | list)
+    not in (llamacpp_active_instances | map(attribute='name') | list)
   register: llamacpp_pruned
 
 # Quadlets are compiled into .service units by a generator that only runs on
@@ -323,6 +331,7 @@
     enabled: true
   become_user: "{{ node_user }}"
   environment: "{{ llamacpp_user_env }}"
+  when: llamacpp_active_instances | length > 0
 
 # Restart only what changed: each restart reloads tens of GiB of weights.
 - name: Restart instances whose quadlet changed
@@ -344,6 +353,6 @@
     state: started
   become_user: "{{ node_user }}"
   environment: "{{ llamacpp_user_env }}"
-  loop: "{{ llamacpp_instances }}"
+  loop: "{{ llamacpp_active_instances }}"
   loop_control:
     label: "{{ item.name }}"

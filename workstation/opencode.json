@@ -3,32 +3,25 @@
   "provider": {
     "quality": {
       "npm": "@ai-sdk/openai-compatible",
+      "name": "mini",
       "options": {
         "baseURL": "http://mini:8090/v1",
         "apiKey": "llamacpp"
       },
       "models": {
-        "qwen3.6-35b-a3b-mtp": {
-          "name": "Qwen3.6-35B-A3B MTP Q4_K_M (general — :8090, 262144 ctx / 4 slots)",
-          "limit": {
-            "context": 262144,
-            "output": 8192
-          }
-        }
-      }
-    },
-    "deep": {
-      "npm": "@ai-sdk/openai-compatible",
-      "options": {
-        "baseURL": "http://mini:8091/v1",
-        "apiKey": "llamacpp"
-      },
-      "models": {
-        "qwen3.8-27b": {
-          "name": "Qwen3.8-27B Q4_K_M (coding + hard design — :8091, 262144 ctx, 1 slot)",
+        "qwen3.8-flash-next": {
+          "name": "Qwen3.8 Flash-Next",
           "limit": {
             "context": 262144,
             "output": 32768
+          },
+          "options": {
+            "temperature": 1,
+            "topP": 0.95,
+            "topK": 20,
+            "minP": 0,
+            "presencePenalty": 0,
+            "reasoningEffort": "high"
           }
         }
       }
@@ -36,8 +29,9 @@
     "github-copilot": {},
     "xai": {}
   },
-  "model": "quality/qwen3.6-35b-a3b-mtp",
-  "small_model": "quality/qwen3.6-35b-a3b-mtp",
+  "model": "quality/qwen3.8-flash-next",
+  "small_model": "quality/qwen3.8-flash-next",
+  "default_agent": "plan",
   "compaction": {
     "auto": true,
     "prune": true,
@@ -45,218 +39,73 @@
     "reserved": 8192
   },
   "instructions": [
-    "AGENTS.md",
-    ".moderndegree/skills/*.md"
+    "AGENTS.md"
   ],
-  "mcp": {
-    "cortex": {
-      "type": "local",
-      "command": [
-        "/home/blewis/projects/ai-workstation/node_modules/.bin/tsx",
-        "/home/blewis/projects/ai-workstation/mcp/cortex-server.ts"
-      ],
-      "environment": {
-        "CORTEX_VAULT_DIR": "/data/brain"
-      },
-      "enabled": true
-    }
-  },
   "agent": {
-    "build": {
+    "plan": {
       "mode": "primary",
-      "model": "quality/qwen3.6-35b-a3b-mtp",
+      "model": "quality/qwen3.8-flash-next",
+      "reasoningEffort": "medium",
+      "permission": {
+        "task": "deny",
+        "edit": "deny",
+        "write": "deny",
+        "patch": "deny",
+        "bash": "deny"
+      },
+      "prompt": "Plan mode: read-only. Glob/grep first, read only a few files, then write a short plan as a slice list (small serial pieces, not one giant task). Stop and wait. The user will Tab to Orchestrator when ready. Do not implement. Do not launch subagents. Do not paste file contents into the plan.",
+      "description": "Think and refine the plan. No edits. Tab to Orchestrator when ready."
+    },
+    "orchestrator": {
+      "mode": "primary",
+      "model": "quality/qwen3.8-flash-next",
+      "reasoningEffort": "high",
       "permission": {
         "edit": "deny",
         "write": "deny",
         "patch": "deny",
         "bash": "deny",
-        "cortex_vault_search": "deny",
-        "cortex_vault_get_note": "deny",
-        "cortex_vault_list_notes": "deny",
-        "cortex_vault_backlinks": "deny",
-        "cortex_vault_local_graph": "deny",
-        "cortex_vault_stats": "deny",
-        "cortex_vault_capture": "deny",
-        "list_mcp_resources": "deny",
-        "read_mcp_resource": "deny",
-        "list_mcp_resource_templates": "deny"
+        "question": "deny",
+        "task": {
+          "*": "deny",
+          "worker": "allow",
+          "explore": "allow"
+        }
       },
-      "description": "Orchestrator. Routes work; does NOT do it. DO NOT add reasoningEffort:'none' here — measured 2026-08-05, it drops subagent dispatches to ZERO (the model stops deciding to delegate). The edit/write/patch/bash denials are load-bearing too: with prose alone the no-implementation rule held on some runs and not others.",
-      "prompt": "{file:./.moderndegree/prompts/orchestrator.md}"
+      "prompt": "YOU ARE THE ORCHESTRATOR NOW. This is not plan mode. Do not tell the user to Tab or switch agents. The plan is already in the conversation.\nYour first action is the task tool with subagent_type=worker for Slice 1. Do not reply with only text.\nYou do not implement. Your context lasts the whole session — keep it thin.\nOne worker at a time. Slice the plan: one package/feature/test per worker, serial.\nEach task() package: goal, done-when, constraints, PATHS only — never file contents, never the tree.\nexplore is for search only (paths + one line). Never read files yourself to understand the repo.\nNever paste a worker transcript or diff into the next task(). Keep plan bullets, slice list, last @@RESULT.",
+      "description": "You are the dispatcher. Call task(worker) immediately. Do not tell the user to switch."
     },
-    "planner": {
+    "worker": {
       "mode": "subagent",
-      "model": "quality/qwen3.6-35b-a3b-mtp",
-      "description": "Produces an implementation plan from context provided in-prompt. Reasoning only.",
+      "model": "quality/qwen3.8-flash-next",
+      "reasoningEffort": "high",
       "permission": {
-        "task": "deny",
-        "*": "deny",
-        "read": "allow",
-        "grep": "allow",
-        "glob": "allow",
-        "list": "allow"
+        "task": "deny"
       },
-      "prompt": "{file:./.moderndegree/prompts/planner.md}",
-      "steps": 80
+      "prompt": "You implement ONE slice. Edit and run commands. Do not launch subagents. Do not read the whole repo — open only the paths in your package. If the package is missing a path or done-when, return BLOCKED with the exact gaps; do not ask the orchestrator to paste files.\nReply with @@RESULT only (status, one-line summary, evidence as command+output or path:line, handoff). No full diffs, no file dumps.",
+      "description": "The only writer. Fat. One at a time."
     },
-    "architect": {
+    "build": {
+      "disable": true
+    },
+    "general": {
       "mode": "subagent",
-      "model": "deep/qwen3.8-27b",
-      "description": "Designs structure and interfaces from provided context. Reasoning only. Shares mini:8091's single qwen3.8-27b slot with coder and deep, so a concurrent architect+deep dispatch queues.",
-      "permission": {
-        "task": "deny",
-        "*": "deny",
-        "read": "allow",
-        "grep": "allow",
-        "glob": "allow",
-        "list": "allow"
-      },
-      "prompt": "{file:./.moderndegree/prompts/architect.md}",
-      "reasoningEffort": "medium",
-      "steps": 80
+      "hidden": true,
+      "disable": true
     },
-    "coder": {
-      "mode": "primary",
-      "model": "deep/qwen3.8-27b",
-      "description": "Implements changes. Edits files, verifies they parse/build. On mini:8091 qwen3.8-27b with architect — ONE slot shared with architect+deep, so a concurrent dispatch queues.",
-      "prompt": "{file:./.moderndegree/prompts/coder.md}",
+    "explore": {
+      "mode": "subagent",
+      "model": "quality/qwen3.8-flash-next",
       "reasoningEffort": "medium",
       "permission": {
         "task": "deny",
-        "external_directory": "allow"
+        "edit": "deny",
+        "write": "deny",
+        "patch": "deny",
+        "bash": "deny"
       },
-      "steps": 80
-    },
-    "devops": {
-      "mode": "subagent",
-      "model": "quality/qwen3.6-35b-a3b-mtp",
-      "reasoningEffort": "none",
-      "description": "Infra and shell operations. Deterministic, no reasoning.",
-      "prompt": "{file:./.moderndegree/prompts/devops.md}",
-      "permission": {
-        "task": "deny",
-        "external_directory": "allow"
-      },
-      "steps": 80
-    },
-    "reviewer": {
-      "mode": "subagent",
-      "model": "quality/qwen3.6-35b-a3b-mtp",
-      "description": "Critiques diffs handed to it. Reasoning only. FAN-OUT agent — dispatched in parallel with the other critics. Since 2026-08-14 the critics share :8090 with the orchestrator (4 slots), so a 4-wide fan-out fully occupies the endpoint and the orchestrator queues behind it.",
-      "permission": {
-        "task": "deny",
-        "*": "deny",
-        "read": "allow",
-        "grep": "allow",
-        "glob": "allow",
-        "list": "allow"
-      },
-      "prompt": "{file:./.moderndegree/prompts/reviewer.md}",
-      "steps": 80
-    },
-    "security-auditor": {
-      "mode": "subagent",
-      "model": "quality/qwen3.6-35b-a3b-mtp",
-      "description": "Audits provided diffs for security issues. Reasoning only. FAN-OUT agent.",
-      "permission": {
-        "task": "deny",
-        "*": "deny",
-        "read": "allow",
-        "grep": "allow",
-        "glob": "allow",
-        "list": "allow"
-      },
-      "prompt": "{file:./.moderndegree/prompts/security.md}",
-      "steps": 80
-    },
-    "tester": {
-      "mode": "subagent",
-      "model": "quality/qwen3.6-35b-a3b-mtp",
-      "description": "Writes and runs tests, reads results. FAN-OUT agent.",
-      "prompt": "{file:./.moderndegree/prompts/tester.md}",
-      "permission": {
-        "task": "deny",
-        "external_directory": "allow"
-      },
-      "steps": 80
-    },
-    "doc-writer": {
-      "mode": "subagent",
-      "model": "quality/qwen3.6-35b-a3b-mtp",
-      "description": "Writes docs from provided material. Reasoning only. FAN-OUT agent.",
-      "permission": {
-        "task": "deny",
-        "*": "deny",
-        "read": "allow",
-        "grep": "allow",
-        "glob": "allow",
-        "list": "allow"
-      },
-      "prompt": "{file:./.moderndegree/prompts/docs.md}",
-      "steps": 80
-    },
-    "qa": {
-      "mode": "subagent",
-      "model": "quality/qwen3.6-35b-a3b-mtp",
-      "description": "Final acceptance gate. Runs the delivered system against its DONE-WHEN list black-box, with real dependencies, and pastes actual output per criterion. Distinct from tester: tester proves the logic, qa proves the thing works. Runs AFTER the critic fan-out, not inside it. Runs ALONE, after the fan-out has drained. There is no longer a second endpoint to split across: the throughput endpoint was retired 2026-08-14 because :8090 with MTP beat it on BOTH aggregate and single-stream. Measured 2026-08-05: on gpt-oss-20b it spent 11 of 17 tool calls globbing and reading (which qa.md forbids) and never emitted its @@RESULT block at all, so the orchestrator improvised an extra tester dispatch that then hung the run.",
-      "prompt": "{file:./.moderndegree/prompts/qa.md}",
-      "permission": {
-        "task": "deny",
-        "external_directory": "allow",
-        "cortex_vault_capture": "allow",
-        "cortex_vault_search": "allow",
-        "cortex_vault_stats": "allow"
-      },
-      "steps": 80
-    },
-    "librarian": {
-      "mode": "subagent",
-      "model": "quality/qwen3.6-35b-a3b-mtp",
-      "description": "Second brain. RECALL: searches the cortex vault for prior lessons before work starts. CAPTURE: records a lesson after a run with a real miss. The ONLY agent with vault tools — the orchestrator is denied them, because measured 2026-08-05 a prose \"cortex pass\" never fired once while a dispatch does.",
-      "permission": {
-        "task": "deny",
-        "*": "deny",
-        "read": "allow",
-        "grep": "allow",
-        "glob": "allow",
-        "list": "allow",
-        "cortex_vault_search": "allow",
-        "cortex_vault_get_note": "allow",
-        "cortex_vault_list_notes": "allow",
-        "cortex_vault_stats": "allow",
-        "cortex_vault_capture": "allow",
-        "cortex_vault_backlinks": "allow",
-        "cortex_vault_local_graph": "allow"
-      },
-      "prompt": "{file:./.moderndegree/prompts/librarian.md}",
-      "steps": 80
-    },
-    "deep": {
-      "mode": "subagent",
-      "model": "deep/qwen3.8-27b",
-      "description": "Hard problems only. qwen3.8-27b on :8091 — ONE slot; a second dispatch queues behind it.",
-      "permission": {
-        "task": "deny",
-        "*": "deny",
-        "read": "allow",
-        "grep": "allow",
-        "glob": "allow",
-        "list": "allow"
-      },
-      "prompt": "{file:./.moderndegree/prompts/deep.md}",
-      "reasoningEffort": "medium",
-      "steps": 80
-    },
-    "research": {
-      "mode": "subagent",
-      "model": "xai/grok-build-0.1",
-      "description": "Tier X. Live web research via xAI. NEVER give this agent client-confidential material.",
-      "permission": {
-        "task": "deny",
-        "*": "deny"
-      },
-      "prompt": "{file:./.moderndegree/prompts/research.md}",
-      "steps": 80
+      "prompt": "Read-only search. Return paths + one line each, not file bodies. Do not dump the tree.",
+      "description": "Read-only search. Paths + one line. May overlap one worker."
     }
   }
 }

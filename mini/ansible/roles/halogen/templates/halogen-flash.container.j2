@@ -1,0 +1,56 @@
+# Managed by Ansible (mini/ansible/roles/halogen) — do not edit by hand.
+#
+# halogen-flash-server for Qwen3.8-Flash-Next on gfx1151. systemd generates
+# halogen-flash.service from this at daemon-reload.
+#
+# Closed-source engine, OpenAI front-end in the same image (`all` mode). The
+# engine protocol has no auth and binds 127.0.0.1:{{ halogen_engine_port }}
+# inside the container; only {{ halogen_api_port }} is a real host port.
+#
+# WHY THESE FLAGS. --ipc=host and memlock=-1 are what the image's README
+# measures with: the checkpoint is mapped and registered with KFD in place,
+# never copied. Without them the server may still start and then crawl or
+# refuse to pin. seccomp=unconfined is the same load-bearing ioctl allowance
+# as llama-server.container.j2 — without it the GPU silently fails to
+# enumerate rather than erroring.
+#
+# Network=host matches llama-quality: UFW (tailnet-only via tailscale0) is the
+# single control point. The API binds 0.0.0.0 inside the image.
+[Unit]
+Description=halogen-flash [quality] {{ halogen_model_id }} on :{{ halogen_api_port }}
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+ContainerName=halogen-flash
+Image={{ halogen_image }}
+Network=host
+AddDevice=/dev/dri
+AddDevice=/dev/kfd
+PodmanArgs=--security-opt seccomp=unconfined --ipc=host --ulimit memlock=-1:-1
+Volume={{ halogen_models_dir }}:/models:ro
+Environment=HALOGEN_API_PORT={{ halogen_api_port }}
+Environment=HALOGEN_PORT={{ halogen_engine_port }}
+Environment=HALOGEN_MODEL_ID={{ halogen_model_id }}
+Environment=HALOGEN_CHECKPOINT=/models/qwen38-flash-next-w4b.hgn
+{% if halogen_vision | bool %}
+Environment=HALOGEN_VISION_TOWER=1
+{% endif %}
+
+# The slim image has no curl. halogen-healthcheck asks the engine for a PONG,
+# so a live front-end in front of a dead engine is unhealthy rather than 200.
+HealthCmd=/usr/local/bin/halogen-healthcheck api
+HealthInterval={{ halogen_health_interval }}
+HealthStartPeriod={{ halogen_health_start_period }}
+HealthTimeout={{ halogen_health_timeout }}
+HealthRetries=3
+
+[Service]
+Restart=on-failure
+RestartSec={{ halogen_restart_sec }}
+# First start faults in ~68 GiB of weights. Warm starts are ~10–20 s.
+TimeoutStartSec={{ halogen_timeout_start_sec }}
+LimitMEMLOCK=infinity
+
+[Install]
+WantedBy=default.target

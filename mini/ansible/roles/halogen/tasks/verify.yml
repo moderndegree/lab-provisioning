@@ -1,0 +1,131 @@
+---
+# Read-only probes for roles/halogen. Appends to `problems`; changes nothing.
+
+- name: Check halogen-flash.service is active
+  ansible.builtin.command: "systemctl --user is-active {{ halogen_unit }}"
+  become: true
+  become_user: "{{ node_user }}"
+  environment: "{{ user_systemd_env }}"
+  register: verify_halogen_unit
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Flag an inactive halogen unit
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        halogen_unit ~ ' is ' ~ (verify_halogen_unit.stdout | default('unknown')) ~
+        ' — configured to serve ' ~ halogen_model_id ~ ' on :' ~ halogen_api_port ~ '.'
+      ] }}
+  when: verify_halogen_unit.stdout | default('') != 'active'
+
+- name: Read the image the running halogen container was started from
+  ansible.builtin.command: >-
+    podman inspect --format {{ '{{.ImageName}}' }} halogen-flash
+  become: true
+  become_user: "{{ node_user }}"
+  environment: "{{ user_systemd_env }}"
+  register: verify_halogen_image
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Flag a halogen container running a stale image
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'halogen-flash is running image ' ~ (verify_halogen_image.stdout | trim) ~
+        ' but the quadlet pins ' ~ halogen_image ~
+        ' — restart it to pick the pinned image up.'
+      ] }}
+  when:
+    - verify_halogen_image.rc | default(1) == 0
+    - (verify_halogen_image.stdout | trim) != halogen_image
+
+- name: Stat the halogen checkpoint and quality sidecar
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+  loop:
+    - path: "{{ halogen_checkpoint }}"
+      expect: "{{ halogen_checkpoint_bytes }}"
+      label: checkpoint
+    - path: "{{ halogen_overlay }}"
+      expect: "{{ halogen_overlay_bytes }}"
+      label: overlay
+  loop_control:
+    label: "{{ item.label }}"
+  register: verify_halogen_weights
+
+- name: Flag a missing or truncated halogen weight file
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'halogen ' ~ item.item.label ~ ' at ' ~ item.item.path ~
+        ' is missing or truncated (have ' ~
+        (item.stat.size | default(0) | string) ~ ' bytes, need ' ~
+        (item.item.expect | string) ~ ').'
+      ] }}
+  loop: "{{ verify_halogen_weights.results }}"
+  loop_control:
+    label: "{{ item.item.label }}"
+  when: >-
+    not item.stat.exists or
+    (item.stat.size | default(0) | int) != (item.item.expect | int)
+
+- name: Fetch halogen /health
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ halogen_api_port }}/health"
+    timeout: "{{ verify_http_timeout }}"
+    status_code: [200]
+  register: verify_halogen_health
+  failed_when: false
+  check_mode: false
+
+- name: Flag halogen not answering
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        halogen_model_id ~ ' is not serving on :' ~ halogen_api_port ~
+        ' (' ~ (verify_halogen_health.msg | default('no response')) ~ ').'
+      ] }}
+  when: verify_halogen_health.status | default(0) != 200
+
+- name: Ask :{{ halogen_api_port }} which model it is serving
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ halogen_api_port }}/v1/models"
+    timeout: "{{ verify_http_timeout }}"
+    return_content: true
+  register: verify_halogen_models
+  failed_when: false
+  check_mode: false
+
+- name: Flag :{{ halogen_api_port }} serving the wrong model id
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        ':' ~ halogen_api_port ~ ' should be serving ' ~ halogen_model_id ~
+        ' but reports ' ~ (verify_halogen_models.json.data[0].id | default('nothing')) ~ '.'
+      ] }}
+  when:
+    - verify_halogen_models.status | default(0) == 200
+    - (verify_halogen_models.json.data[0].id | default('')) != halogen_model_id
+
+- name: Check llama-quality is not still holding the box
+  ansible.builtin.command: "systemctl --user is-active llama-quality.service"
+  become: true
+  become_user: "{{ node_user }}"
+  environment: "{{ user_systemd_env }}"
+  register: verify_halogen_llama
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Flag llama-quality still running beside halogen
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'llama-quality.service is still ' ~ (verify_halogen_llama.stdout | default('unknown')) ~
+        ' — halogen and llama.cpp cannot both hold 122 GiB.'
+      ] }}
+  when: verify_halogen_llama.stdout | default('') == 'active'

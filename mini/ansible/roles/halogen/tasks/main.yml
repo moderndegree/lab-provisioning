@@ -1,0 +1,206 @@
+---
+# halogen-flash serving path. Runs AFTER roles/containers (lingering, quadlet
+# dir) and after roles/llamacpp when that is enabled, so we can stop llama.cpp
+# before this unit binds :8090.
+#
+# The engine is closed source. This role deploys the published container and
+# the separately-licensed .hgn weights; it does not build anything.
+
+- name: Look up the node user's uid for XDG_RUNTIME_DIR
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ node_user }}"
+
+- name: Build the rootless user environment
+  ansible.builtin.set_fact:
+    halogen_user_env:
+      HOME: "{{ node_home }}"
+      XDG_RUNTIME_DIR: "/run/user/{{ ansible_facts['getent_passwd'][node_user][1] }}"
+
+# ─── GPU device permissions ──────────────────────────────────────────────────
+# Same rule as roles/llamacpp. Applied here so enable_halogen does not depend
+# on enable_llamacpp. See that role's defaults for the trade-off.
+- name: Allow rootless containers to reach the compute and render devices
+  ansible.builtin.copy:
+    dest: "{{ halogen_udev_rule_path }}"
+    content: |
+      # Managed by Ansible (roles/halogen / roles/llamacpp) — do not edit.
+      # Rootless Podman maps uids into a user namespace; a host GID that is not
+      # mapped there cannot satisfy the kernel's check on these nodes, so the
+      # GPU is simply not enumerated inside the container.
+      SUBSYSTEM=="kfd", KERNEL=="kfd", MODE="0666"
+      SUBSYSTEM=="drm", KERNEL=="renderD*", MODE="0666"
+    owner: root
+    group: root
+    mode: "0644"
+  when: halogen_permissive_udev | bool
+  notify: reload udev rules
+
+- name: Apply udev changes before starting any container
+  ansible.builtin.meta: flush_handlers
+
+- name: Ensure the halogen models directory exists
+  ansible.builtin.file:
+    path: "{{ halogen_models_dir }}"
+    state: directory
+    owner: "{{ node_user }}"
+    group: "{{ node_user }}"
+    mode: "0755"
+
+# ─── Image ───────────────────────────────────────────────────────────────────
+- name: Check whether the halogen image is already present
+  ansible.builtin.command:
+    cmd: "podman image exists {{ halogen_image }}"
+  become_user: "{{ node_user }}"
+  environment: "{{ halogen_user_env }}"
+  register: halogen_image_check
+  changed_when: false
+  failed_when: false
+
+- name: Pull the halogen image
+  ansible.builtin.command:
+    cmd: "podman pull {{ halogen_image }}"
+  become_user: "{{ node_user }}"
+  environment: "{{ halogen_user_env }}"
+  when: halogen_image_check.rc != 0
+  changed_when: true
+
+# ─── Weights ─────────────────────────────────────────────────────────────────
+# A truncated 115 GiB file starts, runs for minutes, then dies. Exact byte
+# sizes from the Hub LFS pointer, not a floor.
+- name: Stat the halogen checkpoint, quality sidecar, and tokenizer
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ halogen_checkpoint }}"
+    - "{{ halogen_overlay }}"
+    - "{{ halogen_tokenizer }}"
+  loop_control:
+    label: "{{ item | basename }}"
+  register: halogen_weight_stat
+
+- name: Require the halogen checkpoint at the published size
+  ansible.builtin.assert:
+    that:
+      - halogen_weight_stat.results[0].stat.exists
+      - halogen_weight_stat.results[0].stat.size | int == halogen_checkpoint_bytes | int
+    fail_msg: >-
+      halogen checkpoint missing or truncated at {{ halogen_checkpoint }}
+      (have {{ halogen_weight_stat.results[0].stat.size | default(0) }} bytes,
+      need {{ halogen_checkpoint_bytes }}). Stage with
+      `hf download peonist-ai/halogen-qwen3.8-flash-next --local-dir {{ halogen_models_dir }}`
+      or run mini/scripts/halogen-setup.sh.
+
+- name: Require the halogen quality sidecar at the published size
+  ansible.builtin.assert:
+    that:
+      - halogen_weight_stat.results[1].stat.exists
+      - halogen_weight_stat.results[1].stat.size | int == halogen_overlay_bytes | int
+    fail_msg: >-
+      halogen quality sidecar missing or truncated at {{ halogen_overlay }}
+      (have {{ halogen_weight_stat.results[1].stat.size | default(0) }} bytes,
+      need {{ halogen_overlay_bytes }}). Without it the engine runs the bare
+      4-bit checkpoint (~6–9% worse perplexity). Re-fetch the repo.
+
+- name: Require the halogen tokenizer
+  ansible.builtin.assert:
+    that:
+      - halogen_weight_stat.results[2].stat.exists
+    fail_msg: >-
+      no tokenizer.json at {{ halogen_tokenizer }}. The weights repo ships
+      tokenizer/ next to the checkpoint; one `hf download --local-dir` gets both.
+
+# ─── Retire llama.cpp on :8090 ───────────────────────────────────────────────
+# halogen and llama-quality cannot both hold weights in 122 GiB. Stopping is
+# not enough: a .container left in systemd/containers comes back at boot.
+- name: Stop llama.cpp serving units so they cannot hold 122 GiB
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    scope: user
+    state: stopped
+    enabled: false
+  become_user: "{{ node_user }}"
+  environment: "{{ halogen_user_env }}"
+  loop:
+    - llama-quality.service
+    - llama-deep.service
+    - llama-servers.target
+  failed_when: false
+
+- name: Find live llama.cpp quadlets
+  ansible.builtin.find:
+    paths: "{{ halogen_quadlet_dir }}"
+    patterns: "llama-quality.container,llama-deep.container"
+  register: halogen_llama_quadlets
+
+- name: Retire live llama.cpp quadlets
+  ansible.builtin.command:
+    cmd: "mv {{ item.path }} {{ item.path }}.retired-halogen"
+    removes: "{{ item.path }}"
+  loop: "{{ halogen_llama_quadlets.files }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+
+# After a 111 GiB process exits, free memory is often plentiful and still not
+# in the large contiguous pieces halogen's allocator needs. Compaction is the
+# documented recovery; without it startup can sit at 100% of one core for
+# tens of minutes with no output, which looks like a hang.
+- name: Compact fragmented host memory after llama.cpp exits
+  ansible.builtin.shell:
+    cmd: echo 1 > /proc/sys/vm/compact_memory
+  changed_when: true
+  when: halogen_llama_quadlets.files | length > 0
+
+# ─── Quadlet ─────────────────────────────────────────────────────────────────
+- name: Ensure the quadlet directory exists
+  ansible.builtin.file:
+    path: "{{ halogen_quadlet_dir }}"
+    state: directory
+    owner: "{{ node_user }}"
+    group: "{{ node_user }}"
+    mode: "0755"
+
+- name: Install the halogen-flash quadlet
+  ansible.builtin.template:
+    src: halogen-flash.container.j2
+    dest: "{{ halogen_quadlet_path }}"
+    owner: "{{ node_user }}"
+    group: "{{ node_user }}"
+    mode: "0644"
+  register: halogen_quadlet
+
+- name: Reload the systemd user manager
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+    scope: user
+  become_user: "{{ node_user }}"
+  environment: "{{ halogen_user_env }}"
+  changed_when: false
+
+- name: Enable halogen-flash at boot
+  ansible.builtin.systemd_service:
+    name: "{{ halogen_unit }}"
+    scope: user
+    enabled: true
+  become_user: "{{ node_user }}"
+  environment: "{{ halogen_user_env }}"
+  # Quadlets are generated units; systemd 256+ refuses to enable them.
+  # WantedBy=default.target in the quadlet plus lingering is the boot path.
+  failed_when: false
+
+- name: Restart halogen-flash when the quadlet changed
+  ansible.builtin.systemd_service:
+    name: "{{ halogen_unit }}"
+    scope: user
+    state: restarted
+  become_user: "{{ node_user }}"
+  environment: "{{ halogen_user_env }}"
+  when: halogen_quadlet.changed
+
+- name: Start halogen-flash
+  ansible.builtin.systemd_service:
+    name: "{{ halogen_unit }}"
+    scope: user
+    state: started
+  become_user: "{{ node_user }}"
+  environment: "{{ halogen_user_env }}"
