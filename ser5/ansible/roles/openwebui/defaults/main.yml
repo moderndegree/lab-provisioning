@@ -23,10 +23,10 @@ openwebui_env_file: "{{ data_mount }}/services/openwebui/webui.env"
 # Open WebUI listens on 8080 inside the container.
 openwebui_port: 8080
 
-# Loopback-only, same posture as roles/observability's Grafana — ser5 has no
-# blanket tailscale0 UFW allow (unlike mini). Reach it remotely via
-# `tailscale serve --bg --https=8080 http://127.0.0.1:8080` or the Cloudflare
-# tunnel (enable_cloudflared) once a hostname is routed to it.
+# Loopback-only — ser5 has no blanket tailscale0 UFW allow (unlike mini).
+# Grafana is the exception (0.0.0.0 + a tailscale0 UFW rule). Reach Open WebUI
+# remotely via `tailscale serve --bg --https=8080 http://127.0.0.1:8080` or the
+# Cloudflare tunnel (enable_cloudflared) once a hostname is routed to it.
 openwebui_host: "127.0.0.1"
 
 # Ollama backends over the tailnet. DNSSearch= on the container (MagicDNS

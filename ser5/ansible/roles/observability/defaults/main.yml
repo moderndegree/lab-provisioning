@@ -11,10 +11,29 @@ prometheus_config_dir: "{{ data_mount }}/services/prometheus"
 # ─── Grafana ──────────────────────────────────────────────────────────────────
 grafana_version: "13.1.3"   # 13.1.1 -> 13.1.3, 2026-08-12 (point release)
 grafana_port: 3000
+# Bind 0.0.0.0 so tailnet peers can hit http://ser5:3000. UFW scopes the port
+# to tailscale0 (same shape as hermes-dashboard). 127.0.0.1 is the lock-down.
+grafana_host: "0.0.0.0"
+grafana_tailnet_interface: "tailscale0"
 grafana_data_dir: "{{ data_mount }}/services/grafana/data"
 grafana_provisioning_dir: "{{ data_mount }}/services/grafana/provisioning"
+
+# ─── json-exporter (halogen JSON → Prometheus) ────────────────────────────────
+# halogen-flash has no /metrics. It does publish live serving state as JSON at
+# /health (in_flight, queue, engine ping) and /cache (prompt-cache counters).
+# json-exporter runs on ser5, not mini — mini stays inference-only.
+#
+# Version audit: curl -s https://api.github.com/repos/prometheus-community/json_exporter/releases/latest
+json_exporter_version: "v0.8.0"   # latest as of 2026-09-12
+json_exporter_port: 7979
+json_exporter_config_dir: "{{ data_mount }}/services/json-exporter"
 
 # ─── Scrape targets ───────────────────────────────────────────────────────────
 # Tailscale MagicDNS hostname for the mini inference node.
 mini_host: "mini"
 mini_node_exporter_port: 9100
+# halogen-flash (the live serving path) occupies :8090. llama-quality used the
+# same port; llama-deep is :8091 and is down while halogen is on.
+mini_halogen_port: 8090
+mini_llamacpp_quality_port: 8090
+mini_llamacpp_deep_port: 8091

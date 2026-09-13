@@ -13,9 +13,9 @@ ContainerName=grafana
 Network=obs.network
 UserNS=keep-id
 User=root
-# Accessible on ser5 at http://localhost:{{ grafana_port }}.
-# Expose via Cloudflare tunnel or tailscale-serve if remote access is needed.
-PublishPort=127.0.0.1:{{ grafana_port }}:{{ grafana_port }}
+# http://ser5:{{ grafana_port }} on the tailnet (dashboard: mini — inference).
+# UFW on {{ grafana_tailnet_interface }} is the LAN/WAN control, matching Hermes.
+PublishPort={{ grafana_host }}:{{ grafana_port }}:{{ grafana_port }}
 Volume={{ grafana_data_dir }}:/var/lib/grafana:Z
 Volume={{ grafana_provisioning_dir }}:/etc/grafana/provisioning:Z,ro
 Environment=GF_SERVER_HTTP_PORT={{ grafana_port }}

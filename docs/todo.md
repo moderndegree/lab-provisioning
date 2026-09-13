@@ -81,10 +81,11 @@ acceptance test; these are the items that outlive it.
 - [x] **Open the Grafana dashboards after ser5 converges.** Done 2026-08-05: the
       11 -> 13 migration came through clean — `/api/health` returns
       `{"database":"ok","version":"13.1.1"}` and the Prometheus datasource
-      survived intact (`http://prometheus:9090`, still default). Only the API was
-      verified, not the UI, and there are still zero dashboards (by design —
-      datasource only). Bumped to 13.1.3 on 2026-08-12. Rollback is
-      `grafana_version: "11.4.0"`, one line, data lives in a volume.
+      survived intact (`http://prometheus:9090`, still default). Bumped to
+      13.1.3 on 2026-08-12. Dashboard **mini — inference** is file-provisioned
+      as of 2026-09-12 (halogen /health+/cache via json-exporter, GPU via
+      node-exporter). Rollback is `grafana_version: "11.4.0"`, one line, data
+      lives in a volume.
 - [ ] **Drop the retirement tasks once both boxes are past them.** Two blocks
       exist purely to clean up state a converge cannot otherwise reach, and both
       are dead weight afterwards: the legacy `llama-server*.service` retirement
@@ -153,7 +154,7 @@ answer down; if it's "yes, drifted," that's what triggers the freeze above.
 
 ## Oneshot network units report success forever (found 2026-08-05)
 
-- [ ] **Add a `podman network exists` guard to `roles/observability`.** A quadlet
+- [x] **Add a `podman network exists` guard to `roles/observability`.** A quadlet
       `.network` generates a oneshot unit that creates the network, exits 0, and
       then reports `active (exited)` indefinitely. Nothing re-checks it. On
       2026-08-05 podman's storage was reset at 22:18 the previous night — every
@@ -163,11 +164,9 @@ answer down; if it's "yes, drifted," that's what triggers the freeze above.
       because a converge happened to restart Grafana and the handler failed with
       `unable to find network with name or ID systemd-obs`.
 
-      Fix shape: a task that runs `podman network exists systemd-obs` and
-      restarts `obs-network.service` when it does not. Same for
-      `systemd-openwebui`. This is the third variant of one pattern — see
-      "Verify running state, not converge output"; green Ansible and green
-      systemd can both sit on top of a dead service.
+      Guard added 2026-09-12 in `roles/observability`: `podman network exists
+      systemd-obs`, restart `obs-network.service` when it does not. Same shape
+      still needed for `systemd-openwebui`.
 
       What caused the reset is unknown. No `prune`/`reset` in bash history, no
       prune task in any role, no prune timer on the box. Left unattributed

@@ -1,0 +1,142 @@
+# json-exporter modules — managed by Ansible, do not edit by hand.
+# Probes mini's halogen-flash JSON. Paths use allow_missing_key so a llama.cpp
+# /health on the same port (the rollback) is a successful empty scrape rather
+# than a red target.
+modules:
+  halogen_health:
+    # 503 is /health's engine_unresponsive response; the body is still JSON.
+    valid_status_codes: [200, 503]
+    metrics:
+      - name: halogen_busy
+        help: 1 when halogen is generating, 0 when idle
+        path: '{.busy}'
+        allow_missing_key: true
+      - name: halogen_in_flight
+        help: Requests currently generating
+        path: '{.in_flight}'
+        allow_missing_key: true
+      - name: halogen_queued
+        help: Requests waiting for a slot or KV-pool room
+        path: '{.queued}'
+        allow_missing_key: true
+      - name: halogen_busy_for_seconds
+        help: Seconds the current busy period has lasted
+        path: '{.busy_for_s}'
+        allow_missing_key: true
+      - name: halogen_slots
+        help: Concurrent generation slots (HALOGEN_KV_SLOTS)
+        path: '{.slots}'
+        allow_missing_key: true
+      - name: halogen_slot_ctx
+        help: Max context tokens of one request
+        path: '{.slot_ctx}'
+        allow_missing_key: true
+      - name: halogen_kv_pool_positions
+        help: Attention positions resident across all conversations
+        path: '{.kv_pool_positions}'
+        allow_missing_key: true
+      - name: halogen_context
+        help: Native context advertised by /health
+        path: '{.context}'
+        allow_missing_key: true
+      - name: halogen_engine_responds
+        help: 1 when the engine answered the last health ping
+        path: '{.engine.responds}'
+        allow_missing_key: true
+      - name: halogen_engine_probe_seconds
+        help: Seconds the last engine health ping took
+        path: '{.engine.probe_s}'
+        allow_missing_key: true
+      - name: halogen_version_match
+        help: 1 when API and engine image tags match
+        path: '{.version.match}'
+        allow_missing_key: true
+      - name: halogen_vision_enabled
+        help: 1 when the vision tower is loaded
+        path: '{.vision.enabled}'
+        allow_missing_key: true
+      - name: halogen_prompt_cache_enabled
+        help: 1 when the prompt cache is on
+        path: '{.prompt_cache.enabled}'
+        allow_missing_key: true
+      - name: halogen_prompt_cache_mode
+        help: HALOGEN_PROMPT_CACHE mode (2 = resume anywhere)
+        path: '{.prompt_cache.mode}'
+        allow_missing_key: true
+      - name: halogen_prompt_cache_cap_mb
+        help: Prompt-cache entry cap in MiB
+        path: '{.prompt_cache.cap_mb}'
+        allow_missing_key: true
+
+  halogen_cache:
+    metrics:
+      - name: halogen_cache_entries
+        help: Live prompt-cache entries
+        path: '{.entries}'
+        allow_missing_key: true
+      - name: halogen_cache_bytes
+        help: Bytes resident for live cache entries
+        path: '{.bytes}'
+        allow_missing_key: true
+      - name: halogen_cache_hits
+        help: Prompt-cache hits (cumulative)
+        path: '{.hits}'
+        allow_missing_key: true
+      - name: halogen_cache_misses
+        help: Prompt-cache misses (cumulative)
+        path: '{.misses}'
+        allow_missing_key: true
+      - name: halogen_cache_stores
+        help: Prompt-cache stores (cumulative)
+        path: '{.stores}'
+        allow_missing_key: true
+      - name: halogen_cache_evicted
+        help: Prompt-cache evictions (cumulative)
+        path: '{.evicted}'
+        allow_missing_key: true
+      - name: halogen_cache_prompt_tokens_saved
+        help: Prompt tokens not re-prefilling because of a cache hit (cumulative)
+        path: '{.prompt_tokens_saved}'
+        allow_missing_key: true
+      - name: halogen_cache_hit_rate
+        help: Hits / (hits + misses) as reported by halogen
+        path: '{.hit_rate}'
+        allow_missing_key: true
+      - name: halogen_cache_store_ms_total
+        help: Cumulative milliseconds spent storing cache entries
+        path: '{.store_ms_total}'
+        allow_missing_key: true
+      - name: halogen_cache_restore_ms_total
+        help: Cumulative milliseconds spent restoring cache entries
+        path: '{.restore_ms_total}'
+        allow_missing_key: true
+      - name: halogen_cache_last_store_ms
+        help: Milliseconds the last cache store took
+        path: '{.last_store_ms}'
+        allow_missing_key: true
+      - name: halogen_cache_last_restore_ms
+        help: Milliseconds the last cache restore took
+        path: '{.last_restore_ms}'
+        allow_missing_key: true
+      - name: halogen_cache_refused
+        help: Cache stores refused (cumulative)
+        path: '{.refused}'
+        allow_missing_key: true
+      - name: halogen_cache_rows_copied
+        help: Cache hits that had to copy rows (host memory pressure)
+        path: '{.rows_copied}'
+        allow_missing_key: true
+      - name: halogen_cache_rows_copied_ms
+        help: Milliseconds spent copying cache rows
+        path: '{.rows_copied_ms}'
+        allow_missing_key: true
+      # 0.6.1 renamed cap_bytes/reserved_bytes → max_entries/last_entry_bytes.
+      # mini is on 0.5.8; keep both families so a bump does not blank the panels.
+      - name: halogen_cache_cap_bytes
+        help: Cache cap in bytes (0.5.x; placeholder on some builds)
+        path: '{.cap_bytes}'
+        allow_missing_key: true
+      - name: halogen_cache_max_entries
+        help: Cache entry cap (0.6.1+)
+        path: '{.max_entries}'
+        allow_missing_key: true

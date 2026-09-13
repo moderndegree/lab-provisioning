@@ -1,17 +1,17 @@
 ---
-# Observability — Prometheus + Grafana as rootless Podman quadlets on ser5.
-# Scrapes: mini node-exporter (:9100, system + GPU hwmon/drm) and Ollama (:11434/metrics).
-# Both services run as user-level systemd units (quadlets); the containers role must
-# run first (enables lingering and creates ~/.config/systemd/user/).
-# Access Grafana at http://localhost:3000 after provisioning.
-# Suggested dashboards to import manually:
-#   - https://grafana.com/grafana/dashboards/1860  (node-exporter-full)
-#   - llama.cpp exposes llamacpp:* metrics (tokens_predicted_total,
-#     n_decode_total, requests_processing, requests_deferred, n_busy_slots_per_decode).
-#     No community dashboard covers these; build panels from those names.
-#     tokens_predicted_total / n_decode_total is the MTP acceptance rate, but it
-#     is only meaningful at concurrency 1 — continuous batching decodes every
-#     active slot in one step, which inflates the ratio independently of MTP.
+# Observability — Prometheus + Grafana + json-exporter as rootless Podman
+# quadlets on ser5. Scrapes:
+#   mini node-exporter (:9100, system + GPU hwmon/drm)
+#   halogen-flash /health and /cache via json-exporter (live serving path)
+#   llama.cpp /metrics on :8090/:8091 (rollback; expected down while halogen is on)
+#
+# The containers role must run first (lingering + ~/.config/systemd/user/).
+# Access Grafana at http://ser5:3000 — dashboard "mini — inference" is
+# file-provisioned. Bound 0.0.0.0; UFW scopes the port to tailscale0.
+#
+# llama.cpp llamacpp:* panels on that dashboard stay empty until the rollback
+# path is started. tokens_predicted_total / n_decode_total is MTP acceptance
+# only at concurrency 1 — continuous batching inflates it independently of MTP.
 
 - name: Observability role is disabled
   ansible.builtin.debug:
@@ -67,6 +67,22 @@
         group: "{{ username }}"
         mode: "0755"
 
+    - name: Create Grafana provisioning/dashboards directory
+      ansible.builtin.file:
+        path: "{{ grafana_provisioning_dir }}/dashboards/json"
+        state: directory
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0755"
+
+    - name: Create json-exporter config directory
+      ansible.builtin.file:
+        path: "{{ json_exporter_config_dir }}"
+        state: directory
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0755"
+
     # ─── Configuration ────────────────────────────────────────────────────────
     - name: Write Prometheus scrape config
       ansible.builtin.template:
@@ -89,6 +105,38 @@
       notify:
         - grafana daemon-reload
         - restart grafana
+
+    - name: Write Grafana dashboard provider
+      ansible.builtin.template:
+        src: grafana-dashboards.yml.j2
+        dest: "{{ grafana_provisioning_dir }}/dashboards/dashboards.yml"
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0644"
+      notify:
+        - grafana daemon-reload
+        - restart grafana
+
+    - name: Install the mini inference dashboard
+      ansible.builtin.copy:
+        src: dashboards/mini-inference.json
+        dest: "{{ grafana_provisioning_dir }}/dashboards/json/mini-inference.json"
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0644"
+      notify:
+        - restart grafana
+
+    - name: Write json-exporter module config
+      ansible.builtin.template:
+        src: json-exporter.yml.j2
+        dest: "{{ json_exporter_config_dir }}/config.yml"
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0644"
+      notify:
+        - json-exporter daemon-reload
+        - restart json-exporter
 
     # ─── Retire pre-quadlet static units ──────────────────────────────────────
     # RETIREMENT TASK — delete once every host has converged past it (see docs/todo.md).
@@ -116,12 +164,15 @@
       loop:
         - prometheus.service
         - grafana.service
+        - json-exporter.service
         - obs-network.service
       notify:
         - prometheus daemon-reload
         - grafana daemon-reload
+        - json-exporter daemon-reload
         - restart prometheus
         - restart grafana
+        - restart json-exporter
 
     # ─── Quadlet units ────────────────────────────────────────────────────────
     # Podman's quadlet generator scans ~/.config/containers/systemd/ for .container
@@ -144,6 +195,7 @@
       notify:
         - prometheus daemon-reload
         - grafana daemon-reload
+        - json-exporter daemon-reload
 
     - name: Write Prometheus quadlet unit
       ansible.builtin.template:
@@ -167,8 +219,56 @@
         - grafana daemon-reload
         - restart grafana
 
+    - name: Write json-exporter quadlet unit
+      ansible.builtin.template:
+        src: json-exporter.container.j2
+        dest: "{{ user_home }}/.config/containers/systemd/json-exporter.container"
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0644"
+      notify:
+        - json-exporter daemon-reload
+        - restart json-exporter
+
     - name: Flush handlers (daemon-reload before enable/start)
       ansible.builtin.meta: flush_handlers
+
+    # ─── obs network still exists ─────────────────────────────────────────────
+    # A quadlet .network generates a oneshot that creates the network, exits 0,
+    # and then reports active (exited) forever. Nothing re-checks it. Found
+    # 2026-08-05: podman storage reset overnight, every network vanished, and
+    # obs-network.service still showed success from the previous evening.
+    # Prometheus/Grafana/Open WebUI were down for ~10 hours; systemd and a
+    # converge both looked fine. Ask podman, not systemd.
+    - name: Check the obs podman network still exists
+      ansible.builtin.command: podman network exists systemd-obs
+      become: true
+      become_user: "{{ username }}"
+      environment:
+        XDG_RUNTIME_DIR: "/run/user/{{ obs_user_uid.stdout }}"
+      register: obs_network_exists
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Recreate the obs network when podman lost it
+      ansible.builtin.systemd:
+        name: obs-network.service
+        state: restarted
+        scope: user
+      become: true
+      become_user: "{{ username }}"
+      environment:
+        XDG_RUNTIME_DIR: "/run/user/{{ obs_user_uid.stdout }}"
+      when: obs_network_exists.rc != 0
+      notify:
+        - restart prometheus
+        - restart grafana
+        - restart json-exporter
+
+    - name: Flush handlers after recreating a missing obs network
+      ansible.builtin.meta: flush_handlers
+      when: obs_network_exists.rc != 0
 
     # ─── Start services ───────────────────────────────────────────────────────
     # No enabled: true — these are Quadlet-generated units (from each
@@ -185,6 +285,16 @@
       environment:
         XDG_RUNTIME_DIR: "/run/user/{{ obs_user_uid.stdout }}"
 
+    - name: Ensure json-exporter user service is started
+      ansible.builtin.systemd:
+        name: json-exporter.service
+        state: started
+        scope: user
+      become: true
+      become_user: "{{ username }}"
+      environment:
+        XDG_RUNTIME_DIR: "/run/user/{{ obs_user_uid.stdout }}"
+
     - name: Ensure Grafana user service is started
       ansible.builtin.systemd:
         name: grafana.service
@@ -194,3 +304,16 @@
       become_user: "{{ username }}"
       environment:
         XDG_RUNTIME_DIR: "/run/user/{{ obs_user_uid.stdout }}"
+
+    # ser5 is default-deny with NO blanket tailscale0 allow. grafana_host
+    # 0.0.0.0 is what makes http://ser5:3000 work; this rule is what keeps
+    # the wifi LAN from getting anonymous-admin Grafana. Skip when locked
+    # to loopback — there is nothing for UFW to admit.
+    - name: Allow Grafana in from the tailnet interface
+      community.general.ufw:
+        rule: allow
+        direction: in
+        interface: "{{ grafana_tailnet_interface }}"
+        to_port: "{{ grafana_port }}"
+        proto: tcp
+      when: grafana_host != "127.0.0.1"

@@ -195,7 +195,7 @@ These flags in `ansible/group_vars/all.yml` now match the live box:
 
 | Flag | Role | Status |
 |------|------|--------|
-| `enable_observability: true` | `observability` | Prometheus + Grafana quadlets targeting mini's metrics (mini must be reachable) |
+| `enable_observability: true` | `observability` | Prometheus + Grafana + json-exporter; dashboard **mini — inference** at `http://ser5:3000` |
 | `enable_hermes: true` | `hermes` | Hermes gateway, proxy, dashboard, messaging adapters, optional Grok Build skill + xAI env (see below) |
 | `enable_brain: true` | `brain` | Obsidian-compatible second brain under `{{ data_mount }}/brain` — see [`../docs/brain.md`](../docs/brain.md) |
 | `enable_openwebui: true` | `openwebui` | Open WebUI browser chat UI, reaching mini's llama-server over the tailnet — see below |
@@ -431,8 +431,8 @@ mini — mini's hard rule is inference only.
   `DNSSearch={{ tailnet_dns_search }}` so Tailscale MagicDNS resolves `mini`
   from inside the container's network namespace — the same trick
   `roles/observability` uses to reach mini's node-exporter.
-- **Loopback-only by default** (`openwebui_host: 127.0.0.1`), matching
-  Grafana's posture — ser5 has no blanket tailscale0 UFW allow the way mini
+- **Loopback-only by default** (`openwebui_host: 127.0.0.1`) — ser5 has no
+  blanket tailscale0 UFW allow the way mini
   does. For phone/remote access, either run
   `tailscale serve --bg --https=8080 http://127.0.0.1:8080` or route a
   Cloudflare tunnel hostname to `http://localhost:8080` (`enable_cloudflared`).
@@ -443,6 +443,37 @@ mini — mini's hard rule is inference only.
 - Session cookies are signed with a `WEBUI_SECRET_KEY` generated once on first
   provision and persisted at `{{ data_mount }}/services/openwebui/webui.env`
   (`0600`, owned by `username`) — re-provisioning does not invalidate sessions.
+
+---
+
+## Observability (Prometheus + Grafana)
+
+With `enable_observability: true`, ser5 runs Prometheus (`:9090`), Grafana
+(`http://ser5:3000`), and json-exporter (`127.0.0.1:7979`) as rootless Podman
+quadlets on `obs.network`. Grafana is anonymous-admin. It binds `0.0.0.0:3000`;
+UFW scopes the port to `tailscale0` (same shape as the Hermes dashboard).
+
+What it scrapes:
+
+| Job | Target | What you actually see |
+|-----|--------|------------------------|
+| `mini-node` | `mini:9100` | CPU, RAM, GPU busy, GTT, package power, temps (node-exporter drm + hwmon) |
+| `mini-halogen-health` | `mini:8090/health` via json-exporter | in-flight, queue, engine ping, slots |
+| `mini-halogen-cache` | `mini:8090/cache` via json-exporter | prompt-cache hit rate, evictions, tokens saved |
+| `mini-llamacpp` | `mini:8090` / `:8091` `/metrics` | llama.cpp tokens/s — **expected down** while halogen occupies `:8090` |
+
+halogen-flash has no Prometheus `/metrics`. json-exporter lives on ser5, not
+mini — mini stays inference-only. The provisioned dashboard is **mini —
+inference** (uid `mini-inference`). GPU busy + package power are the live
+"is it generating" signal; cache hit rate is the live "are agent turns
+warm" signal. `MemAvailable` overstates by ~68 GiB while halogen has weights
+pinned — believe GTT used, and the server's own startup line.
+
+```bash
+# from any tailnet peer
+curl -s http://ser5:3000/api/health
+curl -s 'http://ser5:9090/api/v1/query?query=halogen_in_flight'
+```
 
 ---
 

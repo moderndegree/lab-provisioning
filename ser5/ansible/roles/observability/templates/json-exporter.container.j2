@@ -1,0 +1,29 @@
+# json-exporter quadlet — rootless Podman (Ansible-managed, do not edit by hand)
+# Joins the 'obs' bridge network so Prometheus can scrape it by container name.
+# Outbound probes (mini /health and /cache over tailscale0) use netavark's
+# default routing; DNSSearch= is what makes "mini" resolve.
+[Unit]
+Description=json-exporter (halogen /health and /cache)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=docker.io/prometheuscommunity/json-exporter:{{ json_exporter_version }}
+ContainerName=json-exporter
+Network=obs.network
+DNSSearch={{ tailnet_dns_search }}
+UserNS=keep-id
+User=root
+# Loopback only — Prometheus reaches this over obs.network. Published so
+# `make verify` and a human curl can ask it from the host without podman exec.
+PublishPort=127.0.0.1:{{ json_exporter_port }}:{{ json_exporter_port }}
+Volume={{ json_exporter_config_dir }}/config.yml:/config.yml:Z,ro
+Exec=--config.file=/config.yml
+AutoUpdate=registry
+
+[Service]
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

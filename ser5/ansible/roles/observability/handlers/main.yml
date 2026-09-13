@@ -36,3 +36,22 @@
   become_user: "{{ username }}"
   environment:
     XDG_RUNTIME_DIR: "/run/user/{{ obs_user_uid.stdout }}"
+
+- name: json-exporter daemon-reload
+  ansible.builtin.systemd:
+    daemon_reload: true
+    scope: user
+  become: true
+  become_user: "{{ username }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ obs_user_uid.stdout }}"
+
+- name: restart json-exporter
+  ansible.builtin.systemd:
+    name: json-exporter.service
+    state: restarted
+    scope: user
+  become: true
+  become_user: "{{ username }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ obs_user_uid.stdout }}"

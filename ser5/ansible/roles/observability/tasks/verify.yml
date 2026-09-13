@@ -16,7 +16,7 @@
   become: true
   become_user: "{{ username }}"
   environment: "{{ user_systemd_env }}"
-  loop: [prometheus, grafana]
+  loop: [prometheus, grafana, json-exporter]
   register: verify_obs_units
   changed_when: false
   failed_when: false
@@ -96,6 +96,45 @@
     verify_grafana_health.status | default(0) != 200
     or verify_grafana_health.json.database | default('') != 'ok'
 
+- name: Check UFW for the Grafana tailnet rule
+  ansible.builtin.command: ufw status
+  register: verify_grafana_ufw
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: grafana_host | default('0.0.0.0') != "127.0.0.1"
+
+- name: Flag Grafana published beyond loopback without a tailnet UFW rule
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'Grafana publishes on ' ~ grafana_host ~ ':' ~ grafana_port
+        ~ ' but UFW has no ' ~ grafana_port ~ '/tcp on ' ~ grafana_tailnet_interface
+        ~ ' rule — it is reachable from the wifi LAN, or from nowhere on the tailnet.'
+      ] }}
+  when:
+    - grafana_host | default('0.0.0.0') != "127.0.0.1"
+    - verify_grafana_ufw.rc | default(1) == 0
+    - not (verify_grafana_ufw.stdout is search(grafana_port | string ~ '/tcp on ' ~ grafana_tailnet_interface))
+
+# ─────────────────────────────────────────────────────────────────────────────
+# json-exporter
+# ─────────────────────────────────────────────────────────────────────────────
+- name: Ask json-exporter whether it is serving
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ json_exporter_port }}/metrics"
+    timeout: "{{ verify_http_timeout }}"
+    return_content: true
+  register: verify_json_exporter
+  failed_when: false
+  check_mode: false
+
+- name: Flag json-exporter not answering
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + ['json-exporter is not answering on :' ~ json_exporter_port ~ '.'] }}
+  when: verify_json_exporter.status | default(0) != 200
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Scrape targets
 # ─────────────────────────────────────────────────────────────────────────────
@@ -103,6 +142,11 @@
 # alerts — the exact failure mode where you only find out when you go looking.
 # mini's node exporter is reached over the tailnet, so this doubles as a check
 # that MagicDNS still resolves and the wifi link is actually carrying traffic.
+#
+# llama.cpp /metrics on :8090/:8091 is the ROLLBACK path. halogen occupies
+# :8090 and has no /metrics, so those targets are expected down while halogen
+# is the serving path. Do not flag them as an outage if halogen_engine_responds
+# is 1. Flag a missing serving path instead if NEITHER is up.
 - name: Ask Prometheus about its scrape targets
   ansible.builtin.uri:
     url: "http://127.0.0.1:{{ prometheus_port }}/api/v1/targets?state=active"
@@ -112,7 +156,54 @@
   failed_when: false
   check_mode: false
 
-- name: Flag every down scrape target
+- name: Ask Prometheus whether halogen's engine is responding
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ prometheus_port }}/api/v1/query?query=halogen_engine_responds"
+    timeout: "{{ verify_http_timeout }}"
+    return_content: true
+  register: verify_halogen_responds
+  failed_when: false
+  check_mode: false
+
+- name: Classify live scrape health
+  ansible.builtin.set_fact:
+    verify_obs_targets: "{{ verify_prom_targets.json.data.activeTargets | default([]) }}"
+    verify_halogen_engine_up: >-
+      {{
+        (verify_halogen_responds.json.data.result | default([]))
+        | selectattr('value', 'defined')
+        | map(attribute='value')
+        | map('last')
+        | map('float')
+        | select('equalto', 1.0)
+        | list | length > 0
+      }}
+    verify_halogen_health_up: >-
+      {{
+        (verify_prom_targets.json.data.activeTargets | default([]))
+        | selectattr('health', 'defined')
+        | selectattr('labels', 'defined')
+        | selectattr('health', 'equalto', 'up')
+        | map(attribute='labels')
+        | selectattr('job', 'defined')
+        | selectattr('job', 'equalto', 'mini-halogen-health')
+        | list | length > 0
+      }}
+    verify_llamacpp_quality_up: >-
+      {{
+        (verify_prom_targets.json.data.activeTargets | default([]))
+        | selectattr('health', 'defined')
+        | selectattr('labels', 'defined')
+        | selectattr('health', 'equalto', 'up')
+        | map(attribute='labels')
+        | selectattr('job', 'defined')
+        | selectattr('instance', 'defined')
+        | selectattr('job', 'equalto', 'mini-llamacpp')
+        | selectattr('instance', 'equalto', 'mini-quality')
+        | list | length > 0
+      }}
+
+- name: Flag required scrape targets that are down
   ansible.builtin.set_fact:
     problems: >-
       {{ problems + [
@@ -120,7 +211,59 @@
         ~ (item.labels.instance | default('?')) ~ ' is down: '
         ~ (item.lastError | default('no error reported')) ~ '.'
       ] }}
-  loop: "{{ verify_prom_targets.json.data.activeTargets | default([]) }}"
+  loop: "{{ verify_obs_targets }}"
   loop_control:
-    label: "{{ item.labels.instance | default('?') }}"
-  when: item.health | default('') != 'up'
+    label: "{{ item.labels.job | default('?') }} {{ item.labels.instance | default('?') }}"
+  when:
+    - item.health | default('') != 'up'
+    - (item.labels.job | default('')) in ['mini-node', 'json-exporter']
+
+- name: Flag halogen probes down when llama.cpp is not the serving path
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'Prometheus target ' ~ (item.labels.job | default('?')) ~ ' at '
+        ~ (item.labels.instance | default('?')) ~ ' is down: '
+        ~ (item.lastError | default('no error reported')) ~ '.'
+      ] }}
+  loop: "{{ verify_obs_targets }}"
+  loop_control:
+    label: "{{ item.labels.job | default('?') }}"
+  when:
+    - item.health | default('') != 'up'
+    - (item.labels.job | default('')) in ['mini-halogen-health', 'mini-halogen-cache']
+    - not (verify_llamacpp_quality_up | bool)
+
+- name: Flag no inference scrape succeeding
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'No inference scrape is up — halogen health is down and llama-quality '
+        ~ '/metrics is down. Grafana will show GPU numbers with no serving path.'
+      ] }}
+  when:
+    - not (verify_halogen_engine_up | bool)
+    - not (verify_halogen_health_up | bool)
+    - not (verify_llamacpp_quality_up | bool)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Dashboard
+# ─────────────────────────────────────────────────────────────────────────────
+# File-provisioned. A Grafana that is healthy with an empty search result is
+# the 2026-08 state (datasource only) — that is no longer the desired state.
+- name: Ask Grafana for the mini inference dashboard
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ grafana_port }}/api/dashboards/uid/mini-inference"
+    timeout: "{{ verify_http_timeout }}"
+    return_content: true
+  register: verify_grafana_dash
+  failed_when: false
+  check_mode: false
+
+- name: Flag a missing mini inference dashboard
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'Grafana has no dashboard uid mini-inference — provisioning/dashboards did not load.'
+      ] }}
+  when: verify_grafana_dash.status | default(0) != 200

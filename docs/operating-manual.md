@@ -205,7 +205,7 @@ Start it: run AI Workstation with `CORTEX_VAULT_DIR=/data/brain`, or open `/data
 5. For personal and lab work, use the already-configured Hermes Telegram or Discord gateways for chat-driven task initiation.
 6. Treat Telegram and Discord as third-party paths: notifications and personal lab work only, never client-confidential.
 7. To start real coding from the couch, use GitHub mobile: assign an issue to the Copilot cloud agent, then review the PR.
-8. Use Grafana on ser5 for host metrics when the lab feels slow.
+8. Use Grafana at `http://ser5:3000` (dashboard **mini — inference**) for halogen load, GPU, prompt-cache, and host metrics. Tailnet-only; UFW scopes `:3000` to `tailscale0`.
 9. Raw model chat from the phone needs Open WebUI on ser5, which ships **disabled** (`enable_openwebui: false` in `ser5/ansible/group_vars/all.yml`). Turn it on and re-provision if you want it; it is a convenience, not the cockpit.
 10. If a phone path asks for secrets, stop and move to the workstation.
 

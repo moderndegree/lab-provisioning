@@ -15,23 +15,58 @@ scrape_configs:
         labels:
           instance: mini
 
-  # mini llama.cpp inference metrics (tokens/s, active requests, queue depth,
-  # KV cache usage). llama-server exposes /metrics only with --metrics, which
-  # mini's llamacpp_base_args sets. One job per instance so the `instance` label
-  # distinguishes them — they serve different models with different sizing.
-  #
-  # This replaced a commented-out Ollama scrape job in 2026-08: Ollama no longer
-  # serves on this box, so those metrics would never have arrived.
+  # json-exporter's own process metrics (not the halogen probes).
+  - job_name: json-exporter
+    static_configs:
+      - targets:
+          - "json-exporter:{{ json_exporter_port }}"
+        labels:
+          instance: json-exporter
+
+  # halogen-flash serving path. No Prometheus /metrics — json-exporter probes
+  # the JSON at /health and /cache. instance is a stable label; the URL lives
+  # in __param_target so a port change does not rename the series.
+  - job_name: mini-halogen-health
+    metrics_path: /probe
+    params:
+      module: [halogen_health]
+    static_configs:
+      - targets:
+          - "http://{{ mini_host }}:{{ mini_halogen_port }}/health"
+        labels:
+          instance: mini-halogen
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - target_label: __address__
+        replacement: json-exporter:{{ json_exporter_port }}
+
+  - job_name: mini-halogen-cache
+    metrics_path: /probe
+    params:
+      module: [halogen_cache]
+    static_configs:
+      - targets:
+          - "http://{{ mini_host }}:{{ mini_halogen_port }}/cache"
+        labels:
+          instance: mini-halogen
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - target_label: __address__
+        replacement: json-exporter:{{ json_exporter_port }}
+
+  # llama.cpp rollback. /metrics is 404 (halogen on :8090) or connection-refused
+  # (:8091) while halogen is the serving path. verify.yml treats that as expected,
+  # not an outage, as long as halogen_engine_responds is 1. Flip enable_halogen
+  # off and start llama-servers.target and these targets come up on their own.
   - job_name: mini-llamacpp
     static_configs:
       - targets:
-          - "{{ mini_host }}:8090"
+          - "{{ mini_host }}:{{ mini_llamacpp_quality_port }}"
         labels:
           instance: mini-quality
       - targets:
-          - "{{ mini_host }}:8091"
+          - "{{ mini_host }}:{{ mini_llamacpp_deep_port }}"
         labels:
-          instance: mini-throughput
-  #       labels:
-  #         instance: mini
-  #     metrics_path: /metrics
+          instance: mini-deep

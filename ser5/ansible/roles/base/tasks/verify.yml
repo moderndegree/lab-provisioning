@@ -1,10 +1,10 @@
 ---
 # Read-only probes for roles/base. Appends to `problems`; changes nothing.
 
-# ser5 has NO blanket tailscale0 allow (unlike mini) — Grafana and Open WebUI are
-# bound to loopback and reached via `tailscale serve` or the tunnel. That posture
-# only holds while UFW is up; Prometheus publishes on 0.0.0.0:9090 and would
-# otherwise be on the wifi LAN.
+# ser5 has NO blanket tailscale0 allow (unlike mini) — Grafana is 0.0.0.0:3000
+# with a tailscale0 UFW rule, Open WebUI is loopback. That posture only holds
+# while UFW is up; Prometheus publishes on 0.0.0.0:9090 and would otherwise be
+# on the wifi LAN.
 - name: Check UFW status
   ansible.builtin.command: ufw status
   register: verify_ufw
