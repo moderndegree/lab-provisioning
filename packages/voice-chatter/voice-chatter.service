@@ -1,0 +1,28 @@
+# systemd USER unit — Chatterbox Turbo on the workstation GPU.
+# Install: cp packages/voice-chatter/voice-chatter.service ~/.config/systemd/user/
+#          systemctl --user daemon-reload && systemctl --user enable --now voice-chatter
+#
+# ser5 points VOICE_TTS_URL=http://desktop:8774 at this. Piper on ser5 is the
+# fallback, so a dead unit here does not silence the presence.
+
+[Unit]
+Description=Voice chatter — Chatterbox Turbo, zero-shot clone
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/projects/lab-provisioning
+Environment=PYTHONUNBUFFERED=1
+Environment=HF_HOME=%h/.local/share/voice-chatter/hf
+Environment=CHATTER_VOICES_DIR=%h/.local/share/voice-chatter/voices
+Environment=CHATTER_DEVICE=cuda
+Environment=CHATTER_VARIANT=turbo
+Environment=CHATTER_HOST=0.0.0.0
+Environment=CHATTER_PORT=8774
+ExecStart=%h/projects/lab-provisioning/.venv/bin/python -m voice_chatter
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
