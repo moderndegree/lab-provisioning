@@ -1,0 +1,32 @@
+# systemd user unit — LocalBots server (managed by Ansible)
+# https://www.freedesktop.org/software/systemd/man/systemd.user.html
+
+[Unit]
+Description=LocalBots Server — persistent AI worker control plane
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/localbots serve
+Restart=on-failure
+RestartSec=5
+TimeoutSec=300
+
+# Environment
+Environment=LOCALBOTS_CONFIG_FILE={{ localbots_config_file }}
+Environment=LOCALBOTS_DATA_DIR={{ localbots_data_dir }}
+Environment=LOCALBOTS_DB_PATH={{ localbots_db_path }}
+Environment=LOCALBOTS_API_SECRET_PATH={{ localbots_secret_file }}
+Environment=LOCALBOTS_PORT={{ localbots_port }}
+Environment=LOCALBOTS_HOST={{ localbots_host }}
+Environment=LOCALBOTS_WORKSPACE_POLICY={{ localbots_workspace_policy }}
+Environment=LOCALBOTS_DEFAULT_MODEL={{ localbots_default_model }}
+
+
+# Limit resources
+MemoryLimit={{ localbots_worker_memory_limit | upper }}
+CPUQuota={{ localbots_worker_cpu_limit | int * 100 }}
+
+[Install]
+WantedBy=default.target

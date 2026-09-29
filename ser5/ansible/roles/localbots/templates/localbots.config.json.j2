@@ -1,0 +1,32 @@
+{# LocalBots server config.json — rendered by Ansible; do not edit on the host. #}
+{# Schema: packages/server/src/config.ts (ConfigFileSchema). #}
+{
+  "endpoints": [
+{% for ep in localbots_model_endpoints %}
+{% set model_list = ep.models.split(',') | map('trim') | list if ep.models is string else ep.models %}
+    {
+      "name": {{ ep.name | to_json }},
+      "url": {{ ep.url | to_json }},
+      "api_key": {{ ep.api_key | default('', true) | to_json }},
+      "provider": {{ ep.provider | default('openai-compatible', true) | to_json }},
+      "models": {{ model_list | to_json }}{% if ep.context_length is defined %},
+      "context_length": {{ ep.context_length | int | to_json }}{% endif %},
+      "local": true
+    }{{ "," if not loop.last }}
+{% endfor %}
+  ],
+  "default_model": {{ localbots_default_model | to_json }},
+  "workspace_policy": {{ localbots_workspace_policy | to_json }},
+  "harness": "opencode",
+  "runtime": {
+    "provider": "podman",
+    "binary": {{ localbots_worker_runtime | to_json }},
+    "worker_image": {{ localbots_worker_image | to_json }},
+    "memory_limit": {{ localbots_worker_memory_limit | to_json }},
+    "cpu_limit": {{ localbots_worker_cpu_limit | to_json }},
+    "network_name": {{ localbots_network_name | to_json }}
+  },
+  "max_concurrent_runs": {{ localbots_max_concurrent_workers | int | to_json }},
+  "run_timeout_sec": {{ localbots_worker_timeout | int | to_json }},
+  "idle_cleanup_interval_sec": {{ localbots_idle_cleanup_interval | int | to_json }}
+}

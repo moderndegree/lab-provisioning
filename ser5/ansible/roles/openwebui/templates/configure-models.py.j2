@@ -1,0 +1,93 @@
+"""Point an existing Open WebUI DB at mini's live llama-server alias.
+
+Idempotent. Open WebUI flushes in-memory config over webui.db on shutdown, so
+this must run while the container is STOPPED. Prints "changed" or "unchanged".
+"""
+import json
+import sqlite3
+import time
+import sys
+
+DB = {{ openwebui_db_path | default(openwebui_data_dir + '/webui.db') | to_json }}
+LIVE_URL = "http://mini:8090/v1"
+DEAD_URLS = {"http://mini:8091/v1"}
+DEFAULT_MODEL = {{ openwebui_default_model | to_json }}
+NOW = int(time.time())
+CHECK_ONLY = "--check" in sys.argv
+
+
+def load(cur, key, default):
+    row = cur.execute("SELECT value FROM config WHERE key=?", (key,)).fetchone()
+    if not row or row[0] is None:
+        return default
+    raw = row[0]
+    if isinstance(raw, (dict, list)):
+        return raw
+    return json.loads(raw)
+
+
+def dump(cur, key, value):
+    cur.execute(
+        "INSERT INTO config(key, value, updated_at) VALUES (?, ?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+        (key, json.dumps(value), NOW),
+    )
+
+
+con = sqlite3.connect(DB)
+cur = con.cursor()
+urls = load(cur, "openai.api_base_urls", [])
+keys = load(cur, "openai.api_keys", [])
+cfgs = load(cur, "openai.api_configs", {})
+default = load(cur, "ui.default_models", "")
+
+if not isinstance(urls, list):
+    urls = []
+if not isinstance(keys, list):
+    keys = []
+if not isinstance(cfgs, dict):
+    cfgs = {}
+
+changed = False
+
+# Keep mini:8090 enabled; disable retired :8091. Do not drop other backends
+# (api.openai.com, desktop:8000) — those are operator connections.
+while len(keys) < len(urls):
+    keys.append("llamacpp")
+    changed = True
+
+for i, url in enumerate(urls):
+    idx = str(i)
+    cfg = cfgs.get(idx) or {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+    if url in DEAD_URLS and cfg.get("enable", True):
+        cfg["enable"] = False
+        cfgs[idx] = cfg
+        changed = True
+    if url.rstrip("/") == LIVE_URL.rstrip("/") and not cfg.get("enable", True):
+        cfg["enable"] = True
+        cfgs[idx] = cfg
+        changed = True
+
+if LIVE_URL not in urls and LIVE_URL.rstrip("/") not in [u.rstrip("/") for u in urls]:
+    urls.append(LIVE_URL)
+    keys.append("llamacpp")
+    cfgs[str(len(urls) - 1)] = {"enable": True, "connection_type": "external", "auth_type": "bearer"}
+    changed = True
+
+if default != DEFAULT_MODEL:
+    default = DEFAULT_MODEL
+    changed = True
+
+if changed and not CHECK_ONLY:
+    dump(cur, "openai.enable", True)
+    dump(cur, "openai.api_base_urls", urls)
+    dump(cur, "openai.api_keys", keys)
+    dump(cur, "openai.api_configs", cfgs)
+    dump(cur, "ui.default_models", default)
+    con.commit()
+
+con.close()
+print("changed" if changed else "unchanged")
+sys.exit(0)

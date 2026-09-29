@@ -1,0 +1,156 @@
+---
+# LocalBots — local-first AI worker control plane.
+# Gated by enable_localbots.
+
+- name: localbots stub — role is disabled
+  ansible.builtin.debug:
+    msg: >
+      localbots role is disabled (enable_localbots: false).
+      Set enable_localbots: true in group_vars/all.yml to activate.
+  when: not (enable_localbots | bool)
+
+- name: Deploy LocalBots
+  when: enable_localbots | bool
+  block:
+    - name: Resolve {{ username }} UID (needed for systemctl --user calls)
+      ansible.builtin.command: "id -u {{ username }}"
+      register: localbots_user_uid
+      changed_when: false
+      check_mode: false
+
+    - name: Ensure LocalBots data directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0750"
+      loop:
+        - "{{ localbots_data_dir }}"
+        - "{{ localbots_data_dir }}/sqlite"
+        - "{{ localbots_data_dir }}/artifacts"
+        - "{{ localbots_data_dir }}/memory"
+        - "{{ localbots_data_dir }}/logs"
+
+    # Persistent service secret — keeps LocalBots API tokens valid across restarts.
+    - name: Generate persistent LocalBots secret key (first run only)
+      ansible.builtin.shell:
+        cmd: echo "LOCALBOTS_SECRET_KEY=$(openssl rand -hex 32)" > {{ localbots_secret_file }}
+      args:
+        creates: "{{ localbots_secret_file }}"
+      changed_when: true
+
+    - name: Set ownership/permissions on LocalBots secret file
+      ansible.builtin.file:
+        path: "{{ localbots_secret_file }}"
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0600"
+
+    - name: Ensure user containers/systemd quadlet directory exists
+      ansible.builtin.file:
+        path: "{{ user_home }}/.config/containers/systemd"
+        state: directory
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0755"
+
+    - name: Write LocalBots worker Podman network quadlet
+      ansible.builtin.template:
+        src: localbots.network.j2
+        dest: "{{ user_home }}/.config/containers/systemd/localbots.network"
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0644"
+      notify:
+        - localbots daemon-reload
+
+    # Server config — endpoints, harness, podman runtime, run limits.
+    # 0600 because it carries model endpoint API keys.
+    - name: Generate LocalBots server config.json
+      ansible.builtin.template:
+        src: localbots.config.json.j2
+        dest: "{{ localbots_config_file }}"
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0600"
+      notify:
+        - restart localbots
+
+    # Worker image — disposable per-run execution environment, built from the
+    # monorepo Containerfile. `podman image exists` is the idempotence guard;
+    # rebuild after Containerfile changes with `podman rmi <image>` (or bump
+    # localbots_worker_image) and re-converge.
+    - name: Check whether the LocalBots worker image is present
+      ansible.builtin.command:
+        cmd: podman image exists {{ localbots_worker_image }}
+      become: true
+      become_user: "{{ username }}"
+      environment:
+        HOME: "{{ user_home }}"
+      register: localbots_worker_image_check
+      changed_when: false
+      failed_when: false
+
+    - name: Build the LocalBots worker image when absent
+      ansible.builtin.command:
+        cmd: podman build -t {{ localbots_worker_image }} {{ localbots_src_dir }}
+      become: true
+      become_user: "{{ username }}"
+      environment:
+        HOME: "{{ user_home }}"
+      changed_when: true
+      when: localbots_worker_image_check.rc != 0
+
+    # CLI — build the pnpm workspace once; the `creates` guard skips rebuilds
+    # while packages/cli/dist/index.js exists (re-run manually after repo updates).
+    - name: Build the LocalBots CLI from the monorepo
+      ansible.builtin.command:
+        cmd: pnpm -r build
+        chdir: "{{ localbots_src_dir }}"
+        creates: "{{ localbots_src_dir }}/packages/cli/dist/index.js"
+      become: true
+      become_user: "{{ username }}"
+      environment:
+        HOME: "{{ user_home }}"
+        PATH: "{{ user_home }}/.n/bin:{{ user_home }}/.npm-global/bin:/usr/local/bin:/usr/bin:/bin"
+
+    # Link the CLI onto PATH. Node resolves @localbots/server / @localbots/core
+    # by walking up from the *real* path of the executed script (not the symlink),
+    # so /usr/local/bin/localbots -> <repo>/packages/cli/dist/index.js still
+    # finds the pnpm workspace symlinks under <repo>/packages/cli/node_modules.
+    - name: Link localbots CLI into /usr/local/bin (workspace deps resolve via real-path walk-up)
+      ansible.builtin.file:
+        src: "{{ localbots_src_dir }}/packages/cli/dist/index.js"
+        dest: /usr/local/bin/localbots
+        state: link
+        force: true
+        mode: "0755"
+      notify:
+        - restart localbots
+
+    # LocalBots server systemd unit
+    - name: Template LocalBots server systemd unit
+      ansible.builtin.template:
+        src: localbots.service.j2
+        dest: "{{ user_home }}/.config/systemd/user/localbots.service"
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0644"
+      notify:
+        - localbots daemon-reload
+        - restart localbots
+
+    - name: Flush handlers (daemon-reload before enable/start)
+      ansible.builtin.meta: flush_handlers
+
+    - name: Ensure localbots user service is started
+      ansible.builtin.systemd:
+        name: localbots.service
+        state: started
+        scope: user
+      become: true
+      become_user: "{{ username }}"
+      environment:
+        XDG_RUNTIME_DIR: "/run/user/{{ localbots_user_uid.stdout }}"
+      when: not ansible_check_mode

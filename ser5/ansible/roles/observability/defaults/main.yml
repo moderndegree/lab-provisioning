@@ -37,3 +37,14 @@ mini_node_exporter_port: 9100
 mini_halogen_port: 8090
 mini_llamacpp_quality_port: 8090
 mini_llamacpp_deep_port: 8091
+
+# Solo (~/projects/solo) will run on ser5's host network and serve its own
+# Prometheus metrics at /api/metrics (model calls, tokens, team jobs, the
+# routine scheduler, process vitals). Prometheus is a rootless podman
+# container, so the host is reached through podman's alias for it (verified
+# reachable from inside the container 2026-09-13). Set solo_port to whatever
+# `next start` listens on when Solo is deployed; :3000 is Grafana here and
+# :3001/:3111 were impeccable-poc dev servers at the time of writing.
+solo_host: "host.containers.internal"
+solo_port: 3010
+localbots_port: 8192

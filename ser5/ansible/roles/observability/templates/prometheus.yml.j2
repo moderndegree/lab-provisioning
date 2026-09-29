@@ -56,6 +56,27 @@ scrape_configs:
       - target_label: __address__
         replacement: json-exporter:{{ json_exporter_port }}
 
+# Solo, the app on ser5. Its own counters: model calls and tokens by tier
+# and caller, team jobs and tool calls, scheduler ticks, process vitals.
+# Down until Solo is running on solo_port; not an outage of the lab.
+  - job_name: solo
+    metrics_path: /api/metrics
+    static_configs:
+      - targets:
+          - "{{ solo_host }}:{{ solo_port }}"
+        labels:
+          instance: solo
+
+  # LocalBots server — metrics on {{ localbots_port }}. Runs as a host
+  # systemd user service (not a container).
+  - job_name: localbots
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - "127.0.0.1:{{ localbots_port }}"
+        labels:
+          instance: localbots
+
   # llama.cpp rollback. /metrics is 404 (halogen on :8090) or connection-refused
   # (:8091) while halogen is the serving path. verify.yml treats that as expected,
   # not an outage, as long as halogen_engine_responds is 1. Flip enable_halogen

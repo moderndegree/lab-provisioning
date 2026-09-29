@@ -37,6 +37,8 @@
       when: enable_hermes | bool
     - role: brain
       when: enable_brain | bool
+    - role: localbots
+      when: enable_localbots | bool
     - role: openwebui
       when: enable_openwebui | bool
     - role: observability

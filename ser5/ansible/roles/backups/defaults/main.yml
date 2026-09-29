@@ -19,11 +19,13 @@ restic_password: "{{ vault_restic_password | default('') }}"
 # 356 recorded evaluation runs that cannot be regenerated now the harness is
 # deleted. It is a frozen archive, not a live path. Drop this line (and the
 # directory) once that record is exported or judged worthless.
+# LocalBots data directory (persistent AI worker control plane).
 restic_backup_paths:
   - "{{ user_home }}"
   - "{{ data_mount }}/agentlab"
   - "{{ data_mount }}/brain"
   - "{{ data_mount }}/services"
+  - "{{ localbots_data_dir }}"
   - /etc
 
 # Reproducible or re-scrapeable bulk — never worth snapshot space.
@@ -38,6 +40,8 @@ restic_excludes:
   - "**/__pycache__"
   - "**/node_modules"
   - "**/.venv"
+  # LocalBots runtime logs — reproducible, high volume
+  - "{{ localbots_data_dir }}/logs"
 
 # Retention policy applied (with prune) after every backup run.
 restic_keep_daily: 7

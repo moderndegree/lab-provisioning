@@ -1,0 +1,12 @@
+# Podman network — LocalBots (rootless, managed by Ansible)
+# The worker container joins this network; DNSSearch is set per-container.
+
+[Unit]
+Description=LocalBots network
+After=network-online.target
+Wants=network-online.target
+
+[Network]
+
+[Install]
+WantedBy=default.target

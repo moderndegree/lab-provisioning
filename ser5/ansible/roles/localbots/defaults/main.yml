@@ -1,0 +1,48 @@
+---
+# LocalBots — local-first AI worker control plane.
+# Disabled by default — flip enable_localbots: true in group_vars/all.yml.
+
+enable_localbots: false
+
+# --- Paths ---
+# Monorepo checkout on ser5 — source for the worker image build and the CLI.
+localbots_src_dir: "{{ user_home }}/projects/local-bots"
+localbots_data_dir: "{{ data_mount }}/services/localbots"
+localbots_config_file: "{{ localbots_data_dir }}/config.json"
+localbots_secret_file: "{{ data_mount }}/services/localbots/.secret"
+
+# --- Server ---
+localbots_port: 8192
+localbots_host: "127.0.0.1"
+# SQLite storage path
+localbots_db_path: "{{ localbots_data_dir }}/sqlite/localbots.db"
+# API secret
+localbots_api_secret_path: "{{ localbots_secret_file }}"
+
+# --- Worker runtime (consumed by the server via config.json) ---
+# Workers are dynamic per-run containers started by the server, not quadlets.
+localbots_worker_image: "localbots/worker:latest"
+localbots_worker_runtime: "podman"
+# Resource limits per worker container
+localbots_worker_memory_limit: "2g"
+localbots_worker_cpu_limit: "1"
+# Maximum concurrent worker containers
+localbots_max_concurrent_workers: 4
+# Worker timeout (seconds)
+localbots_worker_timeout: 3600
+# Idle cleanup interval (seconds)
+localbots_idle_cleanup_interval: 300
+
+# --- Model endpoints ---
+localbots_model_endpoints:
+  - name: "mini-halogen"
+    url: "http://mini:8090/v1"
+    api_key: "llamacpp"
+    provider: "openai-compatible"
+    models: "qwen3.8-flash-next"
+    context_length: 262144
+localbots_default_model: "mini-halogen/qwen3.8-flash-next"
+localbots_workspace_policy: "LOCAL_ONLY"
+
+# --- Network ---
+localbots_network_name: "localbots"
