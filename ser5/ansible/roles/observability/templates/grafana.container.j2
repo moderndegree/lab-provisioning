@@ -15,6 +15,8 @@ UserNS=keep-id
 User=root
 # http://ser5:{{ grafana_port }} on the tailnet (dashboard: mini — inference).
 # UFW on {{ grafana_tailnet_interface }} is the LAN/WAN control, matching Hermes.
+# Tailnet address only — never 0.0.0.0: anonymous Admin must not reach the LAN.
+PublishPort=127.0.0.1:{{ grafana_port }}:{{ grafana_port }}
 PublishPort={{ grafana_host }}:{{ grafana_port }}:{{ grafana_port }}
 Volume={{ grafana_data_dir }}:/var/lib/grafana:Z
 Volume={{ grafana_provisioning_dir }}:/etc/grafana/provisioning:Z,ro

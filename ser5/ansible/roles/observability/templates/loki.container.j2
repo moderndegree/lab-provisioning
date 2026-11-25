@@ -1,0 +1,26 @@
+# Loki for warden events shipped from mini. Push is published on loopback and
+# the Tailscale address. Grafana reaches it as http://loki:3100 on obs.network.
+[Unit]
+Description=Loki log store
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=docker.io/grafana/loki:3.7.8
+ContainerName=loki
+Network=obs.network
+DNSSearch=tail6bfbde.ts.net
+UserNS=keep-id
+User=root
+PublishPort=127.0.0.1:3100:3100
+PublishPort=100.125.180.85:3100:3100
+Volume=/data/services/loki/data:/loki:Z
+Volume=/data/services/loki/config.yaml:/etc/loki/local-config.yaml:Z,ro
+AutoUpdate=registry
+
+[Service]
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

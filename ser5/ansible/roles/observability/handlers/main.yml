@@ -55,3 +55,13 @@
   become_user: "{{ username }}"
   environment:
     XDG_RUNTIME_DIR: "/run/user/{{ obs_user_uid.stdout }}"
+
+- name: restart loki
+  ansible.builtin.systemd:
+    name: loki.service
+    state: restarted
+    scope: user
+  become: true
+  become_user: "{{ username }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ obs_user_uid.stdout }}"

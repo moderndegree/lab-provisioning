@@ -13,7 +13,7 @@ grafana_version: "13.1.3"   # 13.1.1 -> 13.1.3, 2026-08-12 (point release)
 grafana_port: 3000
 # Bind 0.0.0.0 so tailnet peers can hit http://ser5:3000. UFW scopes the port
 # to tailscale0 (same shape as hermes-dashboard). 127.0.0.1 is the lock-down.
-grafana_host: "0.0.0.0"
+grafana_host: "100.125.180.85"  # tailnet address only, never 0.0.0.0
 grafana_tailnet_interface: "tailscale0"
 grafana_data_dir: "{{ data_mount }}/services/grafana/data"
 grafana_provisioning_dir: "{{ data_mount }}/services/grafana/provisioning"
@@ -32,9 +32,10 @@ json_exporter_config_dir: "{{ data_mount }}/services/json-exporter"
 # Tailscale MagicDNS hostname for the mini inference node.
 mini_host: "mini"
 mini_node_exporter_port: 9100
-# halogen-flash (the live serving path) occupies :8090. llama-quality used the
-# same port; llama-deep is :8091 and is down while halogen is on.
-mini_halogen_port: 8090
+# halogen-flash /metrics, /health, /cache via halogen-metrics-proxy on the tailnet.
+# :8090/:8091 are Breeze TTS now, so the llama.cpp rollback targets below 404 there.
+mini_halogen_port: 8731
+mini_warden_port: 9740
 mini_llamacpp_quality_port: 8090
 mini_llamacpp_deep_port: 8091
 

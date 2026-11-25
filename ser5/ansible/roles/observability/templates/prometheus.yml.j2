@@ -91,3 +91,12 @@ scrape_configs:
           - "{{ mini_host }}:{{ mini_llamacpp_deep_port }}"
         labels:
           instance: mini-deep
+
+  # warden exporter on mini. events.jsonl metrics plus /healthz.
+  # Bound to the Tailscale address by warden-exporter.service.
+  - job_name: warden
+    static_configs:
+      - targets:
+          - "{{ mini_host }}:{{ mini_warden_port }}"
+        labels:
+          instance: mini

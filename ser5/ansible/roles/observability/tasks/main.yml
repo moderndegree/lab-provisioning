@@ -230,6 +230,35 @@
         - json-exporter daemon-reload
         - restart json-exporter
 
+    - name: Create Loki data directory
+      ansible.builtin.file:
+        path: /data/services/loki/data
+        state: directory
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0755"
+
+    - name: Write Loki config
+      ansible.builtin.copy:
+        src: loki-config.yaml
+        dest: /data/services/loki/config.yaml
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0644"
+      notify:
+        - restart loki
+
+    - name: Write Loki quadlet unit
+      ansible.builtin.template:
+        src: loki.container.j2
+        dest: "{{ user_home }}/.config/containers/systemd/loki.container"
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0644"
+      notify:
+        - grafana daemon-reload
+        - restart loki
+
     - name: Flush handlers (daemon-reload before enable/start)
       ansible.builtin.meta: flush_handlers
 
@@ -278,6 +307,16 @@
     - name: Ensure Prometheus user service is started
       ansible.builtin.systemd:
         name: prometheus.service
+        state: started
+        scope: user
+      become: true
+      become_user: "{{ username }}"
+      environment:
+        XDG_RUNTIME_DIR: "/run/user/{{ obs_user_uid.stdout }}"
+
+    - name: Ensure Loki user service is started
+      ansible.builtin.systemd:
+        name: loki.service
         state: started
         scope: user
       become: true
