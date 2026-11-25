@@ -1,4 +1,6 @@
-# SearXNG — Open WebUI web-search backend (lab, loopback / shared podman net only)
+# SearXNG — Open WebUI web-search backend.
+# format=json stays on for Open WebUI and voice-gateway. The tailnet gate
+# refuses that format; do not publish this container off loopback.
 use_default_settings: true
 
 search:
@@ -11,12 +13,24 @@ search:
 
 server:
   secret_key: "{{ searxng_secret }}"
+  # The limiter's JSON window is 4 requests per hour and would break Open
+  # WebUI and voice-gateway. Published-port clients also share one source
+  # address inside the container, so an allow-list cannot exempt those
+  # callers without also exempting the tailnet. Rate limiting for browsers
+  # lives in searxng-tailnet.service instead.
   limiter: false
+  public_instance: false
+  # Off, and locked below. On, this host fetches result image URLs itself.
   image_proxy: false
   bind_address: "0.0.0.0"
   port: 8080
   method: "GET"
 
+preferences:
+  lock:
+    - image_proxy
+
 general:
+  debug: false
   instance_name: "searxng-lab"
   enable_metrics: false

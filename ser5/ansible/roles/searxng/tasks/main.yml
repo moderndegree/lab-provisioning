@@ -33,9 +33,9 @@
         group: "{{ username }}"
         mode: "0750"
 
-    # Secret is generated once and reused. settings.yml is world-readable
-    # inside the container, so the secret lives in a 0600 sidecar file that
-    # ansible reads back into the template.
+    # Secret is generated once and reused. The sidecar stays 0600, and so does
+    # settings.yml: the container runs as this user (UserNS=keep-id) and is
+    # the only reader. The rendered file contains the secret.
     - name: Generate persistent SearXNG secret (first run only)
       ansible.builtin.shell:
         cmd: openssl rand -hex 32 > {{ searxng_secret_file }}
@@ -67,7 +67,7 @@
         dest: "{{ searxng_data_dir }}/settings.yml"
         owner: "{{ username }}"
         group: "{{ username }}"
-        mode: "0644"
+        mode: "0600"
       notify:
         - restart searxng
 
@@ -92,12 +92,61 @@
         - searxng daemon-reload
         - restart searxng
 
+    - name: Ensure the user systemd directory exists
+      ansible.builtin.file:
+        path: "{{ user_home }}/.config/systemd/user"
+        state: directory
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0755"
+
+    - name: Ensure the user bin directory exists
+      ansible.builtin.file:
+        path: "{{ user_home }}/.local/bin"
+        state: directory
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0755"
+
+    - name: Install the SearXNG tailnet gate
+      ansible.builtin.copy:
+        src: tailnet_proxy.py
+        dest: "{{ searxng_tailnet_proxy }}"
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0750"
+      notify:
+        - restart searxng-tailnet
+
+    - name: Template the SearXNG tailnet gate unit
+      ansible.builtin.template:
+        src: searxng-tailnet.service.j2
+        dest: "{{ user_home }}/.config/systemd/user/searxng-tailnet.service"
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: "0644"
+      notify:
+        - searxng daemon-reload
+        - restart searxng-tailnet
+
     - name: Flush handlers (daemon-reload before enable/start)
       ansible.builtin.meta: flush_handlers
 
     - name: Ensure searxng user service is started
       ansible.builtin.systemd:
         name: searxng.service
+        state: started
+        scope: user
+      become: true
+      become_user: "{{ username }}"
+      environment:
+        XDG_RUNTIME_DIR: "/run/user/{{ searxng_user_uid.stdout }}"
+      when: not ansible_check_mode
+
+    - name: Ensure the SearXNG tailnet gate is started
+      ansible.builtin.systemd:
+        name: searxng-tailnet.service
+        enabled: true
         state: started
         scope: user
       become: true

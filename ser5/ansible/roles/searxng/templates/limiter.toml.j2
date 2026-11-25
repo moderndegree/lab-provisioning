@@ -1,3 +1,8 @@
+# Installed because the image reads it, but server.limiter is false.
+# Turning the limiter on caps format=json at 4 requests per hour, which
+# breaks Open WebUI and voice-gateway. The tailnet gate is the control
+# that refuses that API on the Tailscale address.
+
 [botdetection.ip_limit]
 link_token = false
 

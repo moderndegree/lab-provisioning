@@ -1,6 +1,8 @@
 # Podman quadlet — SearXNG (rootless, Ansible-managed).
 # Open WebUI web-search backend on the same bridge as openwebui.
-# Published on loopback only; not exposed to LAN/WAN/tailnet.
+# Loopback only. The Tailscale address is owned by searxng-tailnet.service,
+# which refuses the JSON API and the image fetcher. Never 0.0.0.0 — that
+# would put this on the LAN, and no UFW rule is expected to catch it.
 
 [Unit]
 Description=SearXNG (Open WebUI web search)
@@ -14,7 +16,7 @@ Network=openwebui.network
 UserNS=keep-id
 PublishPort={{ searxng_host }}:{{ searxng_port }}:8080
 Volume={{ searxng_data_dir }}:/etc/searxng:Z
-Environment=SEARXNG_BASE_URL=http://{{ searxng_host }}:{{ searxng_port }}/
+Environment=SEARXNG_BASE_URL=http://ser5:{{ searxng_port }}/
 {% if searxng_autoupdate | bool %}
 AutoUpdate=registry
 {% endif %}

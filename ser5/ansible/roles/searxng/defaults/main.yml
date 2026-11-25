@@ -7,10 +7,20 @@ enable_searxng: false
 searxng_image: "docker.io/searxng/searxng:latest"
 searxng_data_dir: "{{ data_mount }}/services/searxng"
 searxng_secret_file: "{{ searxng_data_dir }}/secret"
-# Loopback-only host publish. Open WebUI reaches SearXNG by container name
-# on openwebui.network (http://searxng:8080), so this port is for debugging.
+# Loopback host publish. Open WebUI reaches SearXNG by container name on
+# openwebui.network (http://searxng:8080). voice-gateway and the verify
+# probe call http://127.0.0.1:8888 with format=json. Keep this on loopback.
+#
+# The HTML UI for other tailnet machines is searxng-tailnet.service, bound
+# to searxng_tailnet_bind. That gate forwards here and refuses format=json,
+# the image fetcher, /stats, and /config. Do not publish the container on
+# the tailnet address: that would skip the gate.
 searxng_host: "127.0.0.1"
 searxng_port: 8888
+searxng_tailnet_bind: "100.125.180.85"
+# Outside the config dir. That dir is bind-mounted into the container, and
+# the gate is a host process.
+searxng_tailnet_proxy: "{{ user_home }}/.local/bin/searxng-tailnet-proxy.py"
 searxng_autoupdate: true
 
 # Written into Open WebUI's PersistentConfig DB when that DB already exists.

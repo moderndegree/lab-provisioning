@@ -1,0 +1,27 @@
+# systemd USER unit — tailnet gate in front of SearXNG.
+# Managed by ser5/ansible/roles/searxng — do not edit by hand.
+#
+# The container publishes loopback only. This process binds the Tailscale
+# address and forwards to that loopback port. It is what keeps format=json,
+# the image fetcher, and /stats off the tailnet.
+
+[Unit]
+Description=SearXNG tailnet gate
+After=network-online.target searxng.service
+Wants=network-online.target searxng.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 {{ searxng_tailnet_proxy }}
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+Environment=PYTHONUNBUFFERED=1
+Environment=SEARXNG_TAILNET_BIND={{ searxng_tailnet_bind }}
+Environment=SEARXNG_TAILNET_PORT={{ searxng_port }}
+Environment=SEARXNG_UPSTREAM={{ searxng_host }}:{{ searxng_port }}
+Environment=SEARXNG_DEFAULT_HOST=ser5:{{ searxng_port }}
+Environment=SEARXNG_ALLOWED_HOSTS=ser5,ser5:{{ searxng_port }},ser5.tail6bfbde.ts.net,ser5.tail6bfbde.ts.net:{{ searxng_port }},{{ searxng_tailnet_bind }},{{ searxng_tailnet_bind }}:{{ searxng_port }}
+
+[Install]
+WantedBy=default.target

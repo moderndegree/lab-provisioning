@@ -88,25 +88,65 @@
     - searxng_autoupdate | bool
     - verify_searxng_autoupdate_timer.stdout | default('') != 'active'
 
-# SearXNG is deliberately loopback-only — no UFW rule, unlike hermes/voice —
-# because it is meant to be reached only by other containers on openwebui.network
-# via the container name, not from outside ser5 at all. Confirm the deployed
-# quadlet still says so; a future default change to 0.0.0.0 would put a metasearch
-# proxy on the wifi LAN with no UFW rule catching it, because none is expected.
+# SearXNG has no UFW rule. Open WebUI reaches it by container name. On-host
+# clients use loopback, including format=json. The Tailscale address belongs
+# to searxng-tailnet.service, which refuses that API. Any container publish
+# other than 127.0.0.1 — the tailnet address included — either skips the
+# gate or puts the metasearch proxy on the LAN, and no UFW rule is expected.
 - name: Read the deployed SearXNG quadlet
   ansible.builtin.slurp:
     src: "{{ user_home }}/.config/containers/systemd/searxng.container"
   register: verify_searxng_quadlet
   failed_when: false
 
-- name: Flag SearXNG published on more than loopback
+- name: Flag SearXNG published off loopback
   ansible.builtin.set_fact:
     problems: >-
       {{ problems + [
-        'SearXNG'"'"'s quadlet publishes on ' ~ searxng_host ~ ', not 127.0.0.1 — it is '
-        ~ 'reachable beyond ser5 itself with no UFW rule scoping it, because none is '
-        ~ 'expected for a loopback-only service.'
+        'SearXNG'"'"'s quadlet publishes somewhere other than 127.0.0.1. The '
+        ~ 'tailnet address is served by searxng-tailnet.service so the JSON API '
+        ~ 'and the image fetcher stay off it. A direct publish skips that gate, '
+        ~ 'and a LAN or 0.0.0.0 bind has no UFW rule, because none is expected.'
       ] }}
   when:
     - verify_searxng_quadlet.content is defined
-    - searxng_host != '127.0.0.1'
+    - (verify_searxng_quadlet.content | b64decode) is search('PublishPort=(?!127\.0\.0\.1:)')
+
+- name: Check the SearXNG tailnet gate is active
+  ansible.builtin.command: systemctl --user is-active searxng-tailnet.service
+  become: true
+  become_user: "{{ username }}"
+  environment: "{{ user_systemd_env }}"
+  register: verify_searxng_tailnet_unit
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Flag an inactive SearXNG tailnet gate
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'searxng-tailnet.service is '
+        ~ (verify_searxng_tailnet_unit.stdout | default('unknown'))
+        ~ ' — the Tailscale address is not behind the gate.'
+      ] }}
+  when: verify_searxng_tailnet_unit.stdout | default('') != 'active'
+
+- name: Check the tailnet gate refuses the JSON API
+  ansible.builtin.uri:
+    url: "http://{{ searxng_tailnet_bind }}:{{ searxng_port }}/search?q=test&format=json"
+    timeout: "{{ verify_http_timeout }}"
+    status_code: [403]
+  register: verify_searxng_tailnet_json
+  failed_when: false
+  check_mode: false
+
+- name: Flag the JSON API answering on the tailnet address
+  ansible.builtin.set_fact:
+    problems: >-
+      {{ problems + [
+        'SearXNG format=json on ' ~ searxng_tailnet_bind ~ ':' ~ (searxng_port | string)
+        ~ ' returned ' ~ (verify_searxng_tailnet_json.status | default(0) | string)
+        ~ ' instead of 403. The tailnet gate is not refusing the machine API.'
+      ] }}
+  when: verify_searxng_tailnet_json.status | default(0) != 403

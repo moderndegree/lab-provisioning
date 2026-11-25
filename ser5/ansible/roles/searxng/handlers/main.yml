@@ -18,3 +18,14 @@
   environment:
     XDG_RUNTIME_DIR: "/run/user/{{ searxng_user_uid.stdout }}"
   when: not ansible_check_mode
+
+- name: restart searxng-tailnet
+  ansible.builtin.systemd:
+    name: searxng-tailnet.service
+    state: restarted
+    scope: user
+  become: true
+  become_user: "{{ username }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ searxng_user_uid.stdout }}"
+  when: not ansible_check_mode
