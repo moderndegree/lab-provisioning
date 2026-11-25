@@ -1,6 +1,6 @@
 ---
-# Open WebUI — the ChatGPT-style browser UI, talking to mini's llama-server
-# instances over the tailnet. Disabled by default — flip enable_openwebui: true in group_vars/all.yml.
+# Open WebUI — the ChatGPT-style browser UI, talking to mini's halogen
+# server over the tailnet. Disabled by default — flip enable_openwebui: true in group_vars/all.yml.
 enable_openwebui: false
 
 # Pinned to a release tag for reproducible deploys.
@@ -9,10 +9,10 @@ enable_openwebui: false
 # Was ":main" until 2026-08-12 — a ROLLING DEV TAG, not a release, and
 # openwebui_autoupdate below has podman pulling it on a timer. That combination
 # meant an unattended dev build could land on a service published through
-# Cloudflare, with nothing in the repo recording what was running. The pin below
-# is the version that was already live at the time of the change, so it is a
-# no-op deploy, not an upgrade.
-openwebui_image: "ghcr.io/open-webui/open-webui:v0.11.0"
+# Cloudflare, with nothing in the repo recording what was running. Bump this
+# pin on purpose when upgrading; auto-update only re-pulls this exact tag.
+# 2026-11-24: v0.12.4 -> v0.13.4.
+openwebui_image: "ghcr.io/open-webui/open-webui:v0.13.4"
 
 # Data (accounts, chat history, uploaded docs for RAG) persists on the data disk.
 openwebui_data_dir: "{{ data_mount }}/services/openwebui/data"
@@ -35,9 +35,9 @@ openwebui_host: "127.0.0.1"
 #
 # desktop (Windows, tailnet name `desktop`) is the LIVE Ollama — currently
 # serving qwen3.5:4b, qwen3.5:9b, gpt-oss:20b. mini:11434 is installed but
-# STOPPED: llama-server holds the GPU, and the two cannot both stay resident.
+# STOPPED: halogen holds the GPU, and the two cannot both stay resident.
 # Do not point the enabled Ollama connection at mini unless you have stopped
-# a llama-server instance and started ollama.service by hand.
+# halogen and started ollama.service by hand.
 #
 # Plural, semicolon-separated. Seed only — once Admin -> Connections is saved,
 # webui.db wins (see the OpenAI comment block below).
@@ -48,64 +48,42 @@ openwebui_ollama_base_url: "http://desktop:11434"
 openwebui_enable_ollama_api: true
 
 # ─────────────────────────────────────────────────────────────────────────────
-# OpenAI-compatible backends (mini's llama-server)
+# OpenAI-compatible backends (mini's halogen)
 # ─────────────────────────────────────────────────────────────────────────────
-# Ollama and llama-server speak DIFFERENT protocols. OLLAMA_BASE_URLS above
-# only makes Open WebUI query those hosts' /api/tags; it will never discover
-# llama-server on mini:8090/:8091, which serve the OpenAI API. Without the
-# OpenAI vars below, the model list is empty whenever no Ollama is reachable.
-# mini's ollama.service is STOPPED by design (llama-server holds the GPU);
-# desktop is the live Ollama. See ../../../mini/ansible/roles/llamacpp/defaults/main.yml.
+# Ollama and halogen speak DIFFERENT protocols. OLLAMA_BASE_URLS above only
+# makes Open WebUI query those hosts' /api/tags. Halogen serves the OpenAI API
+# at http://mini:8731/v1, model id qwen3.8-flash (it also accepts the old
+# llama.cpp alias qwen3.8-flash-next). Ports 8090 and 8091 are Breeze TTS, not
+# chat. Without the OpenAI vars below, the model list is empty whenever no
+# Ollama is reachable. mini's ollama.service stays stopped while halogen holds
+# the GPU; desktop is the live Ollama.
 #
 # SEEDS ONLY — these do NOT override a configured instance. Open WebUI keeps its
 # live settings in the `config` table of webui.db and falls back to DEFAULT_CONFIG
 # (built from these env vars) only for keys the table does not have. Once anyone
 # saves Admin Settings -> Connections, the DB wins and changing these vars has no
-# effect. So they matter on a fresh data dir; to change an existing install, edit
-# it in the UI. Editing webui.db by hand needs the container STOPPED, or the
-# running app flushes its cached config back over the change on restart.
+# effect. So they matter on a fresh data dir. To change an existing install, use
+# the admin connections API or the UI. Editing webui.db by hand needs the
+# container STOPPED, or the running app flushes its cached config back over the
+# change on restart.
 #
 # Whitespace is not trimmed on the DB path: a URL saved through the UI with a
-# trailing space becomes "http://mini:8000/v1 ", which aiohttp percent-encodes
+# trailing space becomes "http://mini:8731/v1 ", which aiohttp percent-encodes
 # into ".../v1%20/models" and the endpoint 404s while looking correct on screen.
-# The env-var path below is trimmed (config.py strips each split element), which
-# is one more reason to prefer a rebuild over hand-editing.
+# The env-var path below is trimmed (config.py strips each split element).
 #
 # Semicolon-separated, and the two lists are positional: the Nth key belongs to
-# the Nth URL. Open WebUI skips an endpoint whose key is empty, so a placeholder
-# is required even though llama-server takes no API key and ignores it.
-# Authentication is not the security boundary here: mini's UFW only allows 22/tcp
-# from outside plus everything on tailscale0, so :8090 is unreachable from the
-# 10.0.0.0/24 wifi LAN and the exposed surface is the tailnet.
+# the Nth URL. Open WebUI skips an endpoint whose key is empty on the env path,
+# so a placeholder is required even though halogen takes no API key and ignores
+# it. The chat API is published on mini's Tailscale address only.
 #
-# Both ports are llama-server instances managed by mini's roles/llamacpp — real
-# boot services, unlike the vLLM bench servers on :8000/:8001 this used to point
-# at. Those were dropped because vLLM measured ~3x slower single-stream
-# (25 vs 87 tok/s); add them back only for a bench.
-#
-# Models are discovered dynamically from each endpoint's /v1/models, so a
-# model swap on mini needs no URL change — the new alias appears in the
-# picker after llama-server restart.
-#
-# :8090 is halogen-flash (qwen3.8-flash-next). :8091 is retired; keep the URL
-# in the seed list only if a live DB already has a fourth slot — the live
-# openai.api_configs on ser5 already has index 3 disabled.
-#
-# Qwen3.8-27B is a reasoning model: expect a collapsed "thinking" section before
-# the answer. llama.cpp separates that into reasoning_content. The server pins
-# reasoning_effort=medium; xhigh spends 8192 tokens thinking and returns NOTHING.
-# Vision projector is staged on mini but NOT wired (--mmproj), so image uploads
-# to :8091 will not work until that is added.
-#
-# Context is per SLOT and statically partitioned at startup, so a single chat can
-# never exceed the per-slot figure no matter how idle the box is.
+# Models are discovered from each endpoint's /v1/models.
 #
 # SEEDS ONLY — once Admin -> Connections is saved, webui.db wins. Changing these
-# vars alone will not update an existing install; edit the DB (container stopped)
-# or the UI.
+# vars alone will not update an existing install.
 openwebui_enable_openai_api: true
-openwebui_openai_base_urls: "http://mini:8090/v1;http://mini:8091/v1"
-openwebui_openai_api_keys: "llamacpp;llamacpp"
+openwebui_openai_base_urls: "http://mini:8731/v1"
+openwebui_openai_api_keys: "llamacpp"
 
 # Let `podman auto-update` pull a newer image on its timer.
 #

@@ -17,10 +17,10 @@ DNSSearch={{ tailnet_dns_search }}
 Environment=ENABLE_OLLAMA_API={{ openwebui_enable_ollama_api | lower }}
 Environment=OLLAMA_BASE_URL={{ openwebui_ollama_base_url }}
 Environment=OLLAMA_BASE_URLS={{ openwebui_ollama_base_urls }}
-# llama-server speaks the OpenAI API, not Ollama's, so it needs its own wiring — see
+# Halogen speaks the OpenAI API, not Ollama's, so it needs its own wiring — see
 # openwebui_openai_base_urls in defaults/main.yml. Plural *_URLS/*_KEYS is the
 # multi-endpoint form; the lists are positional and an empty key drops that
-# endpoint silently.
+# endpoint silently. The running app reads webui.db, not these seeds.
 Environment=ENABLE_OPENAI_API={{ openwebui_enable_openai_api | lower }}
 Environment=OPENAI_API_BASE_URLS={{ openwebui_openai_base_urls }}
 Environment=OPENAI_API_KEYS={{ openwebui_openai_api_keys }}
