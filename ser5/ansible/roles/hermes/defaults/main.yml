@@ -3,8 +3,9 @@
 # installer and run as a systemd user service on ser5. It routes requests to mini
 # for Tier L (Sovereign) inference over the tailnet.
 #
-# Enabled on ser5: Hermes is the always-on driver box agent surface.
-enable_hermes: true
+# Retired on ser5 2026-11-24: Hermes runs on mini now. The old data and unit
+# files are archived at /data/services/_archive/hermes-retired-20261124.
+enable_hermes: false
 
 # Hermes CLI binary (placed here by the NousResearch installer).
 hermes_bin: "{{ user_home }}/.local/bin/hermes"
