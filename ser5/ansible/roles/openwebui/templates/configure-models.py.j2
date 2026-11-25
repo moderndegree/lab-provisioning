@@ -1,4 +1,4 @@
-"""Point an existing Open WebUI DB at mini's live llama-server alias.
+"""Point an existing Open WebUI DB at halogen on mini.
 
 Idempotent. Open WebUI flushes in-memory config over webui.db on shutdown, so
 this must run while the container is STOPPED. Prints "changed" or "unchanged".
@@ -9,8 +9,9 @@ import time
 import sys
 
 DB = {{ openwebui_db_path | default(openwebui_data_dir + '/webui.db') | to_json }}
-LIVE_URL = "http://mini:8090/v1"
-DEAD_URLS = {"http://mini:8091/v1"}
+LIVE_URL = "http://mini:8731/v1"
+# :8090 and :8091 are Breeze TTS now, not chat. Never enable them as OpenAI backends.
+DEAD_URLS = {"http://mini:8090/v1", "http://mini:8091/v1"}
 DEFAULT_MODEL = {{ openwebui_default_model | to_json }}
 NOW = int(time.time())
 CHECK_ONLY = "--check" in sys.argv
@@ -50,7 +51,7 @@ if not isinstance(cfgs, dict):
 
 changed = False
 
-# Keep mini:8090 enabled; disable retired :8091. Do not drop other backends
+# Keep mini:8731 enabled; disable retired :8090 and :8091. Do not drop other backends
 # (api.openai.com, desktop:8000) — those are operator connections.
 while len(keys) < len(urls):
     keys.append("llamacpp")
